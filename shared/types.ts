@@ -55,6 +55,16 @@ export type Op =
 
 export type Actor = { id: string; name: string; avatar: string | null; agent?: boolean };
 
+/** Coordinates are relative to the node's computed bounds, or to the page when nodeId is null. */
+export type CommentAnchor = { pageId: string; nodeId: string | null; x: number; y: number };
+export type CommentMessage = { id: string; author: Actor; body: string; createdAt: number };
+/** Lightweight pin/list metadata. firstMessage.body is an excerpt; fetch the thread for full messages. */
+export type CommentThread = {
+  id: string; number: number; anchor: CommentAnchor; firstMessage: CommentMessage; messageCount: number;
+  createdAt: number; updatedAt: number; resolvedAt: number | null; resolvedBy: Actor | null; revision: number;
+};
+export type CommentDetail = CommentThread & { messages: CommentMessage[] };
+
 export type Presence = {
   pageId: string | null;
   selection: string[];
@@ -74,7 +84,7 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[] }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
   | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
@@ -82,6 +92,7 @@ export type ServerMsg =
   | { type: "activity"; by: Actor; ids: string[] }
   /** The file's library changed (relinked, or its design system was edited). */
   | { type: "library"; library: LibraryInfo | null }
+  | { type: "comments"; threads: CommentThread[]; deleted?: string[] }
   | { type: "peer"; peer: Peer }
   | { type: "peer.leave"; cid: string };
 

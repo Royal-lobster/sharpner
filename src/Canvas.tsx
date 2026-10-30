@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { CATALOG_GUTTER, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, contains, descendantsOf, dropOrders, familyOf, isManaged, layoutRects, SECTION_PAD, union, type Rect } from "../shared/layout";
-import { frameDocument, renderedHtml, type CanvasNode, type DesignSystem, type Op } from "../shared/types";
+import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
+import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
 import { toast } from "./toast";
@@ -14,11 +15,10 @@ import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-react";
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
+import { canvasNavigation, MAX_CANVAS_ZOOM } from "./canvas-navigation";
 
 type Tier = "lo" | "hi";
 
-const MIN_Z = 0.01;
-const MAX_Z = 8;
 /** Below this on-screen section padding, labels of nested nodes would collide with the section title. */
 const NESTED_LABEL_GAP = 24;
 /** How long a newly appeared node takes to rack-focus in. */
@@ -37,9 +37,15 @@ type Props = {
   onSelect: (ids: string[]) => void;
   /** Link viewers can look around but never select, move, delete, or add anything. */
   readOnly?: boolean;
+  commentMode?: boolean;
+  activeCommentId?: string | null;
+  commentFocus?: { id: string; request: number } | null;
+  onPlaceComment?: (anchor: CommentAnchor) => void;
+  onOpenComment?: (thread: CommentThread) => void;
+  draftComment?: CommentAnchor | null;
 };
 
-export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = false }: Props) {
+export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = false, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
   useSyncExternalStore(room.subscribe, room.getVersion);
   const rootRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -72,8 +78,29 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
+  const frames = room.pageNodes(pageId);
+  // Sections wrap their contents; nodes being dragged don't stretch the section they're leaving.
+  const rects = layoutRects(frames, (f) => room.heightOf(f), room.dragging);
+  const rectOf = (f: CanvasNode) => rects.get(f.id)!;
+  const catalogs = catalogSectionIds(frames);
+  const sections = frames.filter((f) => f.kind === "section");
+  const nodes = frames.filter((f) => f.kind !== "section");
+  const topLevel = () => frames.filter((f) => !f.parentId).map(rectOf);
+  const navigationRects = [...rects.values()];
+  // Page feedback remains reachable too, including threads left after a design was deleted.
+  for (const thread of room.comments.values()) {
+    if (thread.anchor.pageId !== pageId || thread.resolvedAt !== null && thread.id !== activeCommentId) continue;
+    navigationRects.push({ ...commentPoint(thread.anchor, rects), w: 1, h: 1 });
+  }
+  const navigation = canvasNavigation(navigationRects, size);
+  const navigationRef = useRef(navigation);
+  navigationRef.current = navigation;
+
   const setCam = useCallback((next: Cam | ((c: Cam) => Cam)) => {
-    camRef.current = typeof next === "function" ? next(camRef.current) : next;
+    const current = camRef.current;
+    const bounded = navigationRef.current.constrain(typeof next === "function" ? next(current) : next);
+    if (current.x === bounded.x && current.y === bounded.y && current.z === bounded.z) { setCameraReady(true); return; }
+    camRef.current = bounded;
     cancelAnimationFrame(raf.current);
     raf.current = requestAnimationFrame(() => {
       setCamState(camRef.current);
@@ -96,15 +123,6 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
 
   useEffect(() => canvasGestureBoundary(rootRef.current!), []);
 
-  const frames = room.pageNodes(pageId);
-  // Sections wrap their contents; nodes being dragged don't stretch the section they're leaving.
-  const rects = layoutRects(frames, (f) => room.heightOf(f), room.dragging);
-  const rectOf = (f: CanvasNode) => rects.get(f.id)!;
-  const catalogs = catalogSectionIds(frames);
-  const sections = frames.filter((f) => f.kind === "section");
-  const nodes = frames.filter((f) => f.kind !== "section");
-  const topLevel = () => frames.filter((f) => !f.parentId).map(rectOf);
-
   /**
    * Glides the camera to `target`: zoom eases in log space and the viewport centre travels in world space,
    * so content doesn't swing sideways mid-zoom. Any direct input (wheel, drag) cancels it.
@@ -112,6 +130,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   const tween = useRef(0);
   const animateCam = useCallback((target: Cam, ms = 280) => {
     cancelAnimationFrame(tween.current);
+    target = navigationRef.current.constrain(target);
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) return setCam(target);
     const from = camRef.current, t0 = performance.now();
     const center = (c: Cam) => ({ x: (size.w / 2 - c.x) / c.z, y: (size.h / 2 - c.y) / c.z });
@@ -128,16 +147,33 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   }, [size, setCam]);
   const stopTween = () => cancelAnimationFrame(tween.current);
 
+  // Resize, live layout changes and old saved cameras must obey the same limits as direct gestures.
+  useLayoutEffect(() => {
+    if (!size.w || !size.h || room.status !== "open") return;
+    const current = camRef.current, bounded = navigationRef.current.constrain(current);
+    if (current.x === bounded.x && current.y === bounded.y && current.z === bounded.z) return;
+    cancelAnimationFrame(tween.current);
+    setCam(bounded);
+  }, [size.w, size.h, room.status, navigation.bounds.x, navigation.bounds.y, navigation.bounds.w, navigation.bounds.h, setCam]);
+
+  useEffect(() => () => {
+    cancelAnimationFrame(tween.current);
+    cancelAnimationFrame(raf.current);
+    clearTimeout(settleTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const thread = commentFocus && room.comments.get(commentFocus.id);
+    const anchor = draftComment ?? thread?.anchor;
+    if (!anchor || anchor.pageId !== pageId || !size.w) return;
+    const point = commentPoint(anchor, rects);
+    const z = clamp(camRef.current.z, 0.5, 2);
+    animateCam({ z, x: size.w / 2 - point.x * z, y: size.h / 2 - point.y * z });
+  }, [commentFocus?.request, draftComment, size.w, size.h]);
+
   const fitTo = useCallback((rects: Rect[], maxZ = 1, animate = true) => {
-    if (!rects.length || !size.w) return;
-    const x0 = Math.min(...rects.map((r) => r.x)), y0 = Math.min(...rects.map((r) => r.y));
-    const x1 = Math.max(...rects.map((r) => r.x + r.w)), y1 = Math.max(...rects.map((r) => r.y + r.h));
-    // Phones keep content clear of the zoom controls above and the dock below.
-    const compact = size.w < 560;
-    const padX = compact ? 20 : 64, top = compact ? 68 : 64, bottom = compact ? 92 : 64;
-    const w = size.w - padX * 2, h = Math.max(1, size.h - top - bottom);
-    const z = clamp(Math.min(w / (x1 - x0 || 1), h / (y1 - y0 || 1)), MIN_Z, maxZ);
-    const target = { z, x: padX + (w - (x1 - x0) * z) / 2 - x0 * z, y: top + (h - (y1 - y0) * z) / 2 - y0 * z };
+    if (!size.w) return;
+    const target = navigationRef.current.fit(rects, maxZ);
     animate ? animateCam(target) : setCam(target);
   }, [size, setCam, animateCam]);
 
@@ -145,13 +181,13 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   useEffect(() => {
     if (!needsFit.current || !size.w || room.status !== "open") return;
     needsFit.current = false;
-    if (frames.length) fitTo(topLevel(), 1, false);
+    if (navigationRects.length) fitTo([], 1, false);
     else setCam({ x: size.w / 2 - 400, y: size.h / 2 - 300, z: 1 });
   });
 
   const zoomAt = useCallback((sx: number, sy: number, factor: number, animate = false) => {
     const c = camRef.current;
-    const z = clamp(c.z * factor, MIN_Z, MAX_Z);
+    const z = clamp(c.z * factor, navigationRef.current.minZoom, MAX_CANVAS_ZOOM);
     const target = { z, x: sx - (sx - c.x) * (z / c.z), y: sy - (sy - c.y) * (z / c.z) };
     animate ? animateCam(target, 200) : setCam(target);
   }, [setCam, animateCam]);
@@ -285,9 +321,10 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
         setSpaceDown(true);
         e.preventDefault();
       } else if (e.shiftKey && e.code === "Digit1") {
-        fitTo(topLevel());
+        fitTo([]);
       } else if (e.shiftKey && e.code === "Digit2") {
-        fitTo(frames.filter((f) => selectionRef.current.includes(f.id)).map(rectOf), 2);
+        const targets = frames.filter((f) => selectionRef.current.includes(f.id)).map(rectOf);
+        if (targets.length) fitTo(targets, 2);
       } else if ((e.shiftKey || mod) && e.code === "Digit0") {
         e.preventDefault();
         zoomAt(...center(), 1 / camRef.current.z, true);
@@ -332,6 +369,14 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     return { sx: e.clientX - b.left, sy: e.clientY - b.top };
   };
 
+  const placeComment = (sx: number, sy: number) => {
+    if (readOnly) return;
+    const point = toWorld(sx, sy);
+    const nodeId = hitTest(sx, sy);
+    const rect = nodeId ? rects.get(nodeId) : undefined;
+    onPlaceComment?.({ pageId, nodeId, x: point.x - (rect?.x ?? 0), y: point.y - (rect?.y ?? 0) });
+  };
+
   // Touch navigates and selects but never moves nodes: a resting or second finger can't drag a design.
   const touch = useRef(new TouchNavigator());
   const onTouch = (e: React.PointerEvent, phase: "down" | "move" | "up" | "cancel") => {
@@ -347,10 +392,11 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
       if (frame) fitTo([rectOf(frame)], frame.kind === "section" ? 1 : 4);
     } else if (action.type === "tap") {
       if (readOnly) return;
+      if (commentMode) return placeComment(action.x, action.y);
       const hit = hitTest(action.x, action.y);
       onSelect(hit ? [hit] : []);
     } else if (action.type !== "none") {
-      setCam((c) => applyTouch(c, action, MIN_Z, MAX_Z));
+      setCam((c) => applyTouch(c, action, navigationRef.current.minZoom, MAX_CANVAS_ZOOM));
     }
   };
 
@@ -363,6 +409,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     if (e.button !== 0 && e.button !== 1) return;
     stopTween();
     const { sx, sy } = local(e);
+    if (commentMode && !readOnly && e.button === 0 && !spaceDown) return placeComment(sx, sy);
     const hit = readOnly ? null : hitTest(sx, sy);
     rootRef.current!.setPointerCapture(e.pointerId);
     if (readOnly || e.button === 1 || spaceDown || (!hit && !e.shiftKey)) {
@@ -495,6 +542,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
+    if (commentMode) return;
     const b = rootRef.current!.getBoundingClientRect();
     const id = hitTest(e.clientX - b.left, e.clientY - b.top);
     const f = id && room.nodes.get(id);
@@ -568,7 +616,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   return (
     <div
       ref={rootRef}
-      className={`canvas${spaceDown || gesture.current?.kind === "pan" ? " panning" : ""}`}
+      className={`canvas${spaceDown || gesture.current?.kind === "pan" ? " panning" : ""}${commentMode ? " commenting" : ""}`}
       style={{
         backgroundSize: grid < 8 ? "0 0" : `${grid}px ${grid}px`,
         backgroundPosition: `${cam.x}px ${cam.y}px`,
@@ -617,6 +665,18 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
             <span>{p.name}</span>
           </div>
         ))}
+        {!readOnly && [...room.comments.values()].filter((t) => t.anchor.pageId === pageId && (t.resolvedAt === null || t.id === activeCommentId)).map((thread) => {
+          const point = commentPoint(thread.anchor, rects);
+          return <button key={thread.id} className={`comment-pin${thread.id === activeCommentId ? " active" : ""}${thread.resolvedAt ? " resolved" : ""}`}
+            style={{ left: point.x, top: point.y }} aria-label={`Comment ${thread.number} by ${thread.firstMessage.author.name}: ${thread.firstMessage.body}`}
+            aria-pressed={thread.id === activeCommentId} title={thread.firstMessage.body}
+            onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerMove={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onOpenComment?.(thread); }}>
+            {thread.number}
+          </button>;
+        })}
+        {!readOnly && draftComment?.pageId === pageId && <span className="comment-pin draft" role="img" aria-label="New comment location"
+          style={{ left: commentPoint(draftComment, rects).x, top: commentPoint(draftComment, rects).y }}>+</span>}
       </div>
       {marquee && (
         <div
@@ -634,7 +694,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
         </div>
       )}
       <ButtonGroup className="zoom canvas-glass" role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()}>
-        <Button variant="ghost" size="icon" className="zoom-step" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
+        <Button variant="ghost" size="icon" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
           <IconMinus aria-hidden />
         </Button>
         <Button variant="ghost" className="zoom-pct" onClick={() => zoomAt(size.w / 2, size.h / 2, 1 / cam.z, true)} title="Zoom to 100% (⇧0)" aria-label={`Zoom ${Math.round(cam.z * 100)}%, reset to 100%`}>
@@ -644,7 +704,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
           <IconPlus aria-hidden />
         </Button>
         <ButtonGroupSeparator className="zoom-divider" />
-        <Button variant="ghost" className="zoom-fit" onClick={() => fitTo(topLevel())} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
+        <Button variant="ghost" className="zoom-fit" onClick={() => fitTo([])} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
           <IconMaximize aria-hidden />
           <span>Fit</span>
         </Button>

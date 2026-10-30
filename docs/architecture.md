@@ -11,8 +11,11 @@ edits and fan out changes.
 | `src/App.tsx` | Clerk sign-in, routing, and workspace bootstrap |
 | `src/Home.tsx` | Workspace file grid, search, and agent connection |
 | `src/Editor.tsx` | File lifecycle, page organization, sharing, and presence |
+| `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition |
+| `src/presence.ts` | Active member grouping across tabs and pages |
 | `src/Canvas.tsx` | Camera, gestures, selection, and canvas composition |
 | `src/canvas-render-plan.ts` | Viewport culling, preview layers, and live-content budgets |
+| `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
 | `src/room.ts` | Realtime client, optimistic edits, and demand-loaded sources |
 | `src/thumbnail-cache.ts` | Bounded image loading and decoded-pixel budget |
 | `src/touch-gestures.ts` | Touch navigation state machine |
@@ -22,9 +25,11 @@ edits and fan out changes.
 | `worker/accounts.ts` | Clerk identity projections and webhook reconciliation |
 | `worker/data.ts` | Workspace-scoped D1 queries and file operations |
 | `worker/room.ts` | Per-file persistence, realtime sync, and preview queue |
+| `worker/comments.ts` | Transactional SQLite comment storage and anchor lifecycle |
 | `worker/mcp.ts` | Agent tools and input validation |
 | `worker/render.ts` | Browser Rendering and screenshot helpers |
 | `shared/types.ts` | Wire messages, documents, and design-system composition |
+| `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
 | `shared/specimens.ts` | Component and token-sheet presentations |
 
@@ -74,7 +79,37 @@ Known limitations: the initial sync still includes geometry for the whole file, 
 
 Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding.
 
+Preview navigation stays within the current page's computed content bounds,
+with margins for labels and controls. The fitted overview is the minimum zoom
+(capped at 100% for small designs); a cluster that fits on an axis stays centered
+there. Zoomed-in views can pan between the content's edges. All camera writes,
+including mouse/trackpad, touch, keyboard, animated focus and restored views,
+use the same constraints. Bounds update with live layout and viewport changes;
+visible comment pins also contribute so detached feedback remains reachable.
+Empty pages use a bounded 800×600 area until content arrives. Page changes cancel
+pending camera animation and persistence work.
+
 ## Identity and access
+
+The bottom dock displays a compact avatar stack for connected members, grouped
+by member across tabs. Its people list shows their open pages. Disconnecting
+clears stale peers until the socket reconnects; agent edit activity is separate.
+Presence messages supply geometry only and cannot override verified identities.
+
+Comments live in the file's SQLite Durable Object. Initial sync sends thread
+summaries and pin metadata; full messages load only when opening a thread.
+Authenticated HTTP routes and MCP tools write through the same transactional
+room methods, then broadcast versioned summaries to members. Late HTTP responses
+cannot undo newer realtime state or resurrect deleted threads. Node-relative
+anchors follow computed layout; node deletion detaches feedback at its previous
+position, and page deletion removes its threads. Comment writes do not invalidate
+sources, layout caches, thumbnails, or design libraries. Public viewers receive
+neither comment summaries nor conversations.
+
+The comment panel reserves canvas space on desktop and mobile, so camera bounds
+and focused pins use the visible preview area. Closing the panel or switching
+threads preserves unfinished text during the editor session; closing also returns
+keyboard focus to the comments control.
 
 Clerk Users identify people; Clerk Organizations are workspaces. Personal Accounts are disabled. The browser uses Clerk sign-in, the organization switcher, and the account menu. Workspace membership and invitations are managed in Clerk rather than separate Sharpner forms.
 

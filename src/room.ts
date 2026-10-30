@@ -2,7 +2,7 @@ import { descendantsOf, layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
 import {
   componentTag, mergeDesignSystems,
-  type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type Op, type Page, type Peer, type Presence, type ServerMsg,
+  type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Op, type Page, type Peer, type Presence, type ServerMsg,
 } from "../shared/types";
 
 type Status = "connecting" | "open" | "offline" | "gone" | "denied";
@@ -24,6 +24,7 @@ export class Room {
   pages: Page[] = [];
   nodes = new Map<string, CanvasNode>();
   peers = new Map<string, Peer>();
+  comments = new Map<string, CommentThread>();
   library: LibraryInfo | null = null;
   status: Status = "connecting";
   /** Node sources (HTML/CSS), tagged with the revision they belong to. */
@@ -62,6 +63,8 @@ export class Room {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private designCache: { revision: number; design: DesignSystem } | null = null;
   private designRevision = 0;
+  /** Deleted threads cannot be resurrected by an older HTTP response arriving after realtime deletion. */
+  private deletedComments = new Set<string>();
 
   /** `shareToken` opens the file read-only through a view link, without a session. */
   constructor(private fileId: string, private shareToken: string | null = null) {
@@ -114,6 +117,7 @@ export class Room {
       if (this.ws !== ws) return;
       this.inflight.clear();
       this.wanted.clear();
+      this.peers.clear();
       this.status = e.code === 4404 ? "gone" : e.code === 4403 ? "denied" : "offline";
       this.emit();
       if (!this.closed && this.status !== "gone" && this.status !== "denied") this.retryConnection(ws);
@@ -166,6 +170,9 @@ export class Room {
         this.pages = msg.pages;
         this.nodes = new Map(msg.nodes.map((n) => [n.id, n]));
         this.peers = new Map(msg.peers.map((p) => [p.cid, p]));
+        const comments = new Map((msg.comments ?? []).map((t) => [t.id, t]));
+        for (const id of this.comments.keys()) if (!comments.has(id)) this.deletedComments.add(id);
+        this.comments = comments;
         this.library = msg.library;
         this.designNodes = new Map(msg.nodes.filter(isDesignNode).map((node) => [node.id, node]));
         this.designRevision++;
@@ -237,6 +244,10 @@ export class Room {
         break;
       case "peer.leave":
         this.peers.delete(msg.cid);
+        break;
+      case "comments":
+        for (const thread of msg.threads) this.upsertComment(thread);
+        for (const id of msg.deleted ?? []) { this.comments.delete(id); this.deletedComments.add(id); }
         break;
     }
     this.emit();
@@ -379,6 +390,36 @@ export class Room {
   }
 
   // ---- edits (optimistic) --------------------------------------------------
+
+  private upsertComment(thread: CommentThread) {
+    if (this.deletedComments.has(thread.id)) return;
+    if ((this.comments.get(thread.id)?.revision ?? 0) > thread.revision) return;
+    const { messages: _messages, ...summary } = thread as CommentDetail;
+    this.comments.set(thread.id, summary);
+  }
+
+  getComment(id: string, signal?: AbortSignal) {
+    return api<CommentDetail>(`/files/${this.fileId}/comments/${id}`, { signal });
+  }
+
+  async createComment(anchor: CommentAnchor, body: string) {
+    return this.writeComment("", "POST", { anchor, body });
+  }
+
+  async replyComment(id: string, body: string) {
+    return this.writeComment(`/${id}/replies`, "POST", { body });
+  }
+
+  async resolveComment(id: string, resolved: boolean) {
+    return this.writeComment(`/${id}`, "PATCH", { resolved });
+  }
+
+  private async writeComment(path: string, method: string, json: unknown) {
+    if (this.shareToken || this.status !== "open" || this.closed) throw new Error("Reconnect to the file before posting comments");
+    const thread = await api<CommentDetail>(`/files/${this.fileId}/comments${path}`, { method, json });
+    if (!this.closed) { this.upsertComment(thread); this.emit(); }
+    return thread;
+  }
 
   send(ops: Op[]) {
     for (const op of ops) this.applyLocal(op);

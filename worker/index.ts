@@ -3,6 +3,7 @@ import { auth, authenticate, authErrorStatus, clerkClient, type AppEnv } from ".
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFor } from "./data";
 import { mcp } from "./mcp";
 import { oauth } from "./oauth";
+import { newComment, commentReply, commentResolution } from "./comment-schema";
 
 export { FileRoom } from "./room";
 
@@ -142,6 +143,37 @@ api.delete("/files/:id/share", async (c) => {
   await c.env.DB.prepare(`UPDATE files SET share_token = NULL WHERE id = ?`).bind(file.id).run();
   await room(c.env, file.id).revokeViewers();
   return c.body(null, 204);
+});
+
+// Comments are workspace feedback. Public view links never expose them.
+api.get("/files/:id/comments/:threadId", async (c) => {
+  const file = await fileFor(c.env, c.get("user").id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  return c.json(await room(c.env, file.id).comment(c.req.param("threadId")));
+});
+
+api.post("/files/:id/comments", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const { anchor, body } = newComment.parse(await c.req.json());
+  return c.json(await room(c.env, file.id).createComment(file.id, anchor, body, { id: user.id, name: user.name, avatar: user.avatar_url }), 201);
+});
+
+api.post("/files/:id/comments/:threadId/replies", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const { body } = commentReply.parse(await c.req.json());
+  return c.json(await room(c.env, file.id).replyComment(file.id, c.req.param("threadId"), body, { id: user.id, name: user.name, avatar: user.avatar_url }));
+});
+
+api.patch("/files/:id/comments/:threadId", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const { resolved } = commentResolution.parse(await c.req.json());
+  return c.json(await room(c.env, file.id).resolveComment(file.id, c.req.param("threadId"), resolved, { id: user.id, name: user.name, avatar: user.avatar_url }));
 });
 
 /** Upgrades to the file's realtime WebSocket. */

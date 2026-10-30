@@ -6,11 +6,12 @@ export function viewerMessage(message: ServerMsg): ServerMsg | null {
     case "peer":
     case "peer.leave":
     case "activity":
+    case "comments":
       return null;
     case "sync":
       return message.by ? { ...message, by: null } : message;
     case "init":
-      return message.peers.length ? { ...message, peers: [] } : message;
+      return message.peers.length || message.comments?.length ? { ...message, peers: [], ...(message.comments ? { comments: [] } : {}) } : message;
     default:
       return message;
   }

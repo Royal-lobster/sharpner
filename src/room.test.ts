@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiTokenGetter } from "./api";
 import { Room } from "./room";
-import type { CanvasNode, ClientMsg, ServerMsg } from "../shared/types";
+import type { CanvasNode, ClientMsg, CommentThread, ServerMsg } from "../shared/types";
 
 class Socket {
   static OPEN = 1;
@@ -108,6 +108,65 @@ const start = (nodes: CanvasNode[], socket = Socket.instances.at(-1)!) => {
 const sourceIds = (socket: Socket) => socket.sent.flatMap((message) => message.type === "source" ? message.ids : []);
 const tick = () => vi.advanceTimersByTimeAsync(0);
 const supply = (socket: Socket, id: string, source = `<p>${id}</p>`, rev = 1) => socket.receive({ type: "source", items: [{ id, source, rev }] });
+
+describe("live comments and people", () => {
+  const thread: CommentThread = { id: "feedback", number: 1, anchor: { pageId: "page_one", nodeId: null, x: 10, y: 20 },
+    firstMessage: { id: "message", author: { id: "alice", name: "Alice", avatar: null }, body: "Improve spacing", createdAt: 1 },
+    messageCount: 1, createdAt: 1, updatedAt: 1, resolvedAt: null, resolvedBy: null, revision: 1 };
+
+  it("syncs pins without invalidating layout or sources and clears stale people on disconnect", () => {
+    const socket = start([node("screen")]);
+    const revision = room.dataRevision, design = room.design();
+    socket.receive({ type: "comments", threads: [thread] });
+    socket.receive({ type: "peer", peer: { id: "bob", name: "Bob", avatar: null, cid: "bob-tab", pageId: "page_one", selection: [], cursor: null } });
+    expect(room.comments.get(thread.id)).toEqual(thread);
+    expect(room.peers.size).toBe(1);
+    expect(room.dataRevision).toBe(revision);
+    expect(room.design()).toBe(design);
+    socket.disconnect();
+    expect(room.peers.size).toBe(0);
+    expect(room.comments.size).toBe(1);
+  });
+
+  it("does not undo newer agent feedback when an older HTTP reply arrives late", async () => {
+    const socket = start([]);
+    socket.receive({ type: "comments", threads: [thread] });
+    let response!: (value: Response) => void;
+    fetcher.mockReturnValue(new Promise<Response>((resolve) => { response = resolve; }));
+    const posting = room.replyComment(thread.id, "Thanks");
+    await vi.advanceTimersByTimeAsync(0);
+    const newer = { ...thread, revision: 3, resolvedAt: 40, messageCount: 3 };
+    socket.receive({ type: "comments", threads: [newer] });
+    response(Response.json({ ...thread, revision: 2, messageCount: 2, messages: [] }));
+    await posting;
+    expect(room.comments.get(thread.id)).toEqual(newer);
+  });
+
+  it("never resurrects a deleted thread from a late HTTP response", async () => {
+    const socket = start([]);
+    socket.receive({ type: "comments", threads: [thread] });
+    let response!: (value: Response) => void;
+    fetcher.mockReturnValue(new Promise<Response>((resolve) => { response = resolve; }));
+    const posting = room.replyComment(thread.id, "Thanks");
+    await vi.advanceTimersByTimeAsync(0);
+    socket.receive({ type: "comments", threads: [], deleted: [thread.id] });
+    response(Response.json({ ...thread, revision: 2, messages: [] }));
+    await posting;
+    expect(room.comments.has(thread.id)).toBe(false);
+  });
+
+  it("refreshes all thread metadata on reconnect and prevents public viewers from posting", async () => {
+    const socket = start([]);
+    socket.receive({ type: "comments", threads: [thread] });
+    start([]);
+    expect(room.comments.size).toBe(0);
+    const viewer = new Room("file_fixture", "A".repeat(43));
+    start([], Socket.instances.at(-1));
+    await expect(viewer.createComment(thread.anchor, "Feedback")).rejects.toThrow("Reconnect");
+    expect(fetcher).not.toHaveBeenCalled();
+    viewer.close();
+  });
+});
 
 describe("canvas source working set", () => {
   it("reuses matching cached revisions on reconnect without retransferring visited screens", async () => {
