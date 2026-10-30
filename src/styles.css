@@ -191,7 +191,7 @@ button { -webkit-tap-highlight-color: transparent; }
 
 
 /* Workspace layout; component appearance comes from Mira. */
-.home { min-height: 100%; }
+.home { --page-width: 48rem; min-height: 100%; }
 .home-header { height: calc(56px + var(--safe-top)); padding-top: var(--safe-top); border-bottom: 1px solid var(--border); }
 .home-header-inner { display: flex; align-items: center; gap: 4px; height: 56px; padding-inline: calc(var(--page-gutter) + var(--safe-left)) calc(var(--page-gutter) + var(--safe-right)); }
 .brand { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; }
@@ -203,19 +203,15 @@ button { -webkit-tap-highlight-color: transparent; }
 .home-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
 .home-main { padding: 32px calc(var(--page-gutter) + var(--safe-right)) calc(48px + var(--safe-bottom)) calc(var(--page-gutter) + var(--safe-left)); }
 .dashboard { display: flex; flex-direction: column; gap: 24px; }
-.home-head { display: grid; grid-template-columns: auto auto minmax(12px, 1fr) 224px auto; grid-template-areas: "title tabs space search new"; align-items: center; gap: 12px; }
+.home-head { display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "title space new" "tabs search search"; align-items: center; gap: 12px; }
 .home-title { grid-area: title; display: flex; align-items: center; gap: 10px; }
 .home-title h1 { font-size: 20px; line-height: 28px; }
 .new-file { grid-area: new; }
 .new-file-short { display: none; }
-.file-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px 20px; }
+.file-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 20px; }
 .workspace-onboarding { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; }
 .workspace-onboarding .onboarding-clerk { width: 100%; max-width: 420px; }
 .workspace-onboarding .onboarding-card { width: 100%; max-width: 100%; }
-@media (max-width: 900px) and (min-width: 640px) {
-  .home-head { grid-template-columns: auto 1fr auto; grid-template-areas: "title space new" "tabs search search"; }
-  .file-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
 @media (max-width: 639px) {
   :root { --page-gutter: 16px; }
   .home-header-inner { gap: 0; }
