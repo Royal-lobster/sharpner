@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.wrangler/
+.clerk/
+worker-configuration.d.ts
+wrangler.jsonc
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+coverage/
+playwright-report/
+test-results/
+*.log
+*.tsbuildinfo
+.DS_Store

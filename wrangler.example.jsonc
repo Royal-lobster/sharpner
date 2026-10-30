@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sharpner",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/mcp", "/a/*", "/.well-known/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sharpner",
+      // Local development uses an isolated database. Replace with your D1 ID before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "sharpner-files" }],
+  "durable_objects": {
+    "bindings": [{ "name": "FILE_ROOM", "class_name": "FileRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FileRoom"] }],
+  // Optional: remove this binding to develop without thumbnail generation or screenshots.
+  "browser": { "binding": "BROWSER" },
+  "observability": { "enabled": true },
+  "vars": {
+    // Set these to your own registered public OAuth client to show the Claude Code command.
+    "CLERK_MCP_CLIENT_ID": "",
+    "CLERK_MCP_CALLBACK_PORT": ""
+  }
+}

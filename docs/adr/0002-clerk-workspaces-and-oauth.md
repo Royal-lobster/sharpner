@@ -1,0 +1,12 @@
+# Clerk owns workspace identity and agent authorization
+
+Use Clerk Users and Organizations as the identity and tenant authority, following Plantifiles’ projection model. Keep “Workspace” as the product term and preserve local D1 author/workspace IDs behind immutable Clerk links. This replaces custom sessions, membership administration, invitations, and key hashes with one account lifecycle; Personal Accounts are disabled.
+
+For remote MCP, follow Recalio’s direct Clerk OAuth pattern. `/mcp` challenges unauthenticated clients with protected-resource discovery; clients authorize with Clerk using PKCE and receive their credentials directly. Sharpner hosts no OAuth callback or token broker. A registered public OAuth client with a fixed loopback callback supports Claude Code without a client secret. Other agents use their own registered public clients or approved CIMD metadata URLs. Keep dynamic client registration disabled; CIMD metadata URLs must currently be approved through the Clerk Dashboard.
+
+## Consequences
+
+- OAuth identity scopes are not design permissions. Sharpner assigns OAuth agents a fixed read/write ceiling, still bounded by the acting member’s current workspaces. Optional Clerk user keys retain explicit `sharpner:read` / `sharpner:write` scopes and expire after 90 days; organization keys cannot supply the required member author.
+- Current Clerk memberships are reconciled before every authenticated HTTP request. This adds provider latency and availability dependence, but avoids trusting a stale membership projection for authorization. Verified webhooks reconcile lifecycle changes and revoke affected open file sockets as well.
+- File sockets are bounded by the verified session JWT's expiry. Persisted expiry is checked on incoming messages, outgoing updates, and peer listings, so hibernation needs no resident timer and cursor traffic needs no Clerk call. Expired sockets reconnect through authenticated access checks. Session-ended, removed, and revoked webhooks close that user's sockets without removing their memberships; other valid sessions can reconnect.
+- Migration `0002` preserves historical content and obsolete account rows. Only explicitly linked Clerk identities authorize access; matching a name or login cannot claim legacy data. Historical IDs remain stable after profile or workspace renames.
