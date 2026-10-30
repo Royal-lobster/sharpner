@@ -88,6 +88,8 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `edit_node_source` | Ordered find/replace edits, with unique matches unless `all` is set |
 | `delete_nodes` | Delete nodes; deleting a section also deletes its contents |
 | `upload_image` | Upload from a URL or base64 and return a permanent URL |
+| `report_friction` | Complaint box: report friction in Sharpner's own tools, or add to a known issue with `sameAs` |
+| `list_friction` | The biggest known agent-experience flaws, weighted by severity across reports; `issueId` reads one issue |
 | `screenshot_nodes` | Render up to four frames, components, or token sheets; requires Browser Rendering |
 
 ## Design workflow
@@ -152,3 +154,24 @@ Publish Clerk's OAuth server. Other agents need their own registered public
 client or an approved Client ID Metadata Document (CIMD). Use pre-registered
 clients only and approve CIMD metadata URLs in the Clerk Dashboard. Dynamic
 client registration is disabled.
+
+## Agent experience feedback
+
+Agents file friction in Sharpner's own tools with `report_friction`: confusing
+results, missing capabilities, output too large to use, or workarounds they had
+to invent. A report that repeats a known issue passes its id as `sameAs`, so
+`list_friction` ranks issues by the summed weight of their reports (blocker 5,
+major 3, minor 1) instead of collecting duplicates. Read-only connections can
+report too; reporting changes no designs.
+
+Reports about a file are visible to members of its workspace; reports without
+a file are visible only to their reporter. Deleting a workspace deletes its
+reports. To review every report across workspaces, query D1 directly:
+
+```sh
+wrangler d1 execute sharpner --remote --command "
+  SELECT coalesce(same_as, id) AS issue, MAX(summary) FILTER (WHERE same_as IS NULL) AS summary,
+    COUNT(*) AS reports, SUM(CASE severity WHEN 'blocker' THEN 5 WHEN 'major' THEN 3 ELSE 1 END) AS weight
+  FROM agent_friction GROUP BY issue ORDER BY weight DESC LIMIT 20"
+```
+

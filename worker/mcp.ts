@@ -12,6 +12,7 @@ import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, ty
 import designSystemGuide from "./guides/design-system.md?raw";
 import screensGuide from "./guides/screens.md?raw";
 import { commentAnchor, commentBody } from "./comment-schema";
+import { frictionReports, listFriction, reportFriction, SEVERITIES } from "./friction";
 
 const GUIDES = { "design-system": designSystemGuide, screens: screensGuide } as const;
 const pageDescription = z.string().max(DESCRIPTION_MAX)
@@ -36,7 +37,8 @@ Workflow:
 4. Use only tokens and component instances for styling; promote repeated markup into components. Before removing, renaming or reshaping a component, check its uses with find_instances.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
 6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
-7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.`;
+7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.
+8. If Sharpner's own tools get in your way (a confusing result, a missing capability, output too large to use, a workaround you had to invent), check list_friction and file it with report_friction, adding to an existing issue with sameAs when it is already listed. Keep it brief and carry on with the user's task.`;
 
 export const mcp = new Hono<AppEnv>();
 
@@ -172,6 +174,32 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const { stub } = await access(fileId);
     return json(await stub.resolveComment(fileId, threadId, resolved, actor));
   });
+
+  server.registerTool("report_friction", {
+    description: "Complaint box for Sharpner's agent experience. Report anything in these tools that slowed you down, confused you, returned too much or too little, or forced a workaround (e.g. \"get_file overflowed my context\", \"no way to see where a component is used\"). Call list_friction first: if the issue is listed, pass its id as sameAs with your own details, so it ranks higher instead of being duplicated. Reports are visible to members of the file's workspace (only to you without a fileId) and to the Sharpner team. Don't include secrets; quote design content only as far as it explains the problem. Changes no designs.",
+    inputSchema: {
+      summary: z.string().trim().min(1).max(200).describe("One line naming the problem, not the fix"),
+      details: z.string().max(4000).optional().describe("What you were doing, what happened, what you expected, and any workaround"),
+      severity: z.enum(SEVERITIES).describe("blocker: could not do the task; major: a costly workaround; minor: an annoyance"),
+      tool: z.string().max(60).optional().describe("Tool or area, e.g. get_file, layout, components"),
+      fileId: z.string().optional().describe("File you were working on; shares the report with its workspace"),
+      agent: z.string().max(100).optional().describe("Your client and model, e.g. Claude Code / Claude Opus 5.5"),
+      sameAs: z.string().optional().describe("Id of an existing issue from list_friction that this report repeats"),
+    },
+  }, async ({ fileId, ...report }) => {
+    const file = fileId ? (await access(fileId)).file : null;
+    return json(await reportFriction(env, { ...report, userId: user.id, workspaceId: file?.workspace_id ?? null, fileId: file?.id ?? null }));
+  });
+
+  server.registerTool("list_friction", {
+    description: "The biggest known agent-experience flaws in Sharpner, heaviest first: each issue's weight sums its reports (blocker 5, major 3, minor 1). Covers your own reports and those from your workspaces. Check it before report_friction; pass issueId to read every report of one issue.",
+    inputSchema: {
+      issueId: z.string().optional(),
+      offset: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(50).default(20),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ issueId, offset, limit }) =>
+    json(issueId ? { issueId, reports: await frictionReports(env, user.id, issueId) } : await listFriction(env, user.id, limit, offset)));
 
   server.registerTool("read_guide", {
     description: "Read a design guide. 'design-system': setting up and using tokens, components and libraries. 'screens': quality rules for product screens and landing pages.",
