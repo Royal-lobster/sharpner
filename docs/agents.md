@@ -67,7 +67,7 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 
 | Tool | Purpose |
 | --- | --- |
-| `get_app_state` | Workspaces, files, and the member's current page and selection |
+| `get_app_state` | Workspaces, files, and the member's current page, selection, and the open file's page descriptions |
 | `list_comments` | Open feedback by default; filter by file page, node, or resolution state, with pagination and excerpts |
 | `get_comment_thread` | Full feedback text, replies, authors, anchor, and resolution state |
 | `add_comment` | Pin a new comment to a node or page coordinate |
@@ -76,10 +76,11 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `read_guide` | Design-system or screen-design guidance |
 | `create_file` | Create a workspace file, optionally linked to a library |
 | `set_library` | Link or remove a file's workspace library |
-| `get_file` | Pages, section bounds, and node geometry, without sources |
+| `list_pages` | A file's table of contents: page and section descriptions with design counts |
+| `get_file` | Pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
 | `get_design_system` | Merged token CSS, component tags, props, slots, and definition locations |
-| `create_page` / `rename_page` / `delete_page` | Organize pages; deleting a page deletes its nodes |
-| `create_section` | Create an auto-fitting section, optionally nested |
+| `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes |
+| `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
 | `update_nodes` | Update up to 50 nodes or sections, including geometry, source, page, and grouping |
@@ -90,8 +91,12 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 
 ## Design workflow
 
-Start with `get_app_state`, open the file with `get_file`, and read its design
-system with `get_design_system`. Use `read_guide("design-system")` and
+Start with `get_app_state`, find your way with `list_pages`, open the page you
+need with `get_file({ fileId, pageId })`, and read the design system with
+`get_design_system`. Pages and sections carry short descriptions, like skill
+descriptions: what they hold and when to look at them. Agents write one for
+each page and section they create; members can edit page descriptions from the
+Pages panel. Use `read_guide("design-system")` and
 `read_guide("screens")` for the built-in authoring guides.
 
 Create screens inside sections without coordinates to use automatic layout.

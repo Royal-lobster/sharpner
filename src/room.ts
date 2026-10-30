@@ -479,7 +479,8 @@ export class Room {
 
   private upsertPage(p: Page) {
     const i = this.pages.findIndex((x) => x.id === p.id);
-    if (i >= 0) this.pages[i] = p;
+    // A put without a description keeps the current one, as on the server.
+    if (i >= 0) this.pages[i] = { ...this.pages[i], ...p };
     else this.pages.push(p);
     this.pages = [...this.pages].sort((a, b) => a.sort - b.sort);
   }

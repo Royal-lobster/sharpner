@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { layoutHeight, layoutRects } from "../shared/layout";
-import type { NodeInput } from "../shared/types";
+import { DESCRIPTION_MAX, type NodeInput, type Page } from "../shared/types";
 
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class {
@@ -41,14 +41,16 @@ function fixture(legacy = false) {
     }
     return { toArray: () => rows, [Symbol.iterator]: () => rows[Symbol.iterator]() };
   } };
-  const room = new FileRoom({ storage: { sql }, waitUntil: vi.fn() } as unknown as DurableObjectState, {} as Env);
+  const wake = () => new FileRoom({ storage: { sql }, waitUntil: vi.fn() } as unknown as DurableObjectState, {} as Env);
+  const room = wake();
   const pageId = room.pages()[0]!.id;
   // Exercise the production SQLite write path directly; apply's network fan-out is independent of layout.
   const put = (id: string, input: NodeInput) => (room as unknown as {
     putNode(id: string, input: NodeInput, touched: Set<string>, design: { tags: Set<string>; tokens: boolean }): boolean;
   }).putNode(id, { pageId, ...input }, new Set(), { tags: new Set(), tokens: false });
+  const putPage = (page: Page) => (room as unknown as { putPage(page: Page): void }).putPage(page);
   const rects = () => layoutRects(room.nodes(), layoutHeight);
-  return { db, room, put, rects, pageId };
+  return { db, room, wake, put, putPage, rects, pageId };
 }
 
 describe("persisted automatic layout", () => {
@@ -70,7 +72,7 @@ describe("persisted automatic layout", () => {
     expect(room.node("legacy-section")!.layout).toBe("free");
     expect(rects().get("legacy-screen")).toMatchObject({ x: 1000, y: 1200 });
     expect(room.node("component")!.rev).toBe(2);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "5" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "6" });
   });
 
   it("switches automatic groups to free without shifting their descendants or the remaining stack", () => {
@@ -114,5 +116,59 @@ describe("persisted automatic layout", () => {
     put("flow", { kind: "section" });
     expect(() => put("flow", { order: Infinity })).toThrow("finite");
     expect(() => put("frame", { layout: "auto" })).toThrow("section");
+  });
+});
+
+describe("page and section descriptions", () => {
+  it("stores a page description, keeps it through a rename without one, and clears it when emptied", () => {
+    const { room, putPage } = fixture();
+    putPage({ id: "ds", name: "Design System", sort: 1, description: "  Tokens and component catalogs.  " });
+    expect(room.pages().find((p) => p.id === "ds")).toEqual({ id: "ds", name: "Design System", sort: 1, description: "Tokens and component catalogs." });
+    putPage({ id: "ds", name: "Foundations", sort: 1 });
+    expect(room.pages().find((p) => p.id === "ds")).toMatchObject({ name: "Foundations", description: "Tokens and component catalogs." });
+    putPage({ id: "ds", name: "Foundations", sort: 1, description: "x".repeat(DESCRIPTION_MAX + 50) });
+    expect(room.pages().find((p) => p.id === "ds")!.description).toHaveLength(DESCRIPTION_MAX);
+    putPage({ id: "ds", name: "Foundations", sort: 1, description: "" });
+    expect(room.pages().find((p) => p.id === "ds")!.description).toBe("");
+    putPage({ id: "new", name: "Screens", sort: 2 });
+    expect(room.pages().find((p) => p.id === "new")!.description).toBe("");
+  });
+
+  it("describes sections only, keeps the text across edits, and omits empty descriptions from node metadata", () => {
+    const { room, put } = fixture();
+    put("forms", { kind: "section", name: "Forms", description: "Inputs, selects and validation states." });
+    put("forms", { name: "Forms & Inputs", order: 5 });
+    expect(room.node("forms")).toMatchObject({ name: "Forms & Inputs", description: "Inputs, selects and validation states." });
+    put("screen", { parentId: "forms", source: "<p>Field</p>" });
+    expect(room.nodes(["screen"])[0]).not.toHaveProperty("description");
+    expect(() => put("screen", { description: "A screen" })).toThrow("sections");
+    put("forms", { description: "" });
+    expect(room.nodes(["forms"])[0]).not.toHaveProperty("description");
+  });
+
+  it("keeps descriptions when an older deployment lowers the recorded migration version", () => {
+    const { db, wake, put, putPage, pageId } = fixture();
+    putPage({ id: pageId, name: "Page 1", sort: 0, description: "Everything so far." });
+    put("flow", { kind: "section", description: "Sign-up flow." });
+    db.prepare("UPDATE meta SET v = '5' WHERE k = 'schema'").run();
+    const recovered = wake();
+    expect(recovered.pages()[0]!.description).toBe("Everything so far.");
+    expect(recovered.node("flow")!.description).toBe("Sign-up flow.");
+  });
+
+  it("removes a section's or page's description with it", () => {
+    const { db, room, put, putPage } = fixture();
+    putPage({ id: "flows", name: "Flows", sort: 1, description: "Flows." });
+    put("flow", { kind: "section", pageId: "flows", description: "Sign-up flow." });
+    put("other", { kind: "section", description: "Stays." });
+    (room as unknown as { deleteNode(id: string, stale: string[], design: object, deleted: Set<string>): void })
+      .deleteNode("flow", [], { tags: new Set(), tokens: false }, new Set());
+    expect(db.prepare("SELECT id FROM descriptions ORDER BY id").all()).toEqual([{ id: "flows" }, { id: "other" }]);
+  });
+
+  it("migrates existing pages and sections as undescribed", () => {
+    const { room } = fixture(true);
+    expect(room.pages()).toEqual([{ id: "legacy-page", name: "Legacy", sort: 0, description: "" }]);
+    expect(room.node("legacy-section")).not.toHaveProperty("description");
   });
 });

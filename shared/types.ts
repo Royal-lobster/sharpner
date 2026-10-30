@@ -2,7 +2,13 @@
 import { componentSpecimen, tokenSpecimen } from "./specimens";
 export { tokenNames } from "./specimens";
 
-export type Page = { id: string; name: string; sort: number };
+/**
+ * `description` says what a page holds and when to look at it, like a skill's description, so agents can pick
+ * the right page without loading every node. A put without it keeps the current text.
+ */
+export type Page = { id: string; name: string; sort: number; description?: string };
+/** Longest page or section description, in characters. */
+export const DESCRIPTION_MAX = 500;
 
 /**
  * - frame: HTML rendered at a viewport width (a screen, state, slide…)
@@ -27,6 +33,8 @@ export type CanvasNode = {
   order?: number;
   /** Sections: automatic wrapping rows, or freely positioned contents. Missing means legacy free layout. */
   layout?: "auto" | "free";
+  /** Sections: what the group holds and when to look at it, for agent navigation. Omitted when empty. */
+  description?: string;
   width: number;
   /** null = grows to fit its content. */
   height: number | null;
@@ -42,7 +50,7 @@ export type CanvasNode = {
 };
 
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
-export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "x" | "y" | "order" | "layout" | "width" | "height" | "src" | "thumbLo">> & {
+export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
   source?: string;
 };
 

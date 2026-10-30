@@ -10,7 +10,7 @@ A design system is a file's **tokens** (named design decisions) plus its **compo
 
 ## 2. Where it lives
 
-Put it on its own page named **"Design System"** (create it with `create_page`), organised with sections:
+Put it on its own page named **"Design System"** (create it with `create_page`), organised with sections. Describe the page and each section in a sentence or two, saying what it holds and when to look at it (e.g. page: "Token sheet and component catalogs grouped by role. Check before building any screen."; section "Forms": "Fields, selects and validation states for every form."). Agents read these descriptions through `list_pages` to find their way around the file.
 
 ```
 Design System (page)

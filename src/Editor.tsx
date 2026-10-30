@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User, type Workspace } from "./api";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
-import type { CommentAnchor, CommentThread } from "../shared/types";
+import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { Room } from "./room";
@@ -176,6 +176,14 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
+  const describePage = async (p: Page) => {
+    const description = await askText({
+      title: `Describe “${p.name}”`, label: "Description", initial: p.description ?? "", confirm: "Save",
+      message: "What this page holds and when to look at it. Agents read it to find their way around the file.",
+      multiline: true, optional: true, maxLength: DESCRIPTION_MAX,
+    });
+    if (description !== null && description !== (p.description ?? "")) room.send([{ t: "page.put", page: { id: p.id, name: p.name, sort: p.sort, description } }]);
+  };
   const deletePage = async (p: { id: string; name: string }) => {
     const n = counts.get(p.id) ?? 0;
     const ok = await askConfirm({
@@ -258,17 +266,22 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                       onBlur={(e) => {
                         setRenaming(null);
                         const name = e.target.value.trim();
-                        if (!cancelRename.current && name && name !== p.name) room.send([{ t: "page.put", page: { ...p, name } }]);
+                        // Without a description the server keeps the current one, even if an agent just changed it.
+                        if (!cancelRename.current && name && name !== p.name) room.send([{ t: "page.put", page: { id: p.id, name, sort: p.sort } }]);
                       }}
                       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                     />
                   ) : (
                     <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { setPageId(p.id); setSelection([]); setOpen(null); }}>
-                      <span className="truncate">{p.name}</span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
+                      <span className="page-option-text">
+                        <span className="truncate">{p.name}</span>
+                        {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
+                      </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
                     </Button>
                   )}
                   {!readOnly && renaming !== p.id && <ItemActions className="page-actions">
                     <IconAction label={`Rename ${p.name}`} onClick={() => setRenaming(p.id)}><Pencil aria-hidden /></IconAction>
+                    <IconAction label={`Describe ${p.name}`} onClick={() => void describePage(p)}><IconAlignLeft aria-hidden /></IconAction>
                     {room.pages.length > 1 && <IconAction label={`Delete ${p.name}`} onClick={() => void deletePage(p)}><Trash2 aria-hidden /></IconAction>}
                   </ItemActions>}
                 </Item>
