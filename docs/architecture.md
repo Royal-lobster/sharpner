@@ -56,12 +56,13 @@ Only visible nodes, plus a margin, are considered. Rendering switches with on-sc
 
 | On-screen width | Rendered as |
 | --- | --- |
-| < 40 CSS px | Plain box on one `<canvas>`; no image request |
-| Up to about 280 device px | Lazy 256px WebP thumbnail on the canvas |
+| Up to about 280 device px, including tiny nodes | Lazy 256px WebP thumbnail on the canvas |
 | Larger | DOM node with a 1280px thumbnail |
 | At least 360 CSS px, among the six largest, camera at rest | Live sandboxed iframe with source fetched on demand |
 
 Components can become live from 220 CSS px wide; screen previews use the thresholds above. Without thumbnails, up to twelve nodes can become live from 140 CSS px wide. The low-resolution cache admits a stable viewport working set, capped at 600 images, 16 million decoded pixels, and eight concurrent loads. Dense views beyond that budget use boxes until navigation makes room; they do not continuously evict and reload each other. Original image uploads are promoted only for up to eight large, actually visible images.
+
+Visible frames, components, and token sheets can sharpen on the canvas before reaching the DOM threshold. Once the small preview is ready and the camera stops, nodes at least 64 device pixels wide can load their 1280px preview through a separate queue capped at 32 entries, 32 million decoded pixels, and two concurrent requests. The small preview stays visible until the sharper one is ready. Data Saver and limited connection hints disable this optional work; browsers without those hints use the bounded queue. These upgrades fetch neither live sources nor original image uploads, and cached sharp previews remain visible during navigation.
 
 Initial sync sends geometry, with HTML fetched only for live nodes and the file's design-system definitions. The reusable screen-source cache is limited to 128 entries / 8 MiB of UTF-16 text; the current live working set and required design definitions remain pinned. Matching source revisions survive reconnects. Source requests have backpressure, and responses stream in byte-bounded batches. Direct file loads obtain the verified author with file metadata and skip the separate account bootstrap request; current Clerk user and membership reads run concurrently without caching authorization.
 

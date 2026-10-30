@@ -338,6 +338,7 @@ body:has(.editor) { --toast-offset: 84px; }
   padding-bottom: 6px; font-size: 14px; font-weight: 500; color: var(--muted-text); white-space: nowrap; max-width: calc(100% / var(--inv)); overflow: hidden; text-overflow: ellipsis;
 }
 .world.crowded .frame.nested .frame-label { visibility: hidden; }
+.world.catalog-crowded .frame.catalog-item .frame-label { visibility: hidden; }
 .frame.component .frame-label { color: #c084fc; }
 .frame.tokens .frame-label { color: #f9a8d4; }
 .frame:hover .frame-label { color: var(--text); }

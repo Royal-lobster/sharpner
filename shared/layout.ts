@@ -1,3 +1,4 @@
+import { componentName } from "./specimens";
 import type { CanvasNode } from "./types";
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -9,6 +10,15 @@ export const SECTION_GAP = 160;
 /** Four desktop screens fit in a row; small screens stop at four too. */
 export const AUTO_ROW_WIDTH = 6400;
 export const AUTO_COLUMNS = 4;
+/**
+ * A component-only automatic section is a catalog: specimens pack tightly, each component family
+ * ("Chip" in "Chip/Active") starts its own row, and the family name sits once in a left gutter.
+ */
+export const CATALOG_PAD = 64;
+export const CATALOG_GAP = 40;
+export const CATALOG_ROW_GAP = 64;
+export const CATALOG_ROW_WIDTH = 1600;
+export const CATALOG_GUTTER = 160;
 const EMPTY_SECTION = { w: 480, h: 280 };
 
 /** Height used for layout: fixed, else what a live iframe reported, else the renderer's measurement. */
@@ -43,26 +53,33 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
         .filter((k) => !seen.has(k.id) && !(f.layout !== "auto" && floating?.has(k.id) && !floating.has(f.id))));
       const inner = children.map((k) => rectOf(k, new Set(seen)));
       if (f.layout === "auto" && inner.length) {
+        const catalog = isCatalog(children);
+        const pad = catalog ? CATALOG_PAD : SECTION_PAD, gap = catalog ? CATALOG_GAP : AUTO_GAP, rowGap = catalog ? CATALOG_ROW_GAP : AUTO_GAP;
+        const gutter = catalog && children.some((k) => familyOf(k.name)) ? CATALOG_GUTTER : 0;
         let x = 0, y = 0, rowHeight = 0, columns = 0, width = 0;
         for (let i = 0; i < children.length; i++) {
           const child = children[i]!, cr = inner[i]!;
           // Nested groups take their own row; their full measured height moves the following group.
-          if (columns && (child.kind === "section" || columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH)) {
-            y += rowHeight + AUTO_GAP; x = 0; rowHeight = 0; columns = 0;
+          // Catalogs wrap per family instead of after a fixed column count.
+          const wraps = catalog
+            ? familyOf(child.name) !== familyOf(children[i - 1]?.name ?? "") || x + cr.w > CATALOG_ROW_WIDTH
+            : child.kind === "section" || columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
+          if (columns && wraps) {
+            y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
           }
           // Keep the original slot while a child floats. This prevents the drop target collapsing
           // under the pointer and the rest of the canvas jumping before the drop is committed.
           if (!(floating?.has(child.id) && !floating.has(f.id))) {
-            shift(child, f.x + SECTION_PAD + x - cr.x, f.y + SECTION_PAD + y - cr.y);
+            shift(child, f.x + pad + gutter + x - cr.x, f.y + pad + y - cr.y);
           }
           width = Math.max(width, x + cr.w);
           rowHeight = Math.max(rowHeight, cr.h);
-          x += cr.w + AUTO_GAP; columns++;
+          x += cr.w + gap; columns++;
           if (child.kind === "section" && i < children.length - 1) {
-            y += rowHeight + AUTO_GAP; x = 0; rowHeight = 0; columns = 0;
+            y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
           }
         }
-        r = { x: f.x, y: f.y, w: width + SECTION_PAD * 2, h: y + rowHeight + SECTION_PAD * 2 };
+        r = { x: f.x, y: f.y, w: gutter + width + pad * 2, h: y + rowHeight + pad * 2 };
       } else {
         r = inner.length ? pad(union(inner), SECTION_PAD) : { x: f.x, y: f.y, ...EMPTY_SECTION };
       }
@@ -88,6 +105,36 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
     }
   }
   return rects;
+}
+
+const isCatalog = (children: CanvasNode[]) => children.length > 0 && children.every((k) => k.kind === "component");
+
+/** "Chip" for "Chip/Active"; empty for a name without a family. Matches the specimens' componentName. */
+export const familyOf = (name: string) => name.includes("/") ? componentName(name).family : "";
+
+/** Automatic sections laid out as a catalog. */
+export function catalogSectionIds(frames: CanvasNode[]) {
+  const ids = new Set<string>();
+  const sections = new Map(frames.map((f) => [f.id, f]));
+  for (const [id, children] of childrenOf(frames)) if (sections.get(id)?.layout === "auto" && isCatalog(children)) ids.add(id);
+  return ids;
+}
+
+/** Where each catalog row's family name goes: the gutter beside the first specimen of each family. */
+export function catalogFamilyLabels(frames: CanvasNode[], rects: ReadonlyMap<string, Rect>, catalogs: ReadonlySet<string>) {
+  const labels: { family: string; x: number; y: number }[] = [];
+  const kids = childrenOf(frames);
+  for (const id of catalogs) {
+    const section = rects.get(id);
+    const placed = (kids.get(id) ?? []).flatMap((node) => rects.has(node.id) ? [{ node, rect: rects.get(node.id)! }] : [])
+      .sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+    if (!section) continue;
+    placed.forEach(({ node, rect }, i) => {
+      const family = familyOf(node.name);
+      if (family && family !== familyOf(placed[i - 1]?.node.name ?? "")) labels.push({ family, x: section.x + CATALOG_PAD, y: rect.y });
+    });
+  }
+  return labels;
 }
 
 /** Nodes whose location is derived from their order rather than their stored x/y. */

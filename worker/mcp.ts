@@ -228,7 +228,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row), nested groups and top-level sections stack, and measured heights reflow without overlaps. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row), nested groups and top-level sections stack, and measured heights reflow without overlaps. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
     inputSchema: {
       fileId: z.string(),
       name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),

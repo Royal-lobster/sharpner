@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { contains, descendantsOf, dropOrders, isManaged, layoutRects, SECTION_PAD, union, type Rect } from "../shared/layout";
+import { CATALOG_GUTTER, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, contains, descendantsOf, dropOrders, familyOf, isManaged, layoutRects, SECTION_PAD, union, type Rect } from "../shared/layout";
 import { frameDocument, renderedHtml, type CanvasNode, type DesignSystem, type Op } from "../shared/types";
+import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
 import { toast } from "./toast";
 import { ThumbnailCache, thumbnailSource } from "./thumbnail-cache";
@@ -12,13 +13,12 @@ import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-react";
+import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 
 type Tier = "lo" | "hi";
 
 const MIN_Z = 0.01;
 const MAX_Z = 8;
-/** Frames narrower than this on screen render as plain boxes (no image requests). */
-const BOX_BELOW = 40;
 /** Below this on-screen section padding, labels of nested nodes would collide with the section title. */
 const NESTED_LABEL_GAP = 24;
 /** How long a newly appeared node takes to rack-focus in. */
@@ -55,6 +55,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   const camRef = useRef(cam);
   const needsFit = useRef(!saved);
   const [settled, setSettled] = useState(true);
+  const prefetchPreviews = usePreviewPrefetch();
   const raf = useRef(0);
   const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const live = useRef(new Set<string>());
@@ -99,6 +100,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   // Sections wrap their contents; nodes being dragged don't stretch the section they're leaving.
   const rects = layoutRects(frames, (f) => room.heightOf(f), room.dragging);
   const rectOf = (f: CanvasNode) => rects.get(f.id)!;
+  const catalogs = catalogSectionIds(frames);
   const sections = frames.filter((f) => f.kind === "section");
   const nodes = frames.filter((f) => f.kind !== "section");
   const topLevel = () => frames.filter((f) => !f.parentId).map(rectOf);
@@ -202,6 +204,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   // Paint the small frames onto the raster layer, in sync with the DOM layer's transform.
   const rasterRef = useRef<HTMLCanvasElement>(null);
   const thumbnailCache = useRef<ThumbnailCache | null>(null);
+  const highPreviewCache = useRef<ThumbnailCache | null>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
   const now = performance.now();
   // DOM frames animate in CSS. Only visible raster effects need a continuous redraw.
@@ -220,13 +223,18 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   }, [animating]);
   useLayoutEffect(() => {
     let pending = 0;
-    const cache = new ThumbnailCache(() => {
+    const changed = () => {
       if (!pending) pending = requestAnimationFrame(() => { pending = 0; redraw(); });
-    });
+    };
+    const cache = new ThumbnailCache(changed);
+    const highCache = new ThumbnailCache(changed, { maxEntries: 32, maxPixels: 32 * 1024 * 1024, maxConcurrent: 2 });
     thumbnailCache.current = cache;
+    highPreviewCache.current = highCache;
     return () => {
       cache.dispose();
+      highCache.dispose();
       if (thumbnailCache.current === cache) thumbnailCache.current = null;
+      if (highPreviewCache.current === highCache) highPreviewCache.current = null;
       cancelAnimationFrame(pending);
     };
   }, []);
@@ -551,8 +559,9 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
 
   useLayoutEffect(() => {
     if (rasterRef.current) {
-      paintRaster(rasterRef.current, size, cam, visibleSections, rasterFrames, selected, peerSelections,
-        { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current);
+      paintRaster(rasterRef.current, size, cam, visibleSections, rasterFrames, selected, peerSelections, catalogs,
+        catalogFamilyLabels(frames, rects, catalogs), { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current,
+        { cache: highPreviewCache.current, enabled: prefetchPreviews, settled });
     }
   });
 
@@ -576,7 +585,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     >
       <canvas ref={rasterRef} className="raster" style={{ width: size.w, height: size.h }} />
       <div
-        className={`world${SECTION_PAD * cam.z < NESTED_LABEL_GAP ? " crowded" : ""}`}
+        className={`world${SECTION_PAD * cam.z < NESTED_LABEL_GAP ? " crowded" : ""}${CATALOG_ROW_GAP * cam.z < NESTED_LABEL_GAP ? " catalog-crowded" : ""}`}
         style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})`, ["--inv" as string]: 1 / cam.z }}
       >
         {domFrames.map(({ node: f, rect: r, screenWidth }) => {
@@ -585,6 +594,8 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
             <FrameNode
               key={f.id}
               frame={f}
+              label={nodeLabel(f, catalogs)}
+              catalog={catalogs.has(f.parentId ?? "")}
               x={r.x}
               y={r.y}
               height={r.h}
@@ -644,6 +655,9 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
 
 type FrameNodeProps = {
   frame: CanvasNode;
+  label: string;
+  /** Sits in a catalog section, whose tighter rows hide labels sooner. */
+  catalog: boolean;
   x: number;
   y: number;
   height: number;
@@ -661,17 +675,17 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, x, y, height, tier, live, html, design, selected, peerColor, agent, settling, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, selected, peerColor, agent, settling, fresh }: FrameNodeProps) {
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
-  const cls = ["frame", f.kind, f.parentId && "nested", selected && "selected", agent && "working", settling && "settle", fresh && "fresh"].filter(Boolean).join(" ");
+  const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh"].filter(Boolean).join(" ");
   return (
     <div
       className={cls}
       data-frame={f.id}
       style={{ left: x, top: y, width: f.width, height, ["--peer" as string]: peerColor }}
     >
-      <div className="frame-label">{KIND_PREFIX[f.kind]}{f.name}</div>
+      <div className="frame-label">{label}</div>
       {agent && <div className="agent-chip"><span className="aperture" />{agent}</div>}
       <div className="frame-body">
         {lo && <img src={lo} alt="" draggable={false} decoding="async" />}
@@ -712,7 +726,12 @@ const COLORS = {
 };
 const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", section: "", component: "◆ ", tokens: "◎ " };
 
-function paintRaster(
+/** Catalog rows already name the family in their gutter, so specimens show only their variant. */
+function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
+  return KIND_PREFIX[f.kind] + (catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name);
+}
+
+export function paintRaster(
   canvas: HTMLCanvasElement,
   size: { w: number; h: number },
   cam: Cam,
@@ -720,8 +739,11 @@ function paintRaster(
   items: ProjectedNode[],
   selected: Set<string>,
   peers: Map<string, string>,
+  catalogs: ReadonlySet<string>,
+  families: { family: string; x: number; y: number }[],
   fx: { agent: Map<string, unknown>; done: Map<string, number>; appeared: Map<string, number>; now: number; reducedMotion: boolean },
   thumbnails: ThumbnailCache | null,
+  upgrades?: { cache: ThumbnailCache | null; enabled: boolean; settled: boolean },
 ) {
   const dpr = devicePixelRatio;
   const w = Math.round(size.w * dpr), h = Math.round(size.h * dpr);
@@ -736,12 +758,25 @@ function paintRaster(
 
   thumbnails?.setViewport(items.flatMap(({ node: f, rect: r, screenWidth: screenW }) => {
     const url = thumbnailSource(f);
-    if (screenW < BOX_BELOW || !url) return [];
+    if (!url) return [];
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y, height = r.h * cam.z;
     const area = Math.max(0, Math.min(size.w, x + screenW) - Math.max(0, x)) * Math.max(0, Math.min(size.h, y + height) - Math.max(0, y));
     const distance = (x + screenW / 2 - size.w / 2) ** 2 + (y + height / 2 - size.h / 2) ** 2;
     const side = f.kind === "image" ? 400 : 256;
     return [{ url, pixels: side * side * r.h / Math.max(1, r.w), priority: (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance }];
+  }));
+
+  // Load small previews first. Sharpen visible content in a separate bounded queue, without
+  // promoting DOM nodes, fetching sources, or downloading original uploaded images.
+  const highPreviews = upgrades?.cache;
+  highPreviews?.setViewport(items.flatMap(({ node: f, rect: r, screenWidth, visibleArea }) => {
+    const lo = thumbnailSource(f), hi = f.thumbHi;
+    if (f.kind === "image" || !lo || !hi || hi === lo || visibleArea <= 0 || screenWidth * dpr < 64) return [];
+    const ready = highPreviews.get(hi);
+    if (!ready && (!upgrades?.enabled || !upgrades.settled || !thumbnails?.get(lo))) return [];
+    const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y;
+    const distance = (x + screenWidth / 2 - size.w / 2) ** 2 + (y + r.h * cam.z / 2 - size.h / 2) ** 2;
+    return [{ url: hi, pixels: 1280 * 1280 * r.h / Math.max(1, r.w), priority: (selected.has(f.id) ? 1e9 : 0) + visibleArea * 100 - distance }];
   }));
 
   for (const { node: f, rect: r, screenWidth: sw } of sections) {
@@ -760,8 +795,9 @@ function paintRaster(
   for (const { node: f, rect: r, screenWidth: screenW } of items) {
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y, sw = screenW, sh = r.h * cam.z;
     const url = thumbnailSource(f);
-    const box = sw < BOX_BELOW || Boolean(url && thumbnails && !thumbnails.has(url));
-    const img = !box && url ? thumbnails?.get(url) ?? null : null;
+    const sharper = f.kind !== "image" && f.thumbHi ? highPreviews?.get(f.thumbHi) : null;
+    const box = !sharper && Boolean(url && thumbnails && !thumbnails.has(url));
+    const img = sharper ?? (!box && url ? thumbnails?.get(url) ?? null : null);
     const born = fx.appeared.get(f.id);
     const fresh = fx.reducedMotion || born === undefined ? 1 : Math.min(1, (fx.now - born) / MATERIALIZE_MS);
     ctx.globalAlpha = 1 - (1 - fresh) ** 3;
@@ -786,12 +822,28 @@ function paintRaster(
     }
     const doneAt = fx.done.get(f.id);
     if (!fx.reducedMotion && doneAt !== undefined) focusLock(ctx, x, y, sw, sh, Math.min(1, (fx.now - doneAt) / LOCK_MS));
-    if (sw >= 60 && (!f.parentId || SECTION_PAD * cam.z >= NESTED_LABEL_GAP)) {
-      const name = KIND_PREFIX[f.kind] + f.name;
+    const labelRoom = catalogs.has(f.parentId ?? "") ? CATALOG_ROW_GAP : SECTION_PAD;
+    if (sw >= 60 && (!f.parentId || labelRoom * cam.z >= NESTED_LABEL_GAP)) {
+      const name = nodeLabel(f, catalogs);
       const max = Math.floor(sw / 7.5);
       ctx.fillStyle = selected.has(f.id) ? COLORS.select : f.kind === "component" ? COLORS.component : f.kind === "tokens" ? COLORS.tokens : COLORS.muted;
       ctx.fillText(name.length > max ? name.slice(0, max - 1) + "…" : name, x, y - 4);
     }
+  }
+
+  // Family names in catalog gutters, top-aligned with their row.
+  const gutter = (CATALOG_GUTTER - 24) * cam.z;
+  if (gutter >= 48 && CATALOG_ROW_GAP * cam.z >= NESTED_LABEL_GAP) {
+    ctx.font = '600 13px "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif';
+    ctx.textBaseline = "top";
+    ctx.fillStyle = COLORS.sectionText;
+    const max = Math.floor(gutter / 7.5);
+    for (const { family, x, y } of families) {
+      const sx = x * cam.z + cam.x, sy = y * cam.z + cam.y;
+      if (sy < -20 || sy > size.h || sx > size.w || sx + gutter < 0) continue;
+      ctx.fillText(family.length > max ? family.slice(0, max - 1) + "…" : family, sx, sy + 2);
+    }
+    ctx.textBaseline = "bottom";
   }
 
   // Section titles last, so neighbouring sections' contents never cover them.
