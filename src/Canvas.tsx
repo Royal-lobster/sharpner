@@ -613,7 +613,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     }
   });
 
-  return (
+  return <>
     <div
       ref={rootRef}
       className={`canvas${spaceDown || gesture.current?.kind === "pan" ? " panning" : ""}${commentMode ? " commenting" : ""}`}
@@ -693,24 +693,24 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
           </EmptyHeader></Empty>
         </div>
       )}
-      <ButtonGroup className="zoom canvas-glass" role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()}>
-        <Button variant="ghost" size="icon" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
-          <IconMinus aria-hidden />
-        </Button>
-        <Button variant="ghost" className="zoom-pct" onClick={() => zoomAt(size.w / 2, size.h / 2, 1 / cam.z, true)} title="Zoom to 100% (⇧0)" aria-label={`Zoom ${Math.round(cam.z * 100)}%, reset to 100%`}>
-          {Math.round(cam.z * 100)}%
-        </Button>
-        <Button variant="ghost" size="icon" className="zoom-step" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25, true)} title="Zoom in (⌘+)" aria-label="Zoom in">
-          <IconPlus aria-hidden />
-        </Button>
-        <ButtonGroupSeparator className="zoom-divider" />
-        <Button variant="ghost" className="zoom-fit" onClick={() => fitTo([])} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
-          <IconMaximize aria-hidden />
-          <span>Fit</span>
-        </Button>
-      </ButtonGroup>
     </div>
-  );
+    <ButtonGroup className="zoom canvas-glass" role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <Button variant="ghost" size="icon" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
+        <IconMinus aria-hidden />
+      </Button>
+      <Button variant="ghost" className="zoom-pct" onClick={() => zoomAt(size.w / 2, size.h / 2, 1 / cam.z, true)} title="Zoom to 100% (⇧0)" aria-label={`Zoom ${Math.round(cam.z * 100)}%, reset to 100%`}>
+        {Math.round(cam.z * 100)}%
+      </Button>
+      <Button variant="ghost" size="icon" className="zoom-step" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25, true)} title="Zoom in (⌘+)" aria-label="Zoom in">
+        <IconPlus aria-hidden />
+      </Button>
+      <ButtonGroupSeparator className="zoom-divider" />
+      <Button variant="ghost" className="zoom-fit" onClick={() => fitTo([])} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
+        <IconMaximize aria-hidden />
+        <span>Fit</span>
+      </Button>
+    </ButtonGroup>
+  </>;
 }
 
 type FrameNodeProps = {
