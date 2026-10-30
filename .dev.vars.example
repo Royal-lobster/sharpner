@@ -3,7 +3,7 @@ CLERK_PUBLISHABLE_KEY=
 CLERK_SECRET_KEY=
 # Subscribe /auth/webhook to user, organization and organizationMembership events.
 CLERK_WEBHOOK_SIGNING_SECRET=
-# Optional pre-registered public OAuth client for Claude Code. Register matching loopback callback URLs.
+# Optional registered public OAuth client for local agents. Register matching loopback callback URLs.
 CLERK_MCP_CLIENT_ID=
 CLERK_MCP_CALLBACK_PORT=
 # Set to 1 only after enabling Clerk's API Keys feature; hidden by default.

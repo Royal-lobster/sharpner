@@ -62,14 +62,13 @@ the same MCP connection. See the [design-system guide](worker/guides/design-syst
 
 ## Bring your agent
 
-Open **Connect an agent** to copy the command for your client. For Claude Code,
-with a public OAuth client registered in Clerk:
+Open **Connect an agent**, copy the setup prompt, and paste it into your coding
+agent. It configures the connection for its client, guides you through browser
+sign-in, and verifies workspace access. **Manual setup** keeps the endpoint and
+client commands available.
 
-```sh
-claude mcp add --transport http \
-  --client-id <your-public-client-id> --callback-port 54765 \
-  sharpner https://<your-domain>/mcp
-```
+The public [setup guide](https://sharpner.app/agent-setup.md) covers native remote
+MCP and a local bridge for clients that can launch stdio servers.
 
 Clerk handles sign-in and OAuth consent. Every agent acts as a workspace member
 and uses that member's access. The [agent guide](docs/agents.md) covers client

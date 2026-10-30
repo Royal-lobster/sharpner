@@ -1,5 +1,5 @@
 import { CreateOrganization, OrganizationSwitcher, UserButton, useClerk } from "@clerk/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import type { AgentConnectionConfig, Me } from "./App";
 import { api, timeAgo, type FileSummary, type Workspace } from "./api";
 import { Link, navigate } from "./router";
@@ -212,32 +212,77 @@ function FileMenu({ file, onRename, onDelete }: { file: FileSummary; onRename: (
 
 function AgentSettings({ config, open, onOpenChange }: { config: AgentConnectionConfig; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [keysOpen, setKeysOpen] = useState(false);
+  const [promptOpen, setPromptOpen] = useState(false);
   const url = `${location.origin}/mcp`;
+  const guideUrl = `${location.origin}/agent-setup.md`;
+  const prompt = [
+    "Connect this agent to Sharpner.",
+    "",
+    `Setup guide: ${guideUrl}`,
+    `MCP endpoint: ${url}`,
+    "",
+    "1. Read the setup guide and identify the MCP host/client in this environment. Use its supported setup mechanism and preserve existing MCP server settings.",
+    "2. Configure Sharpner using the guide's native connection or local bridge instructions, whichever this client supports.",
+    "3. Start authentication separately. Guide me through any browser sign-in, consent, restart, or client UI steps that you cannot complete yourself.",
+    "4. Verify the connection by listing its tools and calling get_app_state. Report which workspaces are accessible.",
+    "5. If this environment cannot complete setup, explain the exact missing capability and the next step for me. Do not claim success until verified, and do not create or edit designs during setup.",
+  ].join("\n");
   const clientFlags = config.mcpClientId && config.mcpCallbackPort ? ` --client-id ${config.mcpClientId} --callback-port ${config.mcpCallbackPort}` : "";
   const cli = `claude mcp add --transport http${clientFlags} sharpner ${url}`;
-  const json = JSON.stringify({ mcpServers: { sharpner: { type: "http", url } } }, null, 2);
+  const bridge = config.mcpClientId && config.mcpCallbackPort ? {
+    command: "npx",
+    args: ["-y", "mcp-remote@0.15.2", url, String(config.mcpCallbackPort), "--callback-path", "/callback",
+      "--static-oauth-client-info", JSON.stringify({ client_id: config.mcpClientId }), "--transport", "http-only"],
+  } : null;
+  const json = JSON.stringify({ mcpServers: { sharpner: bridge ?? { type: "http", url } } }, null, 2);
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange} title="Connect an agent"
       description="Design with your agent and watch its changes appear live." className="agent-dialog sm:max-w-[500px]">
       <div className="flex min-w-0 flex-col gap-4">
-        <ItemGroup>
-          <Item role="listitem" className="items-start p-0">
-            <ItemMedia><Badge variant="outline" aria-label="Step 1">1</Badge></ItemMedia>
-            <ItemContent className="min-w-0 gap-2"><ItemTitle>Add Sharpner to Claude Code</ItemTitle><ItemDescription>This saves the connection. Sign in separately in the next step.</ItemDescription><CopyBlock label="Terminal" text={cli} /></ItemContent>
-          </Item>
-          <Item role="listitem" className="items-start p-0">
-            <ItemMedia><Badge variant="outline" aria-label="Step 2">2</Badge></ItemMedia>
-            <ItemContent className="min-w-0 gap-2"><ItemTitle>Start authentication</ItemTitle><ItemDescription>Run this in the same project directory.</ItemDescription><CopyBlock label="Terminal" text="claude mcp login sharpner" /><ItemDescription>Inside Claude Code, you can also use <code>/mcp</code> → <strong>sharpner</strong> → <strong>Authenticate</strong>.</ItemDescription></ItemContent>
-          </Item>
-          <Item role="listitem" className="items-start p-0">
-            <ItemMedia><Badge variant="outline" aria-label="Step 3">3</Badge></ItemMedia>
-            <ItemContent className="min-w-0"><ItemTitle>Approve access in your browser</ItemTitle><ItemDescription>Sign in to Sharpner and approve your agent’s access to your workspace files.</ItemDescription></ItemContent>
-          </Item>
-        </ItemGroup>
-        <Collapsible className="border-t pt-2">
-          <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">Using another agent? JSON config<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
-          <CollapsibleContent className="flex min-w-0 flex-col gap-3 pt-3"><p className="text-xs/relaxed text-muted-foreground">Other agents need a registered public OAuth client or an approved client metadata URL (CIMD).</p><CopyBlock label="mcp.json" text={json} pre /></CollapsibleContent>
-        </Collapsible>
+        <Tabs defaultValue="agent" className="min-w-0 gap-4">
+          <TabsList className="w-full" aria-label="Connection setup">
+            <TabsTrigger value="agent">Agent</TabsTrigger>
+            <TabsTrigger value="manual">Manual setup</TabsTrigger>
+          </TabsList>
+          <TabsContent value="agent" className="flex min-w-0 flex-col gap-4">
+            <div className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">Let your agent connect</h3>
+              <p className="m-0 text-xs leading-relaxed text-muted-foreground">Paste this prompt into your coding agent. It can set up the connection and guide you through sign-in.</p>
+            </div>
+            <CopyButton text={prompt} label="Copy setup prompt" variant="default" size="lg" className="w-full" />
+            <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
+              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">{promptOpen ? "Hide prompt" : "Show prompt"}<IconChevronDown className={promptOpen ? "rotate-180" : undefined} aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleContent className="pt-2"><pre className="m-0 max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{prompt}</pre></CollapsibleContent>
+            </Collapsible>
+          </TabsContent>
+          <TabsContent value="manual" className="flex min-w-0 flex-col gap-3">
+            <CopyBlock label="MCP endpoint" text={url} />
+            <p className="m-0 text-xs leading-relaxed text-muted-foreground">Use Streamable HTTP and sign in with OAuth through your client’s connection settings. The <a href={guideUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4">setup guide</a> covers native connections and a local bridge.</p>
+            <Collapsible className="border-t pt-2">
+              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">Claude Code commands<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleContent className="pt-3">
+                <ItemGroup>
+                  <Item role="listitem" className="items-start p-0">
+                    <ItemMedia><Badge variant="outline" aria-label="Step 1">1</Badge></ItemMedia>
+                    <ItemContent className="min-w-0 gap-2"><ItemTitle>Add Sharpner</ItemTitle><ItemDescription>This saves the connection. Sign in separately in the next step.</ItemDescription><CopyBlock label="Terminal" text={cli} /></ItemContent>
+                  </Item>
+                  <Item role="listitem" className="items-start p-0">
+                    <ItemMedia><Badge variant="outline" aria-label="Step 2">2</Badge></ItemMedia>
+                    <ItemContent className="min-w-0 gap-2"><ItemTitle>Start authentication</ItemTitle><ItemDescription>Run this in the same project directory.</ItemDescription><CopyBlock label="Terminal" text="claude mcp login sharpner" /><ItemDescription>Inside Claude Code, you can also use <code>/mcp</code> → <strong>sharpner</strong> → <strong>Authenticate</strong>.</ItemDescription></ItemContent>
+                  </Item>
+                  <Item role="listitem" className="items-start p-0">
+                    <ItemMedia><Badge variant="outline" aria-label="Step 3">3</Badge></ItemMedia>
+                    <ItemContent className="min-w-0"><ItemTitle>Approve access in your browser</ItemTitle><ItemDescription>Sign in to Sharpner and approve your agent’s access to your workspace files.</ItemDescription></ItemContent>
+                  </Item>
+                </ItemGroup>
+              </CollapsibleContent>
+            </Collapsible>
+            <Collapsible className="border-t pt-2">
+              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">{bridge ? "Local MCP bridge" : "JSON configuration"}<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleContent className="flex min-w-0 flex-col gap-3 pt-3"><p className="text-xs leading-relaxed text-muted-foreground">{bridge ? "For clients that can run local MCP servers. Requires Node.js and opens browser sign-in. Adapt this JSON to your client’s configuration format." : "Example for clients that read mcpServers JSON. Authentication also needs a compatible OAuth client and callback."}</p><CopyBlock label="mcp.json" text={json} pre /></CollapsibleContent>
+            </Collapsible>
+          </TabsContent>
+        </Tabs>
         {config.agentKeysEnabled && <Collapsible open={keysOpen} onOpenChange={setKeysOpen} className="border-t pt-2">
           <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">Use an agent key instead<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
           <CollapsibleContent className="pt-3">{keysOpen && <AgentKeys />}</CollapsibleContent>
@@ -256,14 +301,16 @@ function CopyBlock({ label, text, pre }: { label: string; text: string; pre?: bo
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, label = "Copy", variant = "ghost", size = "sm", className }: {
+  text: string; label?: string;
+} & Pick<ComponentProps<typeof Button>, "variant" | "size" | "className">) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
-  return <Button type="button" variant="ghost" size="sm" aria-live="polite" onClick={async () => {
+  return <Button type="button" variant={variant} size={size} className={className} aria-live="polite" onClick={async () => {
     try { await navigator.clipboard.writeText(text); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1400); }
     catch { toast("Could not copy. Select the text to copy it manually.", { tone: "error" }); }
-  }}>{copied ? <IconCheck aria-hidden /> : <IconCopy aria-hidden />}<span>{copied ? "Copied" : "Copy"}</span></Button>;
+  }}>{copied ? <IconCheck aria-hidden /> : <IconCopy aria-hidden />}<span>{copied ? "Copied" : label}</span></Button>;
 }
 
 type AgentKey = { id: string; name: string; created_at: number; last_used_at: number | null; expiration?: number | null; scopes?: string[] };

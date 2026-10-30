@@ -26,7 +26,7 @@
   "browser": { "binding": "BROWSER" },
   "observability": { "enabled": true },
   "vars": {
-    // Set these to your own registered public OAuth client to show the Claude Code command.
+    // Publish your registered public OAuth client and its loopback callback port for agent setup.
     "CLERK_MCP_CLIENT_ID": "",
     "CLERK_MCP_CALLBACK_PORT": ""
   }

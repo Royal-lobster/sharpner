@@ -2,9 +2,21 @@
 
 Agents use Sharpner's remote MCP endpoint to create files, arrange sections,
 write HTML, define tokens and components, and inspect rendered screenshots.
-Open **Connect an agent** in the workspace to copy the command for your deployment.
+Open **Connect an agent → Agent** in the workspace and copy the setup prompt
+into your coding agent. It identifies its own MCP host, configures the server,
+guides you through browser sign-in, and verifies access with `get_app_state`.
+The deployment serves a public [agent setup guide](../public/agent-setup.md) at
+`/agent-setup.md`; it reads public connection details from `/auth/config`, so
+self-hosted instances do not need a hard-coded client ID in the guide.
 
-Copy the command from **Connect an agent**. When a public Claude Code client is configured, it includes the registered client ID and callback port:
+The guide prefers compatible native OAuth and offers an `mcp-remote` stdio
+bridge for clients that can launch local MCP servers. Clients with neither
+capability still need a compatible OAuth registration. **Manual setup** keeps
+the endpoint and client-specific instructions available.
+
+For manual Claude Code setup, copy the command from **Connect an agent →
+Manual setup → Claude Code commands**. When a public client is configured,
+the command includes its registered client ID and callback port:
 
 ```sh
 claude mcp add --transport http --client-id <public-client-id> --callback-port 54765 sharpner https://<your-domain>/mcp
@@ -30,7 +42,12 @@ authentication guide](https://code.claude.com/docs/en/mcp#authenticate-from-the-
 The client ID and callback port are public configuration; no client secret or
 bearer header is needed.
 
-There is no Sharpner OAuth callback or token broker. Clerk handles authorization, PKCE, and token refresh. Other agents need their own registered public OAuth client or a CIMD metadata URL approved in Clerk; the JSON connection snippet alone does not register a client. Automatic client registration is disabled.
+There is no Sharpner OAuth callback or token broker. Clerk handles authorization,
+PKCE, and token refresh. Native clients can use a compatible registered public
+client or a CIMD metadata URL approved in Clerk; the JSON connection snippet
+alone does not register a client. Automatic client registration is disabled.
+The local bridge uses the existing public client with its fixed loopback port
+and `/callback` path.
 
 Discovery endpoints:
 
