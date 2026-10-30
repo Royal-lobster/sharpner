@@ -215,10 +215,9 @@ button { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 639px) {
   :root { --page-gutter: 16px; }
   .home-header-inner { gap: 0; }
-  .brand { width: 44px; height: 44px; }
   .home-header-divider { display: none; }
   .home-header .workspace-switcher { flex: 1; }
-  .home-header .workspace-trigger { max-width: 100%; min-height: 44px; padding: 2px 4px; }
+  .home-header .workspace-trigger { max-width: 100%; }
   .home-header-actions { gap: 0; }
   .home-main { padding-top: 20px; padding-bottom: calc(40px + var(--safe-bottom)); }
   .dashboard { gap: 20px; }
@@ -241,6 +240,7 @@ body:has(.editor) { --toast-offset: 84px; }
 /* Floating controls are spaced apart, so each keeps the design system's button radius. */
 .dock-bar > :is(button, a), .zoom > button { border-radius: var(--radius-md); }
 .dock-button { gap: 8px; min-width: 0; max-width: 240px; flex-shrink: 1; }
+.dock-file-button { justify-content: flex-start; }
 .dock-button > span:first-of-type { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .dock-chevron { flex: none; transition: transform 0.16s var(--ease); }
 .dock-page-button[aria-expanded=true] .dock-chevron { transform: rotate(180deg); }
@@ -278,7 +278,7 @@ body:has(.editor) { --toast-offset: 84px; }
 .person-row small { color: var(--muted-foreground); font-size: 11px; }
 .agent-presence { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 12px; }
 .agent-presence svg { width: 16px; height: 16px; }
-.dock-comments-button { flex: none; min-width: 44px; gap: 5px; }
+.dock-comments-button { flex: none; gap: 5px; }
 .dock-comments-button[aria-pressed=true] { color: var(--primary); background: var(--accent); }
 .dock-comments-count { font-size: 11px; font-variant-numeric: tabular-nums; }
 .canvas-help dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; margin: 0; font-size: 12px; }
@@ -298,18 +298,15 @@ body:has(.editor) { --toast-offset: 84px; }
 }
 @media (max-width: 700px) {
   .editor-dock { left: calc(10px + var(--safe-left)); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
-  .editor-navigation { top: calc(10px + var(--safe-top)); right: calc(10px + var(--safe-right)); bottom: auto; }
-  .editor-navigation .dock-bar { width: 100%; }
+  .editor-navigation { top: calc(10px + var(--safe-top)); bottom: auto; }
   .editor-collaboration { bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); max-width: calc(100% - 140px - var(--safe-left) - var(--safe-right)); }
-  .dock-file-button { flex: 1 1 0; }
+  .dock-file-button { flex: 1 1 auto; }
   .dock-page-button { flex: 0 1 auto; max-width: 44%; }
   .dock-share-divider, .dock-share-label { display: none; }
-  .dock-share-button { position: relative; flex: none; width: 44px; padding-inline: 0; }
+  .dock-share-button { position: relative; flex: none; }
   .dock-share-button .share-on-dot { position: absolute; top: 7px; right: 7px; }
-  .dock-people-button { min-width: 44px; gap: 4px; padding-inline: 8px; }
   .dock-people-button > .presence-dot { display: none; }
-  .dock-comments-button { padding-inline: 8px; }
-  .selection-pill { top: calc(76px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
+  .selection-pill { top: calc(64px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
   .selection-pill b { display: none; }
   .zoom { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); }
   .zoom .zoom-step, .zoom-divider { display: none; }
@@ -318,14 +315,9 @@ body:has(.editor) { --toast-offset: 84px; }
   .dock-popover { max-height: calc(100dvh - 48px - var(--keyboard)); }
   .zoom .zoom-step, .zoom-divider { display: none; }
 }
-/* Touch targets adapt together, while desktop components retain the preset sizes. */
-@media (pointer: coarse), (max-width: 640px) {
+/* Responsive layouts keep the same Mira component sizes and padding. */
+@media (max-width: 640px) {
   .page-actions { display: flex; }
-  [data-slot=button], [data-slot=dropdown-menu-trigger], [data-slot=dialog-close], [data-slot=drawer-close], [data-slot=alert-dialog-action], [data-slot=alert-dialog-cancel], [data-slot=tabs-trigger], .dock-button, .dock-bar .back { min-height: 44px; }
-  [data-slot=button][data-size^=icon], [data-slot=dropdown-menu-trigger], .dock-bar .back, .page-actions button { min-width: 44px; }
-  [data-slot=input], [data-slot=input-group-control], [data-slot=native-select] { min-height: 44px; font-size: 16px; }
-  [data-slot=input-group], [data-slot=tabs-list] { min-height: 44px; }
-  [data-slot=dropdown-menu-item] { min-height: 44px; }
 }
 /* Preserve canvas glass as a surface treatment on the preset components. */
 @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -419,11 +411,9 @@ body:has(.editor) { --toast-offset: 84px; }
 .comment-offline { flex: none; padding: 10px 16px; color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border); }
 .comment-placement { position: absolute; top: calc(16px + var(--safe-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 16px; max-width: calc(100% - 32px); padding: 8px 12px; border-radius: var(--radius-lg); background: var(--popover); font-size: 12px; z-index: 16; }
 @media (max-width: 700px) {
-  .stage.comments-open .canvas { bottom: calc(var(--comments-panel-height, 0px) + 80px + var(--safe-bottom) + var(--keyboard)); }
-  .comments-panel { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(80px + var(--safe-bottom) + var(--keyboard)); max-height: min(60dvh, calc(100dvh - 160px - var(--safe-top) - var(--safe-bottom) - var(--keyboard))); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
+  .stage.comments-open .canvas { bottom: calc(var(--comments-panel-height, 0px) + 64px + var(--safe-bottom) + var(--keyboard)); }
+  .comments-panel { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(64px + var(--safe-bottom) + var(--keyboard)); max-height: min(60dvh, calc(100dvh - 128px - var(--safe-top) - var(--safe-bottom) - var(--keyboard))); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
   .comment-placement { left: calc(10px + var(--safe-left)); right: calc(10px + var(--safe-right)); top: calc(68px + var(--safe-top)); transform: none; max-width: none; justify-content: space-between; }
-  .comment-pin { width: 36px; height: 36px; }
-  .comment-composer textarea { font-size: 16px; }
 }
 @media (min-width: 701px) and (max-width: 1000px) {
   .selection-pill, .comment-placement { top: calc(76px + var(--safe-top)); }
