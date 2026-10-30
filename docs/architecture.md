@@ -77,7 +77,7 @@ Component nodes show their real default instance directly on the file's backgrou
 
 Known limitations: the initial sync still includes geometry for the whole file, including other pages; HTML and image loading are lazy. Canvas-layer nodes paint beneath DOM-layer nodes, so overlapping nodes of very different on-screen sizes can stack incorrectly. Zoomed-out edits appear after the replacement thumbnail is ready. Generating new previews is separate from opening an existing file with previews ready.
 
-Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding.
+Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding. Responsive layouts retain the same Mira component sizes and padding; mobile changes rearrange controls and constrain widths, rather than enlarging buttons, tabs, inputs, or menus.
 
 Preview navigation locks panning at the fitted overview, which is also the minimum
 zoom. Above that zoom, panning is free on both axes so any part of a design can be

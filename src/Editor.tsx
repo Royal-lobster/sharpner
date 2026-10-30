@@ -282,7 +282,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people"
             trigger={<Button variant="ghost" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
               title={people.map((p) => p.id === user.id ? `${p.name} (you)` : p.name).join(", ") || "Reconnecting…"}>
-              <AvatarStack max={desktop ? 4 : 2} size={desktop ? 28 : 24}>{people.length
+              <AvatarStack max={desktop ? 4 : 2} size={28}>{people.length
                 ? people.map((p) => <Avatar key={p.id} id={p.id} name={p.name} src={p.avatar} />)
                 : <Avatar id={user.id} name={user.name} src={user.avatar_url} />}</AvatarStack>
               <span className={`presence-dot${room.status !== "open" ? " disconnected" : ""}`} aria-hidden />

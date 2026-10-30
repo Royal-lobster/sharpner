@@ -98,7 +98,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
             afterCreateOrganizationUrl="/" afterSelectOrganizationUrl="/"
             appearance={{ elements: { rootBox: "workspace-switcher", organizationSwitcherTrigger: "workspace-trigger", organizationPreviewMainIdentifier: "workspace-name", organizationPreviewAvatarBox: "workspace-avatar" } }} />
           <div className="home-header-actions">
-            <Button variant="ghost" className="max-sm:size-11 max-sm:p-0" onClick={() => setAgentOpen(true)} aria-label="Connect an agent" title="Connect an agent">
+            <Button variant="ghost" onClick={() => setAgentOpen(true)} aria-label="Connect an agent" title="Connect an agent">
               <IconTerminal2 aria-hidden /><span className="hidden sm:inline">Connect agent</span>
             </Button>
             <UserButton />
