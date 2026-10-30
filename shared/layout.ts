@@ -145,9 +145,8 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
   // page that has any keeps its automatic sections in one column, so tiling never grows sideways into them.
   const pages = new Map<string, CanvasNode[]>(), manual = new Set<string>();
   for (const f of frames) {
-    if (f.parentId) continue;
-    if (f.kind === "section" && f.layout === "auto") (pages.get(f.pageId) ?? pages.set(f.pageId, []).get(f.pageId)!).push(f);
-    else manual.add(f.pageId);
+    if (isManualRoot(f)) manual.add(f.pageId);
+    else if (!f.parentId) (pages.get(f.pageId) ?? pages.set(f.pageId, []).get(f.pageId)!).push(f);
   }
   for (const [pageId, roots] of pages) {
     const anchors = roots.filter((f) => !floating?.has(f.id));
@@ -164,6 +163,20 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
     }
   }
   return rects;
+}
+
+/** Top-level content placed by hand: a free section or a loose node. Its page keeps automatic sections in one column. */
+export const isManualRoot = (f: CanvasNode) => !f.parentId && !(f.kind === "section" && f.layout === "auto");
+
+/**
+ * How one page arranges its automatic top-level sections: tiled, stacked in one column because hand-placed
+ * content shares the page (`stackedBy`), or manual when nothing on it is automatic.
+ */
+export function pageArrangement(pageNodes: readonly CanvasNode[]) {
+  const automatic = pageNodes.some((f) => !f.parentId && !isManualRoot(f)), stackedBy = pageNodes.filter(isManualRoot);
+  if (!stackedBy.length) return { arrangement: "tiled" as const };
+  if (!automatic) return { arrangement: "manual" as const };
+  return { arrangement: "stacked" as const, stackedBy };
 }
 
 const isCatalog = (children: CanvasNode[]) => children.length > 0 && children.every((k) => k.kind === "component");

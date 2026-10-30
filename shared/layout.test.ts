@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
+import { AUTO_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, pageArrangement, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
 import type { CanvasNode } from "./types";
 
 const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
@@ -150,12 +150,16 @@ describe("automatic sections", () => {
     for (const seed of [7, 113, 997]) expect(layout(seed)).toEqual(before);
   });
 
-  it("keeps automatic sections in one column on a page with manual content", () => {
-    const tiled = [section("tokens", { order: 0 }), section("components", { order: 1 })];
+  it("keeps automatic sections in one column on a page with manual content, and says which content does it", () => {
+    const tiled = [section("tokens", { order: 0 }), section("components", { order: 1 }), node("button", { parentId: "components", kind: "component" })];
     expect(rectsOf(tiled).get("components")).toMatchObject({ x: 480 + SECTION_GAP, y: 0 });
+    expect(pageArrangement(tiled)).toEqual({ arrangement: "tiled" });
     for (const manual of [section("placed", { layout: "free", x: 640, y: 0 }), node("loose", { x: 640, y: 0 })]) {
       expect(rectsOf([...tiled, manual]).get("components")).toMatchObject({ x: 0, y: 280 + SECTION_GAP });
+      expect(pageArrangement([...tiled, manual])).toEqual({ arrangement: "stacked", stackedBy: [manual] });
     }
+    expect(pageArrangement([node("loose")])).toEqual({ arrangement: "manual" });
+    expect(pageArrangement([])).toEqual({ arrangement: "tiled" });
   });
 
   it("preserves legacy/free arrangements and every loose node", () => {
