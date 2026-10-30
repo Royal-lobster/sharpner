@@ -12,6 +12,14 @@ const expectCamera = (actual: Camera, expected: Camera) => {
 };
 
 describe("bounded preview navigation", () => {
+  it("lets a zoomed section be dragged down and right so its title clears the floating file controls", () => {
+    const nav = canvasNavigation([{ x: 0, y: 0, w: 2000, h: 4000 }], { w: 1200, h: 800 });
+    const panned = nav.constrain({ x: 180, y: 160, z: 1 });
+    // The section label is 24px above its bounds; the top-left pill ends at 54px.
+    expect(panned.y - 24).toBeGreaterThanOrEqual(54 + 16);
+    expect(panned.x).toBeGreaterThanOrEqual(120);
+  });
+
   it("makes the fitted overview the furthest zoom out and locks panning at that overview", () => {
     const nav = canvasNavigation([cluster], desktop);
     expect(nav.minZoom).toBeCloseTo((desktop.h - 128) / cluster.h);
@@ -22,28 +30,31 @@ describe("bounded preview navigation", () => {
     }
   });
 
-  it("stops at each edge while keeping all four edges reachable at higher zoom", () => {
+  it("allows free panning above the fitted overview, including beyond the content edges", () => {
     const nav = canvasNavigation([cluster], desktop);
-    const first = nav.constrain({ x: 1e10, y: 1e10, z: 1 });
-    expect(cluster.x + first.x).toBe(64);
-    expect(cluster.y + first.y).toBe(64);
-    const last = nav.constrain({ x: -1e10, y: -1e10, z: 1 });
-    expect(cluster.x + cluster.w + last.x).toBe(desktop.w - 64);
-    expect(cluster.y + cluster.h + last.y).toBe(desktop.h - 64);
-    expectCamera(nav.constrain(first), first);
-    expectCamera(nav.constrain(last), last);
-    // Reversing direction moves immediately; there is no accumulated overscroll to undo.
-    expect(nav.constrain({ ...first, x: first.x - 20 }).x).toBe(first.x - 20);
+    for (const z of [nav.minZoom * 1.01, 0.5, 1, MAX_CANVAS_ZOOM]) {
+      for (const x of [-1e10, 180, 1e10]) for (const y of [-1e10, 160, 1e10]) {
+        expectCamera(nav.constrain({ x, y, z }), { x, y, z });
+      }
+    }
   });
 
-  it("centers a narrow cluster horizontally while allowing vertical scrolling", () => {
+  it("allows any part of a zoomed page to be centered, including corners", () => {
+    const nav = canvasNavigation([cluster], desktop);
+    for (const point of [{ x: cluster.x, y: cluster.y }, { x: cluster.x + cluster.w, y: cluster.y + cluster.h }, { x: 0, y: 1000 }]) {
+      for (const z of [0.5, 1, 2]) {
+        const next = nav.constrain({ x: desktop.w / 2 - point.x * z, y: desktop.h / 2 - point.y * z, z });
+        expect(point.x * next.z + next.x).toBeCloseTo(desktop.w / 2);
+        expect(point.y * next.z + next.y).toBeCloseTo(desktop.h / 2);
+      }
+    }
+  });
+
+  it("also frees the axis where a narrow cluster still fits once zoomed in", () => {
     const narrow = { x: 900, y: -500, w: 200, h: 5000 };
     const nav = canvasNavigation([narrow], { w: 1000, h: 800 });
-    const first = nav.constrain({ x: 1e10, y: 1e10, z: 0.5 });
-    const last = nav.constrain({ x: -1e10, y: -1e10, z: 0.5 });
-    expect(first.x).toBe(last.x);
-    expect((narrow.x + narrow.w / 2) * first.z + first.x).toBe(500);
-    expect(first.y).not.toBe(last.y);
+    const requested = { x: 350, y: 250, z: 0.5 };
+    expectCamera(nav.constrain(requested), requested);
   });
 
   it("keeps small designs at 100% in the overview and still allows zooming in", () => {
@@ -54,13 +65,12 @@ describe("bounded preview navigation", () => {
     expect(nav.constrain({ ...nav.overview, z: 1000 }).z).toBe(MAX_CANVAS_ZOOM);
   });
 
-  it("bounds touch panning and pinching with the same policy as desktop navigation", () => {
+  it("allows zoomed touch panning and locks a pinch back to the overview", () => {
     const nav = canvasNavigation([cluster], desktop);
     const current = nav.constrain({ x: -500, y: -2000, z: 1 });
     const panned = applyTouch(current, { type: "pan", dx: 1e10, dy: -1e10 }, nav.minZoom, MAX_CANVAS_ZOOM);
     const bounded = nav.constrain(panned);
-    expect(cluster.x + bounded.x).toBe(64);
-    expect(cluster.y + cluster.h + bounded.y).toBe(desktop.h - 64);
+    expectCamera(bounded, panned);
     const pinched = applyTouch(current, { type: "pinch", scale: 0.000001, from: { x: 100, y: 300 }, to: { x: 140, y: 360 } }, nav.minZoom, MAX_CANVAS_ZOOM);
     expectCamera(nav.constrain(pinched), nav.overview);
   });
@@ -74,14 +84,20 @@ describe("bounded preview navigation", () => {
     expect((to.y - next.y) / next.z).toBeCloseTo((from.y - current.y) / current.z);
   });
 
-  it("keeps phone navigation clear of the top controls and bottom dock", () => {
+  it("allows phone panning above the overview and restores its safe margins at Fit", () => {
     const nav = canvasNavigation([cluster], { w: 390, h: 844 });
-    const first = nav.constrain({ x: 1e10, y: 1e10, z: 1 });
-    const last = nav.constrain({ x: -1e10, y: -1e10, z: 1 });
-    expect(cluster.x + first.x).toBe(20);
-    expect(cluster.y + first.y).toBe(68);
-    expect(cluster.x + cluster.w + last.x).toBe(370);
-    expect(cluster.y + cluster.h + last.y).toBe(752);
+    const requested = { x: 190, y: 300, z: 1 };
+    expectCamera(nav.constrain(requested), requested);
+    expectCamera(nav.constrain({ ...requested, z: nav.minZoom }), nav.overview);
+    expect(cluster.y * nav.overview.z + nav.overview.y).toBeGreaterThanOrEqual(68);
+  });
+
+  it("centers invalid saved offsets at the requested zoom without losing valid offsets", () => {
+    const nav = canvasNavigation([cluster], desktop);
+    const next = nav.constrain({ x: NaN, y: Infinity, z: 2 });
+    expect((cluster.x + cluster.w / 2) * next.z + next.x).toBeCloseTo(desktop.w / 2);
+    expect((cluster.y + cluster.h / 2) * next.z + next.y).toBeCloseTo(desktop.h / 2);
+    expect(nav.constrain({ x: 180, y: NaN, z: 2 }).x).toBe(180);
   });
 
   it("recovers old saved positions after resize, layout shrinkage and deletion", () => {
