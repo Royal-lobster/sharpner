@@ -33,7 +33,7 @@ Workflow:
    To find your way around a file, call list_pages (page and section descriptions), then get_file with pageId for just the part you need.
 2. For product work (an app/site with several screens), read_guide("design-system") once, then get_design_system. Reuse the existing system or the workspace library (set_library); otherwise set one up on a "Design System" page: token sheet, then components, then screens. One-off files can skip this.
 3. read_guide("screens") before designing screens. One frame per screen/state, in sections per flow, left to right.
-4. Use only tokens and component instances for styling; promote repeated markup into components.
+4. Use only tokens and component instances for styling; promote repeated markup into components. Before removing, renaming or reshaping a component, check its uses with find_instances.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
 6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
 7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.`;
@@ -247,7 +247,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "The tokens and components available to a file's frames (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, and where it is defined.",
+    description: "The tokens and components available to a file's frames (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, where it is defined, and `uses`: how many frames and components in this file use it directly. Call find_instances before removing or reshaping a component.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -264,7 +264,9 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     };
     const own = await describe(file.id, "file");
     const lib = design.library ? (await describe(design.library.fileId, "library")).filter((c) => !own.some((o) => o.tag === c.tag)) : [];
-    const components = [...lib, ...own];
+    const uses = new Map<string, number>();
+    for (const { tag } of await stub.instances()) uses.set(tag, (uses.get(tag) ?? 0) + 1);
+    const components = [...lib, ...own].map((c) => ({ ...c, uses: uses.get(c.tag) ?? 0 }));
     return json({
       library: design.library,
       tokens: tokenNames(design.tokens),
@@ -272,6 +274,27 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       components,
       ...(!design.tokens && !components.length ? { hint: "This file has no design system yet. For product work, read_guide('design-system') and set one up (or set_library to a workspace library)." } : {}),
     });
+  });
+
+  server.registerTool("find_instances", {
+    description: "Where a component is used: every frame or component whose HTML contains its tag, in this file and in workspace files that use this file as their library (unless they define their own component with that tag). Use before removing, renaming or reshaping a component. Lists direct uses; a component entry means it is used inside another component.",
+    inputSchema: { fileId: z.string(), component: z.string().describe("Tag (x-button-primary) or component name (Button/Primary)") },
+    annotations: { readOnlyHint: true },
+  }, async ({ fileId, component }) => {
+    const { file } = await access(fileId);
+    const tag = /^<?x-/i.test(component) ? component.replace(/[<>]/g, "").toLowerCase() : componentTag(component);
+    const { results: dependents } = await env.DB.prepare(`SELECT id FROM files WHERE library_id = ?`).bind(file.id).all<{ id: string }>();
+    const files = [file, ...(await Promise.all(dependents.map((d) => fileFor(env, user.id, d.id)))).filter((f) => f !== null)];
+    const instances = (await Promise.all(files.map(async (f) => {
+      const s = room(env, f.id);
+      const [found, pages, nodes] = await Promise.all([s.instances(), s.pages(), f.id === file.id ? [] : s.nodes()]);
+      // A dependent's own component with the same tag replaces the library's there.
+      if (nodes.some((n) => n.kind === "component" && componentTag(n.name) === tag)) return [];
+      return found.filter((i) => i.tag === tag).map(({ tag: _tag, id, ...node }) => ({
+        fileId: f.id, fileName: f.name, pageId: node.pageId, pageName: pages.find((p) => p.id === node.pageId)?.name ?? null, nodeId: id, name: node.name, kind: node.kind,
+      }));
+    }))).flat();
+    return json({ tag, total: instances.length, instances });
   });
 
   server.registerTool("create_page", {
@@ -418,7 +441,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("update_nodes", {
-    description: "Update nodes or sections. height null = fit content. Auto sections derive positions from order and current measured heights: omit x/y, use order to reorder siblings. Set section layout 'auto' to arrange an existing group, or 'free' to preserve its current positions for manual placement. Free-section x/y move its visible top-left and contents. sectionId moves a node into/out of a section (null = out), pageId to another page.",
+    description: "Update nodes or sections. height null = fit content. Auto sections derive positions from order and current measured heights: omit x/y, use order to reorder siblings. Set section layout 'auto' to arrange an existing group, or 'free' to preserve its current positions for manual placement. Free-section x/y move its visible top-left and contents. sectionId moves a node into/out of a section (null = out), pageId to another page (without x/y it lands right of that page's content).",
     inputSchema: {
       fileId: z.string(),
       updates: z.array(z.object({
@@ -443,10 +466,21 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const missing = updates.filter((update) => !nodesById.has(update.nodeId)).map((update) => update.nodeId);
     if (missing.length) throw new Error(`Nodes not found: ${missing.join(", ")}`);
     const rects = layoutRects(all, (n) => layoutHeight(n));
+    const arrivals: CanvasNode[] = [];
     await apply(updates.map(({ nodeId, sectionId, ...patch }) => {
       const cur = nodesById.get(nodeId)!;
       const node = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as NodeInput;
       if (sectionId !== undefined) node.parentId = sectionId;
+      // Moving loose to another page without coordinates: land to the right of that page's content (and of
+      // anything moved there in this call) instead of reusing a position from the old page. Automatic
+      // sections join that page's arrangement instead, so their stored position must not move its origin.
+      const joinsLayout = cur.kind === "section" && (patch.layout ?? cur.layout) === "auto";
+      if (patch.pageId !== undefined && patch.pageId !== cur.pageId && !sectionId && !joinsLayout && patch.x === undefined && patch.y === undefined) {
+        const target = [...all.filter((n) => n.pageId === patch.pageId), ...arrivals.filter((n) => n.pageId === patch.pageId)];
+        Object.assign(node, placement(target, null, 160));
+        const r = rects.get(cur.id)!;
+        arrivals.push({ ...cur, id: `${cur.id}:arrival`, kind: "frame", parentId: null, pageId: patch.pageId, x: node.x!, y: node.y!, width: r.w, height: r.h });
+      }
       // A section's x/y refer to its visible bounds; the whole section moves with its contents.
       const reparented = sectionId !== undefined && sectionId !== cur.parentId || patch.pageId !== undefined && patch.pageId !== cur.pageId;
       const relayout = patch.layout !== undefined && patch.layout !== cur.layout;

@@ -183,6 +183,14 @@ export class FileRoom extends DurableObject<Env> {
     };
   }
 
+  /** Direct component instances in this file's frames and components: one entry per using node and tag. */
+  instances(): { tag: string; id: string; name: string; kind: NodeKind; pageId: string }[] {
+    const rows = this.sql.exec<{ id: string; name: string; kind: NodeKind; pageId: string; source: string }>(
+      `SELECT id, name, kind, page_id AS pageId, source FROM nodes WHERE kind IN ('frame', 'component') AND instr(lower(source), '<x-') > 0 ORDER BY sort, id`,
+    ).toArray();
+    return rows.flatMap(({ source, ...node }) => [...new Set(instanceTags(source))].map((tag) => ({ tag, ...node })));
+  }
+
   /** What this file's frames render with: its library's design system overridden by its own. */
   async designSystem(): Promise<DesignSystem & { library: { fileId: string; name: string } | null }> {
     const lib = await this.libraryInfo();
@@ -788,6 +796,8 @@ const meta = <T extends CanvasNode>(row: T): T => {
   if (!row.description) delete row.description;
   return row;
 };
+/** Exact custom-element tags opened in HTML, so `<x-button>` doesn't count as `<x-button-primary>`. */
+const instanceTags = (html: string) => [...html.matchAll(/<(x-[a-z0-9-]+)(?=[\s/>])/gi)].map((m) => m[1]!.toLowerCase());
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0);
 const source = (v: unknown) => {
   const s = str(v);

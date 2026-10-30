@@ -78,12 +78,13 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `set_library` | Link or remove a file's workspace library |
 | `list_pages` | A file's table of contents: page and section descriptions with design counts |
 | `get_file` | Pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
-| `get_design_system` | Merged token CSS, component tags, props, slots, and definition locations |
+| `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
+| `find_instances` | Frames and components using a component, here and in files using this one as a library |
 | `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes |
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
-| `update_nodes` | Update up to 50 nodes or sections, including geometry, source, page, and grouping |
+| `update_nodes` | Update up to 50 nodes or sections, including geometry, source, page, and grouping; a loose node moved to another page without x/y lands right of its content |
 | `edit_node_source` | Ordered find/replace edits, with unique matches unless `all` is set |
 | `delete_nodes` | Delete nodes; deleting a section also deletes its contents |
 | `upload_image` | Upload from a URL or base64 and return a permanent URL |

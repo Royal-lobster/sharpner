@@ -172,3 +172,18 @@ describe("page and section descriptions", () => {
     expect(room.node("legacy-section")).not.toHaveProperty("description");
   });
 });
+
+describe("component instances", () => {
+  it("finds exact tags once per using frame or component", () => {
+    const { room, put, pageId } = fixture();
+    put("button", { kind: "component", name: "Button", source: "<button><slot></slot></button>" });
+    put("primary", { kind: "component", name: "Button/Primary", source: "<x-button>Go</x-button>" });
+    put("screen", { name: "Checkout", source: '<main><X-Button-Primary label="Pay"></X-Button-Primary><x-button>A</x-button><x-button/></main>' });
+    put("plain", { source: "<p>x-button is mentioned, not used</p>" });
+    expect(room.instances()).toEqual([
+      { tag: "x-button", id: "primary", name: "Button/Primary", kind: "component", pageId },
+      { tag: "x-button-primary", id: "screen", name: "Checkout", kind: "frame", pageId },
+      { tag: "x-button", id: "screen", name: "Checkout", kind: "frame", pageId },
+    ]);
+  });
+});
