@@ -142,6 +142,15 @@ describe("cached canvas layout", () => {
     expect(layout.page("page_one").rects.get("replacement")).toEqual({ x: -40, y: 20, w: 100, h: 200 });
   });
 
+  it("keeps zoomed panning free while cached navigation still locks the fitted overview", () => {
+    start([node("section", { kind: "section", x: 0, y: 0 }), node("screen", { width: 2000, height: 4000 })]);
+    const layout = new CanvasLayout(room), view = layout.navigation("page_one", viewport);
+    const requested = { x: 180, y: 160, z: 1 };
+    expect(view.navigation.constrain(requested)).toEqual(requested);
+    expect(layout.navigation("page_one", viewport)).toBe(view);
+    expect(view.navigation.constrain({ x: 1e10, y: -1e10, z: view.navigation.minZoom })).toEqual(view.navigation.overview);
+  });
+
   it("uses live heights and drops stale heights after a source revision or reconnect", () => {
     const frame = node("auto", { height: null, measuredHeight: 200 });
     const socket = start([frame]), layout = new CanvasLayout(room);
