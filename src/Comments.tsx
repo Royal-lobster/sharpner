@@ -18,6 +18,7 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const panel = useRef<HTMLElement>(null);
   const messages = useRef<HTMLDivElement>(null);
@@ -63,12 +64,14 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
     if (messages.current) messages.current.scrollTop = messages.current.scrollHeight;
   }, [detail?.id, detail?.messages.length]);
 
-  const resolve = async () => {
-    if (!active || busy) return;
+  const resolve = async (thread: CommentThread, fromList = false) => {
+    if (busy || !online) return;
     setBusy(true);
     try {
-      const next = await room.resolveComment(active.id, active.resolvedAt === null);
-      setDetail((current) => current?.id === next.id && current.revision > next.revision ? current : next);
+      const next = await room.resolveComment(thread.id, thread.resolvedAt === null);
+      if (activeId === thread.id) setDetail((current) => current?.id === next.id && current.revision > next.revision ? current : next);
+      setAnnouncement(next.resolvedAt ? `Comment #${next.number} resolved` : `Comment #${next.number} reopened`);
+      if (fromList) requestAnimationFrame(() => panel.current?.querySelector<HTMLButtonElement>(".comment-card-open, .comment-filters button[aria-pressed=true]")?.focus({ preventScroll: true }));
     }
     catch (e) { toast((e as Error).message, { tone: "error" }); }
     finally { setBusy(false); }
@@ -80,6 +83,7 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
   const currentDetail = detail?.id === active?.id ? detail : null;
 
   return <aside ref={panel} id="comments-panel" hidden={!open} className="comments-panel canvas-glass" aria-label="Comments" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onClose(); } }} onPointerDown={(e) => e.stopPropagation()}>
+    <p className="sr-only" role="status">{announcement}</p>
     <header className="comments-heading">
       <h2>Comments <span className="comment-count">{openCount}</span></h2>
       <div className="flex gap-1">
@@ -96,7 +100,7 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
     </div> : active ? <>
       <div className="comment-thread-toolbar">
         <Button variant="ghost" size="sm" onClick={() => onSelect(null)}><IconArrowLeft aria-hidden />All comments</Button>
-        <Button variant={active.resolvedAt ? "secondary" : "ghost"} size="sm" disabled={busy || !online} onClick={() => void resolve()}>
+        <Button variant="secondary" size="sm" disabled={busy || !online} onClick={() => void resolve(active)}>
           {active.resolvedAt ? <IconRefresh aria-hidden /> : <IconCheck aria-hidden />}{active.resolvedAt ? "Reopen" : "Resolve"}
         </Button>
       </div>
@@ -126,12 +130,19 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
         <Button variant={filter === "resolved" ? "secondary" : "ghost"} size="sm" aria-pressed={filter === "resolved"} onClick={() => setFilter("resolved")}>Resolved <span>{threads.length - openCount}</span></Button>
       </div>
       <div className="comment-list">
-        {threads.filter((t) => (t.resolvedAt === null) === (filter === "open")).sort((a, b) => b.updatedAt - a.updatedAt || b.number - a.number).map((thread) => <button className="comment-card" key={thread.id} onClick={() => onSelect(thread)}>
-          <span className="comment-card-top"><strong>{thread.firstMessage.author.name}</strong><span>#{thread.number}</span></span>
-          <span className="comment-card-body">{thread.firstMessage.body}</span>
-          <span className="comment-card-meta">{label(thread.anchor)}</span>
-          <span className="comment-card-meta">{timeAgo(thread.updatedAt)}{thread.messageCount > 1 && ` · ${thread.messageCount - 1} ${thread.messageCount === 2 ? "reply" : "replies"}`}</span>
-        </button>)}
+        {threads.filter((t) => (t.resolvedAt === null) === (filter === "open")).sort((a, b) => b.updatedAt - a.updatedAt || b.number - a.number).map((thread) => <div className="comment-card" key={thread.id}>
+          <button className="comment-card-open" onClick={() => onSelect(thread)}>
+            <span className="comment-card-top"><strong>{thread.firstMessage.author.name}</strong><span>#{thread.number}</span></span>
+            <span className="comment-card-body">{thread.firstMessage.body}</span>
+            <span className="comment-card-meta">{label(thread.anchor)}</span>
+            <span className="comment-card-meta">{timeAgo(thread.updatedAt)}{thread.messageCount > 1 && ` · ${thread.messageCount - 1} ${thread.messageCount === 2 ? "reply" : "replies"}`}</span>
+          </button>
+          <Button variant="ghost" size="icon-sm" className="comment-card-resolve" disabled={busy || !online}
+            aria-label={`${thread.resolvedAt ? "Reopen" : "Resolve"} comment ${thread.number}`} title={thread.resolvedAt ? "Reopen comment" : "Resolve comment"}
+            onClick={() => void resolve(thread, true)}>
+            {thread.resolvedAt ? <IconRefresh aria-hidden /> : <IconCheck aria-hidden />}
+          </Button>
+        </div>)}
         {!threads.some((t) => (t.resolvedAt === null) === (filter === "open")) && <div className="comments-empty">
           <IconMessageCircle aria-hidden /><p>{filter === "open" ? "No open comments" : "No resolved comments"}</p>
           <span>{filter === "open" ? "Pin feedback anywhere on the canvas. Ask your agent to address it when you’re ready." : "Resolved conversations will stay here."}</span>
