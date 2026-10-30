@@ -44,6 +44,8 @@ export class Room {
   dataRevision = 0;
   /** Cached source contents; separate from geometry and presence. */
   sourceRevision = 0;
+  /** Comment summaries change navigation bounds independently of node geometry and cursor traffic. */
+  commentsRevision = 0;
 
   private ws: WebSocket | null = null;
   private listeners = new Set<() => void>();
@@ -173,6 +175,7 @@ export class Room {
         const comments = new Map((msg.comments ?? []).map((t) => [t.id, t]));
         for (const id of this.comments.keys()) if (!comments.has(id)) this.deletedComments.add(id);
         this.comments = comments;
+        this.commentsRevision++;
         this.library = msg.library;
         this.designNodes = new Map(msg.nodes.filter(isDesignNode).map((node) => [node.id, node]));
         this.designRevision++;
@@ -247,7 +250,10 @@ export class Room {
         break;
       case "comments":
         for (const thread of msg.threads) this.upsertComment(thread);
-        for (const id of msg.deleted ?? []) { this.comments.delete(id); this.deletedComments.add(id); }
+        for (const id of msg.deleted ?? []) {
+          if (this.comments.delete(id)) this.commentsRevision++;
+          this.deletedComments.add(id);
+        }
         break;
     }
     this.emit();
@@ -396,6 +402,7 @@ export class Room {
     if ((this.comments.get(thread.id)?.revision ?? 0) > thread.revision) return;
     const { messages: _messages, ...summary } = thread as CommentDetail;
     this.comments.set(thread.id, summary);
+    this.commentsRevision++;
   }
 
   getComment(id: string, signal?: AbortSignal) {

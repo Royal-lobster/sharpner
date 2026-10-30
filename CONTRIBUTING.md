@@ -66,6 +66,11 @@ Worker resource types; `worker/env.d.ts` declares the secrets and optional brows
 binding without requiring local credentials. CI runs these same checks from
 the example configuration; it does not need Clerk secrets or a Cloudflare token.
 
+`pnpm test:stress` runs the optional canvas-layout stress suite with one worker.
+It covers 50,000-node pages, edit bursts, nested sections, 10,000 comments, repeated
+page visits and reconnect snapshots. The normal test suite skips these larger
+workloads and keeps the cache-invalidation regression tests.
+
 For UI changes, also check the actual app at desktop and narrow mobile widths,
 keyboard navigation, focus restoration, and reduced-motion settings. Capture
 interaction changes in a short video when useful. Keep verification media outside
