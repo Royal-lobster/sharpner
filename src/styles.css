@@ -256,23 +256,12 @@ body:has(.editor) { --toast-offset: 84px; }
 .page-option { justify-content: space-between; flex: 1; min-width: 0; }
 .page-actions { opacity: 0; padding-right: 4px; }
 .page-item:hover .page-actions, .page-item:focus-within .page-actions { opacity: 1; }
-.file-name { width: 100%; }
-.dock-file-heading { display: flex; flex-direction: column; gap: 8px; }
-.dock-file-heading small { color: var(--muted-foreground); }
-.file-title { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
-.view-only-note { display: flex; gap: 10px; margin: 0; font-size: 12px; color: var(--muted-foreground); }
 .dock-presence { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.dock-help { border-top: 1px solid var(--border); padding-top: 4px; }
-.dock-help-trigger { width: 100%; justify-content: space-between; }
-.dock-help-trigger[data-state=open] > svg { transform: rotate(180deg); }
-.dock-help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 14px; margin: 8px 0 4px; font-size: 12px; }
-.dock-help dd { margin: 0; color: var(--muted-foreground); }
-.dock-help p { font-size: 12px; color: var(--muted-foreground); }
+.canvas-help dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; margin: 0; font-size: 12px; }
+.canvas-help dd { margin: 0; color: var(--muted-foreground); }
+.canvas-help p { margin-bottom: 0; font-size: 12px; color: var(--muted-foreground); }
 .touch-help { display: none; }
 .share { display: flex; flex-direction: column; gap: 12px; }
-.share-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12px; }
-.share-state { color: var(--muted-foreground); text-align: right; }
-.share-state.on { color: var(--primary); }
 .share-on-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
 .share-actions { display: flex; gap: 8px; }
 .share-url { min-width: 0; font-family: var(--font-mono); text-overflow: ellipsis; }
@@ -288,7 +277,9 @@ body:has(.editor) { --toast-offset: 84px; }
   .dock-bar { width: 100%; }
   .dock-file-button { flex: 1 1 0; }
   .dock-page-button { flex: 0 1 auto; max-width: 44%; }
-  .dock-share-button, .dock-share-divider { display: none; }
+  .dock-share-divider, .dock-share-label { display: none; }
+  .dock-share-button { position: relative; flex: none; width: 44px; padding-inline: 0; }
+  .dock-share-button .share-on-dot { position: absolute; top: 7px; right: 7px; }
   .selection-pill { top: calc(10px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 150px - var(--safe-left) - var(--safe-right)); }
   .selection-pill b { display: none; }
   .zoom { top: calc(10px + var(--safe-top)); right: calc(10px + var(--safe-right)); bottom: auto; }

@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronUp as ChevronUp, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronUp as ChevronUp, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, colorFor, type FileInfo, type User, type Workspace } from "./api";
 import { Canvas } from "./Canvas";
 import { Room } from "./room";
 import { Link } from "./router";
-import { askConfirm } from "./dialog";
+import { askConfirm, askText, ResponsiveDialog } from "./dialog";
 import { Loading, Notice } from "./states";
 import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,10 +19,10 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Separator } from "@/components/ui/separator";
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Item, ItemGroup, ItemActions } from "@/components/ui/item";
-import { Avatar as AvatarRoot, AvatarImage, AvatarFallback, AvatarBadge, AvatarGroup } from "@/components/ui/avatar";
+import { Avatar as AvatarRoot, AvatarImage, AvatarFallback, AvatarBadge, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { Kbd } from "@/components/ui/kbd";
 
 type FileMeta = { user: User; file: FileInfo; workspace: Workspace; files: { id: string; name: string }[]; shareToken: string | null };
@@ -97,6 +97,9 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const [selection, setSelection] = useState<string[]>([]);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [open, setOpen] = useState<"pages" | "file" | "share" | null>(null);
+  const [dialog, setDialog] = useState<"library" | "help" | null>(null);
+  const fileTrigger = useRef<HTMLButtonElement>(null);
+  const pendingFileAction = useRef<(() => void) | null>(null);
   const cancelRename = useRef(false);
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
@@ -124,11 +127,13 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     setRenaming(id);
   };
 
-  const setLibrary = async (libraryId: string | null) => {
-    await api(`/files/${file.id}`, { method: "PATCH", json: { libraryId } });
-    onChange({ library_id: libraryId });
-    const name = meta.files.find((f) => f.id === libraryId)?.name;
-    toast(name ? `Using ${name}'s design system` : "Library removed: using this file's own design system", { tone: "success" });
+  const renameFile = async () => {
+    const name = await askText({ title: "Rename file", label: "File name", initial: file.name, confirm: "Rename" });
+    if (!name || name === file.name) return;
+    try {
+      await api(`/files/${file.id}`, { method: "PATCH", json: { name } });
+      onChange({ name });
+    } catch (error) { toast((error as Error).message, { tone: "error" }); }
   };
 
   // One avatar per person, even with several tabs open.
@@ -145,8 +150,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     });
     if (ok) room.send([{ t: "page.del", id: p.id }]);
   };
-  const shareLink = <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />;
-
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className="stage">
@@ -169,68 +172,32 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           ) : (
             <Button variant="ghost" size="icon" asChild className="back"><Link href={`/?workspace=${workspace.id}`} aria-label="All files"><img src="/mark.svg" width={24} height={24} alt="" /></Link></Button>
           )}
-          <DockPanel label={readOnly ? "File" : "File options"} open={open === "file"} onOpenChange={toggle("file")} className="dock-file"
-            trigger={
-              <Button variant="ghost" className="dock-button dock-file-button">
+          <DropdownMenu open={open === "file"} onOpenChange={toggle("file")}>
+            <DropdownMenuTrigger asChild>
+              <Button ref={fileTrigger} variant="ghost" className="dock-button dock-file-button" aria-label={`File menu for ${file.name}`} title={`${file.name} · ${status}`}>
                 <span>{file.name}</span>
                 <span className={`status dock-status ${room.status}`} aria-hidden />
                 <ChevronDown className="dock-chevron size-3" aria-hidden />
               </Button>
-            }>
-            <div className="dock-file-heading">
-              {readOnly ? <p className="file-title">{file.name}</p> : (
-                <Input className="file-name" aria-label="File name" defaultValue={file.name} onBlur={(e) => {
-                  const name = e.target.value.trim();
-                  if (name && name !== file.name) api(`/files/${file.id}`, { method: "PATCH", json: { name } }).then(() => onChange({ name }));
-                }} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} enterKeyHint="done" />
-              )}
-              <small>{workspace.name}</small>
-            </div>
-            {readOnly ? (
-              <p className="view-only-note"><span className={`status ${room.status}`} aria-hidden />View only. Changes appear here live as the team and their agents work.</p>
-            ) : (
-              <>
-                <Field>
-                  <FieldLabel htmlFor="file-library">Library</FieldLabel>
-                  <NativeSelect id="file-library" className="w-full" value={file.library_id ?? ""} onChange={(e) => void setLibrary(e.target.value || null)} aria-describedby="file-library-hint">
-                    <NativeSelectOption value="">None (own design system)</NativeSelectOption>
-                    {meta.files.map((f) => <NativeSelectOption key={f.id} value={f.id}>{f.name}</NativeSelectOption>)}
-                  </NativeSelect>
-                  <FieldDescription id="file-library-hint">Use another file’s tokens and components in this file.</FieldDescription>
-                </Field>
-                {shareLink}
-                <div className="dock-presence">
-                  <AvatarGroup>
-                    <Avatar name={user.name} id={user.id} src={user.avatar_url} title={`${user.name} (you)`} />
-                    {peers.map((p) => <Avatar key={p.cid} name={p.name} id={p.id} src={p.avatar} />)}
-                    {room.agentActivity.size > 0 && <Avatar name="Agent" id="agent" src={null} title="An agent is editing" agent />}
-                  </AvatarGroup>
-                  <span className={`status ${room.status}`} role="status">{status}</span>
-                </div>
-              </>
-            )}
-            <Help className="touch-help" title="Touch gestures">
-              <dl>
-                <dt>Pan</dt><dd>Drag with one finger</dd>
-                <dt>Zoom</dt><dd>Pinch with two fingers</dd>
-                {!readOnly && <><dt>Select</dt><dd>Tap a design to show it to agents</dd></>}
-                <dt>Fit</dt><dd>Fit button, or double-tap a design</dd>
-              </dl>
-              {!readOnly && <p>Designs can’t be moved by touch, so navigating never rearranges a page.</p>}
-            </Help>
-            <Help className="keyboard-help" title="Keyboard shortcuts">
-              <dl>
-                <dt>Pan</dt><dd>Drag, scroll, or hold Space</dd>
-                <dt>Zoom</dt><dd>Pinch, <Kbd>⌘</Kbd> scroll, <Kbd>⌘+</Kbd> / <Kbd>⌘−</Kbd></dd>
-                <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
-                {!readOnly && <>
-                  <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag</dd>
-                  <dt>Images</dt><dd>Drop or paste</dd>
-                  <dt>Delete</dt><dd>⌫</dd>
-                </>}
-              </dl>
-            </Help>
-          </DockPanel>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side="top" align="start" sideOffset={10} collisionPadding={16} className="canvas-glass w-56" aria-label="File actions"
+              onCloseAutoFocus={(event) => {
+                const action = pendingFileAction.current;
+                if (!action) return;
+                // Open the dialog after the menu closes, with the persistent trigger as its focus-return target.
+                event.preventDefault();
+                pendingFileAction.current = null;
+                fileTrigger.current?.focus();
+                action();
+              }}>
+              {readOnly ? <DropdownMenuLabel>View only</DropdownMenuLabel> : <>
+                <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => void renameFile(); }}><Pencil aria-hidden />Rename file…</DropdownMenuItem>
+                {(meta.files.length > 0 || file.library_id) && <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("library"); }}><IconLibrary aria-hidden />Design system…</DropdownMenuItem>}
+                <DropdownMenuSeparator />
+              </>}
+              <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("help"); }}><IconKeyboard aria-hidden />Canvas controls</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <span className="sr-only" role="status">{status}</span>
           <Separator orientation="vertical" className="dock-divider" />
           <DockPanel label="Pages" count={room.pages.length} open={open === "pages"} onOpenChange={toggle("pages")} className="dock-pages"
@@ -273,16 +240,53 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             <Separator orientation="vertical" className="dock-divider dock-share-divider" />
             <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share"
               trigger={
-                <Button variant="ghost" className="dock-button dock-share-button">
+                <Button variant="ghost" className="dock-button dock-share-button" aria-label="Share file">
                   <Link2 className="size-4" aria-hidden />
-                  <span>Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
+                  <span className="dock-share-label">Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
                 </Button>
               }>
-              {shareLink}
+              <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />
+              {(peers.length > 0 || room.agentActivity.size > 0) && <>
+                <Separator />
+                <div className="dock-presence">
+                  <span className="text-xs text-muted-foreground">In this file</span>
+                  <AvatarGroup>
+                    {peers.slice(0, 4).map((p) => <Avatar key={p.cid} name={p.name} id={p.id} src={p.avatar} />)}
+                    {peers.length > 4 && <AvatarGroupCount title={peers.slice(4).map((p) => p.name).join(", ")}>+{peers.length - 4}</AvatarGroupCount>}
+                    {room.agentActivity.size > 0 && <Avatar name="Agent" id="agent" src={null} title="An agent is editing" agent />}
+                  </AvatarGroup>
+                </div>
+              </>}
             </DockPanel>
           </>}
         </ButtonGroup></nav>
       </div>
+      {!readOnly && <LibraryDialog file={file} files={meta.files} open={dialog === "library"} onOpenChange={(next) => setDialog(next ? "library" : null)} onChange={(libraryId) => onChange({ library_id: libraryId })} />}
+      <ResponsiveDialog title="Canvas controls" open={dialog === "help"} onOpenChange={(next) => setDialog(next ? "help" : null)}>
+        <div className="canvas-help">
+          <div className="touch-help">
+            <dl>
+              <dt>Pan</dt><dd>Drag with one finger</dd>
+              <dt>Zoom</dt><dd>Pinch with two fingers</dd>
+              {!readOnly && <><dt>Select</dt><dd>Tap a design to show it to agents</dd></>}
+              <dt>Fit</dt><dd>Fit button, or double-tap a design</dd>
+            </dl>
+            {!readOnly && <p>Designs can’t be moved by touch, so navigating never rearranges a page.</p>}
+          </div>
+          <div className="keyboard-help">
+            <dl>
+              <dt>Pan</dt><dd>Drag, scroll, or hold Space</dd>
+              <dt>Zoom</dt><dd>Pinch, <Kbd>⌘</Kbd> scroll, <Kbd>⌘+</Kbd> / <Kbd>⌘−</Kbd></dd>
+              <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
+              {!readOnly && <>
+                <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag</dd>
+                <dt>Images</dt><dd>Drop or paste</dd>
+                <dt>Delete</dt><dd>⌫</dd>
+              </>}
+            </dl>
+          </div>
+        </div>
+      </ResponsiveDialog>
     </div>
   );
 }
@@ -344,12 +348,40 @@ function IconAction({ label, onClick, children }: { label: string; onClick: () =
   );
 }
 
-function Help({ title, className, children }: { title: string; className: string; children: ReactNode }) {
+function LibraryDialog({ file, files, open, onOpenChange, onChange }: {
+  file: FileInfo; files: FileMeta["files"]; open: boolean; onOpenChange: (open: boolean) => void; onChange: (libraryId: string | null) => void;
+}) {
+  const [libraryId, setLibraryId] = useState(file.library_id ?? "");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setLibraryId(file.library_id ?? ""); }, [open, file.library_id]);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(`/files/${file.id}`, { method: "PATCH", json: { libraryId: libraryId || null } });
+      onChange(libraryId || null);
+      onOpenChange(false);
+      const name = files.find((f) => f.id === libraryId)?.name;
+      toast(name ? `Using ${name}'s design system` : "Using this file's own design system", { tone: "success" });
+    } catch (error) { toast((error as Error).message, { tone: "error" }); }
+    finally { setBusy(false); }
+  };
   return (
-    <Collapsible className={cn("dock-help", className)}>
-      <CollapsibleTrigger asChild><Button variant="ghost" className="dock-help-trigger">{title}<ChevronDown className="size-3.5" aria-hidden /></Button></CollapsibleTrigger>
-      <CollapsibleContent className="dock-help-body">{children}</CollapsibleContent>
-    </Collapsible>
+    <ResponsiveDialog title="Design system" description="Reuse another file’s tokens and components." open={open} onOpenChange={onOpenChange}
+      footer={<>
+        <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button type="submit" form="file-library-form" disabled={busy || libraryId === (file.library_id ?? "")}>{busy ? "Saving…" : "Save"}</Button>
+      </>}>
+      <form id="file-library-form" onSubmit={(event) => { event.preventDefault(); if (!busy && libraryId !== (file.library_id ?? "")) void save(); }}>
+        <Field>
+          <FieldLabel htmlFor="file-library">Source file</FieldLabel>
+          <NativeSelect id="file-library" data-autofocus className="w-full" value={libraryId} disabled={busy} onChange={(event) => setLibraryId(event.target.value)}>
+            <NativeSelectOption value="">This file</NativeSelectOption>
+            {file.library_id && !files.some((f) => f.id === file.library_id) && <NativeSelectOption value={file.library_id} disabled>Linked file unavailable</NativeSelectOption>}
+            {files.map((f) => <NativeSelectOption key={f.id} value={f.id}>{f.name}</NativeSelectOption>)}
+          </NativeSelect>
+        </Field>
+      </form>
+    </ResponsiveDialog>
   );
 }
 
@@ -393,10 +425,7 @@ function ShareLink({ fileId, token, onChange }: { fileId: string; token: string 
   };
   return (
     <section className="share" aria-label="Link sharing">
-      <div className="share-head">
-        <span className="share-title">View-only link</span>
-        <span className={`share-state${token ? " on" : ""}`}>{token ? "Anyone with the link can view" : "Off"}</span>
-      </div>
+      <p className="m-0 text-xs leading-relaxed text-muted-foreground">{token ? "Anyone with this link can view this file." : "Create a link to let anyone view this file."}</p>
       {token ? (
         <>
           <Input className="share-url" readOnly value={shareUrl(token)} aria-label="Share link" onFocus={(e) => e.currentTarget.select()} />
@@ -416,7 +445,7 @@ function ShareLink({ fileId, token, onChange }: { fileId: string; token: string 
           const { shareToken } = await api<{ shareToken: string }>(`/files/${fileId}/share`, { method: "PUT" });
           onChange(shareToken);
           await copy(shareToken);
-        })}>{busy ? "Creating link…" : "Create view-only link"}</Button>
+        })}>{busy ? "Creating link…" : "Create link"}</Button>
       )}
     </section>
   );
