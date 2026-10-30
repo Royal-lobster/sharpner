@@ -37,7 +37,7 @@ One canvas document in a workspace, made of pages. A file may be a one-off or th
 _Avoid_: Project, document, board
 
 **Page**:
-One infinite canvas inside a file.
+One infinite canvas inside a file. Its description says what it holds and when to look at it, so agents can navigate the file.
 _Avoid_: Tab, board, sheet
 
 **Node**:
@@ -53,7 +53,7 @@ A node showing an uploaded picture.
 _Avoid_: Asset, photo
 
 **Section**:
-A labeled group that wraps the nodes inside it and can contain other sections. New sections arrange their contents automatically in ordered rows; sections of screens (flows) take a row each, and other sibling sections tile into columns. A section can use free layout for explicit positioning. Existing manual sections retain free layout.
+A labeled group that wraps the nodes inside it and can contain other sections. Like a page, it can carry a description for agent navigation. New sections arrange their contents automatically in ordered rows; sections of screens (flows) take a row each, and other sibling sections tile into columns. A section can use free layout for explicit positioning. Existing manual sections retain free layout.
 _Avoid_: Group, area, container, folder
 
 **Selection**:

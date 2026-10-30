@@ -258,7 +258,9 @@ body:has(.editor) { --toast-offset: 84px; }
 .dock-popover[data-slot=drawer-content] .dock-panel-body { overflow-y: auto; }
 .dock-pages .dock-panel-head, .dock-people .dock-panel-head { padding-block: 8px; }
 .page-list { gap: 2px; max-height: min(360px, calc(100dvh - 190px - var(--keyboard))); overflow-y: auto; overscroll-behavior: contain; }
-.page-option { justify-content: space-between; flex: 1; min-width: 0; min-height: 32px; }
+.page-option { justify-content: space-between; flex: 1; min-width: 0; min-height: 32px; height: auto; }
+.page-option-text { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; text-align: left; }
+.page-description { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; color: var(--muted-foreground); }
 .page-actions { display: none; padding-right: 4px; }
 .page-item:hover .page-actions, .page-item:focus-within .page-actions { display: flex; }
 .dock-people-button { gap: 6px; flex: none; }

@@ -6,6 +6,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconX } from "@tabler/icons-react";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useDesktop } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -75,7 +76,7 @@ export function ResponsiveDialog({ open, onOpenChange, title, description, foote
 // ---- promise-based replacements for prompt() and confirm() ---------------------
 
 type Ask =
-  | { kind: "text"; title: string; message?: string; label: string; initial: string; confirm: string; resolve: (v: string | null) => void }
+  | { kind: "text"; title: string; message?: string; label: string; initial: string; confirm: string; multiline?: boolean; optional?: boolean; maxLength?: number; resolve: (v: string | null) => void }
   | { kind: "confirm"; title: string; message?: string; confirm: string; danger?: boolean; resolve: (v: boolean) => void };
 
 let current: (Ask & { id: number }) | null = null;
@@ -89,8 +90,8 @@ const show = (ask: Ask) => {
   emit();
 };
 
-/** Asks for a short piece of text. Resolves to the trimmed value, or null when dismissed. */
-export function askText(opts: { title: string; message?: string; label: string; initial?: string; confirm?: string }) {
+/** Asks for a piece of text. Resolves to the trimmed value (empty only when `optional`), or null when dismissed. */
+export function askText(opts: { title: string; message?: string; label: string; initial?: string; confirm?: string; multiline?: boolean; optional?: boolean; maxLength?: number }) {
   return new Promise<string | null>((resolve) => show({ kind: "text", initial: "", confirm: "Save", ...opts, resolve }));
 }
 
@@ -114,7 +115,7 @@ function AskDialog({ ask }: { ask: Ask & { id: number } }) {
   const answer = (ok: boolean) => {
     if (answered.current) return;
     answered.current = true;
-    if (ask.kind === "text") ask.resolve(ok && value.trim() ? value.trim() : null);
+    if (ask.kind === "text") ask.resolve(ok && (value.trim() || ask.optional) ? value.trim() : null);
     else ask.resolve(ok);
     setOpen(false);
     // Let the exit animation and focus return finish before the dialog unmounts.
@@ -122,7 +123,7 @@ function AskDialog({ ask }: { ask: Ask & { id: number } }) {
   };
   const formId = `ask-${ask.id}`;
   const inputId = `${formId}-value`;
-  const invalid = ask.kind === "text" && !value.trim();
+  const invalid = ask.kind === "text" && !ask.optional && !value.trim();
   if (ask.kind === "confirm" && desktop) return (
     <AlertDialog open={open} onOpenChange={(next) => { if (!next) answer(false); }}>
       <AlertDialogContent onOpenAutoFocus={focusMarked} onCloseAutoFocus={restoreFocus} onKeyDown={contain}
@@ -148,8 +149,10 @@ function AskDialog({ ask }: { ask: Ask & { id: number } }) {
         <form id={formId} onSubmit={(e) => { e.preventDefault(); if (!invalid) answer(true); }}>
           <Field>
             <FieldLabel htmlFor={inputId}>{ask.label}</FieldLabel>
-            <Input id={inputId} data-autofocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={120} required
-              onFocus={(e) => e.currentTarget.select()} enterKeyHint="done" autoComplete="off" />
+            {ask.multiline
+              ? <Textarea id={inputId} data-autofocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={ask.maxLength ?? 120} rows={4} className="min-h-24" />
+              : <Input id={inputId} data-autofocus value={value} onChange={(e) => setValue(e.target.value)} maxLength={ask.maxLength ?? 120} required={!ask.optional}
+                onFocus={(e) => e.currentTarget.select()} enterKeyHint="done" autoComplete="off" />}
           </Field>
         </form>
       )}

@@ -7,13 +7,17 @@ import { authenticate, authErrorStatus, requireScope, type AppEnv, type Identity
 import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
 import { capture, loadFrame } from "./render";
-import { layoutHeight, layoutRects, union, type Rect } from "../shared/layout";
-import { componentTag, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op } from "../shared/types";
+import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
+import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
 import designSystemGuide from "./guides/design-system.md?raw";
 import screensGuide from "./guides/screens.md?raw";
 import { commentAnchor, commentBody } from "./comment-schema";
 
 const GUIDES = { "design-system": designSystemGuide, screens: screensGuide } as const;
+const pageDescription = z.string().max(DESCRIPTION_MAX)
+  .describe("One or two sentences: what the page holds and when to look at it, so agents can find their way. Empty clears it.");
+const sectionDescription = z.string().max(DESCRIPTION_MAX)
+  .describe("Sections only. One or two sentences: what the group holds and when to look at it. Empty clears it.");
 
 const INSTRUCTIONS = `Sharpner is a shared infinite canvas where you design product UI for and with a team, who watch your edits live. Aim for production-quality design grounded in a design system.
 
@@ -21,13 +25,15 @@ Vocabulary:
 - Workspace → files → pages → nodes. Node kinds: "frame" (HTML rendered at a viewport width: a screen, state, slide), "image", "section" (a labeled group that auto-fits its contents and can nest), "component" (reusable HTML), "tokens" (a token sheet: Tailwind v4 CSS defining the design tokens).
 - A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
 - Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
-- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
+- Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Token sheet and component catalogs grouped by role. Check before building any screen."), and update them when you reorganize. Members can edit them too.
+- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column; list_pages and get_file report that as arrangement "stacked" with the reason, so set those sections to "auto" or move the loose nodes into a section to let the page tile. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
 
 Workflow:
-1. get_app_state: what the user has open and selected ("this frame" means the selection).
+1. get_app_state: what the user has open and selected ("this frame" means the selection), with the open file's page descriptions.
+   To find your way around a file, call list_pages (page and section descriptions), then get_file with pageId for just the part you need.
 2. For product work (an app/site with several screens), read_guide("design-system") once, then get_design_system. Reuse the existing system or the workspace library (set_library); otherwise set one up on a "Design System" page: token sheet, then components, then screens. One-off files can skip this.
 3. read_guide("screens") before designing screens. One frame per screen/state, in sections per flow, left to right.
-4. Use only tokens and component instances for styling; promote repeated markup into components.
+4. Use only tokens and component instances for styling; promote repeated markup into components. Before removing, renaming or reshaping a component, check its uses with find_instances.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
 6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
 7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.`;
@@ -70,7 +76,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const propsOf = (html: string) => [...new Set([...html.matchAll(/\{\{\s*([\w-]+)/g)].map((m) => m[1]!))];
 
   server.registerTool("get_app_state", {
-    description: "Start here. Lists your workspaces and files, plus the file, page and selection the user currently has open in the browser.",
+    description: "Start here. Lists your workspaces and files, plus the file, page and selection the user currently has open in the browser, and that file's pages with their descriptions.",
     inputSchema: {},
   }, async () => {
     const [workspaces, files, me] = await Promise.all([
@@ -92,6 +98,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         libraryFileId: open.library_id,
         openInBrowser: Boolean(mine),
         currentPage: page ? { id: page.id, name: page.name } : null,
+        pages: outline.map(({ id, name, description }) => ({ id, name, description })),
         selection: (mine?.selection ?? []).map((id) => nodes.find((n) => n.id === id)).filter(Boolean).map((n) => ({ id: n!.id, kind: n!.kind, name: n!.name })),
         othersOnline: [...new Set(peers.filter((p) => p.id !== user.id).map((p) => p.name))],
         openCommentCount: comments.filter((t) => t.resolvedAt === null).length,
@@ -192,18 +199,42 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json({ ok: true });
   });
 
-  server.registerTool("get_file", {
-    description: "A file's pages with their sections and nodes (id, kind, name, sectionId, computed geometry and heightMode auto/fixed). No sources; use read_nodes for those, get_design_system for tokens and components.",
+  server.registerTool("list_pages", {
+    description: "A file's table of contents: each page's name and description, and its sections (name, description, parent, number of designs directly inside). Read it to choose where to look, then call get_file with that pageId. Cheaper than get_file for the whole file.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
     const { file, stub } = await access(fileId);
-    const pages = (await stub.outline()).map((p) => {
+    const outline = await stub.outline();
+    const pages = outline.map((p) => ({
+      id: p.id, name: p.name, description: p.description ?? "", ...arrangementOf(p.nodes),
+      designs: p.nodes.filter((n) => n.kind !== "section").length,
+      sections: p.nodes.filter((n) => n.kind === "section").map((s) => ({
+        id: s.id, name: s.name, description: s.description ?? "", parentId: s.parentId,
+        designs: p.nodes.filter((n) => n.parentId === s.id && n.kind !== "section").length,
+      })),
+    }));
+    const undescribed = pages.some((p) => !p.description || p.sections.some((s) => !s.description));
+    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, pages,
+      ...(undescribed ? { hint: "Some pages or sections have no description. When you create or reorganize one, describe it with update_page or update_nodes." } : {}) });
+  });
+
+  server.registerTool("get_file", {
+    description: "A file's pages with their descriptions, sections and nodes (id, kind, name, sectionId, computed geometry and heightMode auto/fixed). Pass pageId to read one page; list_pages is the cheaper overview. No sources; use read_nodes for those, get_design_system for tokens and components.",
+    inputSchema: { fileId: z.string(), pageId: z.string().optional().describe("Only this page. Omit for every page.") },
+    annotations: { readOnlyHint: true },
+  }, async ({ fileId, pageId }) => {
+    const { file, stub } = await access(fileId);
+    const outline = (await stub.outline()).filter((p) => !pageId || p.id === pageId);
+    if (pageId && !outline.length) throw new Error(`Page ${pageId} not found`);
+    const pages = outline.map((p) => {
       const rects = layoutRects(p.nodes, (n) => layoutHeight(n));
       return {
         id: p.id,
         name: p.name,
-        sections: p.nodes.filter((n) => n.kind === "section").map((n) => ({ id: n.id, name: n.name, parentId: n.parentId, layout: n.layout ?? "free", order: n.order, ...rects.get(n.id) })),
+        description: p.description ?? "",
+        ...arrangementOf(p.nodes),
+        sections: p.nodes.filter((n) => n.kind === "section").map((n) => ({ id: n.id, name: n.name, description: n.description ?? "", parentId: n.parentId, layout: n.layout ?? "free", order: n.order, ...rects.get(n.id) })),
         nodes: p.nodes.filter((n) => n.kind !== "section").map((n) => ({
           id: n.id, kind: n.kind, name: n.name, sectionId: n.parentId, order: n.order,
           ...nodeGeometry(n, rects),
@@ -217,7 +248,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "The tokens and components available to a file's frames (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, and where it is defined.",
+    description: "The tokens and components available to a file's frames (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, where it is defined, and `uses`: how many frames and components in this file use it directly. Call find_instances before removing or reshaping a component.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -234,7 +265,9 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     };
     const own = await describe(file.id, "file");
     const lib = design.library ? (await describe(design.library.fileId, "library")).filter((c) => !own.some((o) => o.tag === c.tag)) : [];
-    const components = [...lib, ...own];
+    const uses = new Map<string, number>();
+    for (const { tag } of await stub.instances()) uses.set(tag, (uses.get(tag) ?? 0) + 1);
+    const components = [...lib, ...own].map((c) => ({ ...c, uses: uses.get(c.tag) ?? 0 }));
     return json({
       library: design.library,
       tokens: tokenNames(design.tokens),
@@ -244,27 +277,56 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     });
   });
 
+  server.registerTool("find_instances", {
+    description: "Where a component is used: every frame or component whose HTML contains its tag, in this file and in workspace files that use this file as their library (unless they define their own component with that tag). Use before removing, renaming or reshaping a component. Lists direct uses; a component entry means it is used inside another component.",
+    inputSchema: { fileId: z.string(), component: z.string().describe("Tag (x-button-primary) or component name (Button/Primary)") },
+    annotations: { readOnlyHint: true },
+  }, async ({ fileId, component }) => {
+    const { file } = await access(fileId);
+    const tag = /^<?x-/i.test(component) ? component.replace(/[<>]/g, "").toLowerCase() : componentTag(component);
+    const { results: dependents } = await env.DB.prepare(`SELECT id FROM files WHERE library_id = ?`).bind(file.id).all<{ id: string }>();
+    const files = [file, ...(await Promise.all(dependents.map((d) => fileFor(env, user.id, d.id)))).filter((f) => f !== null)];
+    const instances = (await Promise.all(files.map(async (f) => {
+      const s = room(env, f.id);
+      const [found, pages, nodes] = await Promise.all([s.instances(), s.pages(), f.id === file.id ? [] : s.nodes()]);
+      // A dependent's own component with the same tag replaces the library's there.
+      if (nodes.some((n) => n.kind === "component" && componentTag(n.name) === tag)) return [];
+      return found.filter((i) => i.tag === tag).map(({ tag: _tag, id, ...node }) => ({
+        fileId: f.id, fileName: f.name, pageId: node.pageId, pageName: pages.find((p) => p.id === node.pageId)?.name ?? null, nodeId: id, name: node.name, kind: node.kind,
+      }));
+    }))).flat();
+    return json({ tag, total: instances.length, instances });
+  });
+
   server.registerTool("create_page", {
-    description: "Add a page to a file (e.g. 'Design System', 'Screens').",
-    inputSchema: { fileId: z.string(), name: z.string() },
-  }, async ({ fileId, name }) => {
+    description: "Add a page to a file (e.g. 'Design System', 'Screens'), with a description of what it will hold.",
+    inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional() },
+  }, async ({ fileId, name, description }) => {
     const { stub, apply } = await access(fileId);
     const pages = await stub.pages();
-    const page = { id: crypto.randomUUID(), name, sort: Math.max(0, ...pages.map((p) => p.sort)) + 1 };
+    const page: Page = { id: crypto.randomUUID(), name, sort: Math.max(0, ...pages.map((p) => p.sort)) + 1, description: description ?? "" };
     await apply([{ t: "page.put", page }]);
     return json(page);
   });
 
-  server.registerTool("rename_page", {
-    description: "Rename a page.",
-    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string() },
-  }, async ({ fileId, pageId, name }) => {
+  const updatePage = async (fileId: string, pageId: string, name?: string, description?: string) => {
     const { stub, apply } = await access(fileId);
     const page = (await stub.pages()).find((p) => p.id === pageId);
     if (!page) throw new Error(`Page ${pageId} not found`);
-    await apply([{ t: "page.put", page: { ...page, name } }]);
+    await apply([{ t: "page.put", page: { id: page.id, sort: page.sort, name: name ?? page.name, ...description !== undefined && { description } } }]);
     return json({ ok: true });
-  });
+  };
+
+  server.registerTool("update_page", {
+    description: "Rename a page or change its description.",
+    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional() },
+  }, ({ fileId, pageId, name, description }) => updatePage(fileId, pageId, name, description));
+
+  // Kept so cached tool lists and saved prompts that rename pages keep working.
+  server.registerTool("rename_page", {
+    description: "Deprecated: use update_page. Renames a page and keeps its description.",
+    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1) },
+  }, ({ fileId, pageId, name }) => updatePage(fileId, pageId, name));
 
   server.registerTool("delete_page", {
     description: "Delete a page and every node on it. Only do this when explicitly asked.",
@@ -289,23 +351,24 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a labeled section, optionally nested, with a description of what it holds. Defaults to automatic layout: children wrap in order (up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
     inputSchema: {
       fileId: z.string(),
       name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),
       pageId: z.string().optional().describe("Defaults to the page the user is viewing, else the first page"),
       parentSectionId: z.string().optional(),
+      description: sectionDescription.optional(),
       layout: z.enum(["auto", "free"]).optional().describe("Default auto. Free preserves explicit child positions and lets the section be placed freely."),
       x: z.number().optional(),
       y: z.number().optional(),
     },
-  }, async ({ fileId, name, pageId, parentSectionId, layout = "auto", x, y }) => {
+  }, async ({ fileId, name, description, pageId, parentSectionId, layout = "auto", x, y }) => {
     const { stub, apply } = await access(fileId);
     const page = await targetPage(stub, user.id, pageId, parentSectionId);
     const existingStack = !parentSectionId && layout === "auto" ? page.nodes.filter((n) => !n.parentId && n.kind === "section" && n.layout === "auto") : [];
     const at = existingStack.length ? { x: Math.min(...existingStack.map((n) => n.x)), y: Math.min(...existingStack.map((n) => n.y)) } : placement(page.nodes, parentSectionId ?? null, 160);
     const id = crypto.randomUUID();
-    await apply([{ t: "node.put", id, node: { kind: "section", pageId: page.id, parentId: parentSectionId ?? null, layout, name, x: x ?? at.x, y: y ?? at.y } }]);
+    await apply([{ t: "node.put", id, node: { kind: "section", pageId: page.id, parentId: parentSectionId ?? null, layout, name, description, x: x ?? at.x, y: y ?? at.y } }]);
     return json({ sectionId: id, pageId: page.id, layout });
   });
 
@@ -387,7 +450,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("update_nodes", {
-    description: "Update nodes or sections. height null = fit content. Auto sections derive positions from order and current measured heights: omit x/y, use order to reorder siblings. Set section layout 'auto' to arrange an existing group, or 'free' to preserve its current positions for manual placement. Free-section x/y move its visible top-left and contents. sectionId moves a node into/out of a section (null = out), pageId to another page.",
+    description: "Update nodes or sections. height null = fit content. Auto sections derive positions from order and current measured heights: omit x/y, use order to reorder siblings. Set section layout 'auto' to arrange an existing group, or 'free' to preserve its current positions for manual placement. Free-section x/y move its visible top-left and contents. sectionId moves a node into/out of a section (null = out), pageId to another page (without x/y it lands right of that page's content).",
     inputSchema: {
       fileId: z.string(),
       updates: z.array(z.object({
@@ -397,6 +460,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         layout: z.enum(["auto", "free"]).optional().describe("Sections only. Existing legacy sections remain free until explicitly changed."),
         order: z.number().finite().optional().describe("Sibling order in automatic layout; smaller values come first. Creation appends by default."),
         name: z.string().optional(),
+        description: sectionDescription.optional(),
         source: z.string().optional(),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
@@ -411,10 +475,21 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const missing = updates.filter((update) => !nodesById.has(update.nodeId)).map((update) => update.nodeId);
     if (missing.length) throw new Error(`Nodes not found: ${missing.join(", ")}`);
     const rects = layoutRects(all, (n) => layoutHeight(n));
+    const arrivals: CanvasNode[] = [];
     await apply(updates.map(({ nodeId, sectionId, ...patch }) => {
       const cur = nodesById.get(nodeId)!;
       const node = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as NodeInput;
       if (sectionId !== undefined) node.parentId = sectionId;
+      // Moving loose to another page without coordinates: land to the right of that page's content (and of
+      // anything moved there in this call) instead of reusing a position from the old page. Automatic
+      // sections join that page's arrangement instead, so their stored position must not move its origin.
+      const joinsLayout = cur.kind === "section" && (patch.layout ?? cur.layout) === "auto";
+      if (patch.pageId !== undefined && patch.pageId !== cur.pageId && !sectionId && !joinsLayout && patch.x === undefined && patch.y === undefined) {
+        const target = [...all.filter((n) => n.pageId === patch.pageId), ...arrivals.filter((n) => n.pageId === patch.pageId)];
+        Object.assign(node, placement(target, null, 160));
+        const r = rects.get(cur.id)!;
+        arrivals.push({ ...cur, id: `${cur.id}:arrival`, kind: "frame", parentId: null, pageId: patch.pageId, x: node.x!, y: node.y!, width: r.w, height: r.h });
+      }
       // A section's x/y refer to its visible bounds; the whole section moves with its contents.
       const reparented = sectionId !== undefined && sectionId !== cur.parentId || patch.pageId !== undefined && patch.pageId !== cur.pageId;
       const relayout = patch.layout !== undefined && patch.layout !== cur.layout;
@@ -523,6 +598,20 @@ function buildServer(env: Env, identity: Identity, origin: string) {
 }
 
 /** Tool responses expose computed bounds, while heightMode retains the node's authored sizing choice. */
+/** Whether a page tiles its automatic top-level sections, and if they stay in one column, what to change. */
+function arrangementOf(nodes: CanvasNode[]) {
+  const page = pageArrangement(nodes);
+  if (page.arrangement !== "stacked") return { arrangement: page.arrangement };
+  const free = page.stackedBy.filter((n) => n.kind === "section"), loose = page.stackedBy.length - free.length;
+  const named = free.slice(0, 5).map((n) => `"${n.name}"`).join(", ") + (free.length > 5 ? ` and ${free.length - 5} more` : "");
+  const causes = [free.length ? `free section${free.length === 1 ? "" : "s"} ${named}` : "", loose ? `${loose} loose node${loose === 1 ? "" : "s"}` : ""];
+  return {
+    arrangement: page.arrangement,
+    reason: `Automatic sections stay in one column because of ${causes.filter(Boolean).join(" and ")}. Set those sections to layout "auto", or move loose nodes into a section, to let the page tile.`,
+    stackedBy: page.stackedBy.map((n) => ({ id: n.id, name: n.name, kind: n.kind })),
+  };
+}
+
 function nodeGeometry(node: { id: string; height?: number | null }, rects: ReadonlyMap<string, Rect>) {
   const rect = rects.get(node.id)!;
   return {

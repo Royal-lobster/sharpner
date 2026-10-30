@@ -11,7 +11,7 @@ import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
 import {
-  componentTag, mergeDesignSystems, renderedHtml,
+  componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
   type Op, type Page, type Peer, type Presence, type ServerMsg, type CommentAnchor, type CommentDetail, type CommentThread,
 } from "../shared/types";
@@ -32,8 +32,10 @@ const THUMB_DELAY = 1_200;
 const THUMB_BATCH = 24;
 const THUMB_TABS = 4;
 const THUMB_MAX_TRIES = 3;
-const META_COLS = `id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, sort AS 'order', width, height, measured_h AS measuredHeight,
+const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
   src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev`;
+/** Node rows with their descriptions (only sections have one). */
+const NODES = `nodes LEFT JOIN descriptions d ON d.id = nodes.id`;
 const KINDS: NodeKind[] = ["frame", "image", "component", "section", "tokens"];
 const DEFAULT_NAME: Record<NodeKind, string> = { frame: "Frame", image: "Image", component: "Component", section: "Section", tokens: "Tokens" };
 const DEFAULT_WIDTH: Partial<Record<NodeKind, number>> = { tokens: 960 };
@@ -67,6 +69,9 @@ const MIGRATIONS = [
   // Refresh existing design-system previews after removing the old specimen card presentation.
   `UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind IN ('component', 'tokens');`,
   COMMENT_SCHEMA,
+  // Page and section descriptions, for agent navigation. A separate table keyed by page or node id keeps the
+  // migration repeatable and leaves the pages/nodes columns that older deployments write unchanged.
+  `CREATE TABLE IF NOT EXISTS descriptions (id TEXT PRIMARY KEY, text TEXT NOT NULL);`,
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -95,7 +100,7 @@ export class FileRoom extends DurableObject<Env> {
     for (const m of MIGRATIONS.slice(version)) this.sql.exec(m);
     this.setMeta("schema", String(MIGRATIONS.length));
     if (this.sql.exec(`SELECT 1 FROM pages LIMIT 1`).toArray().length === 0) {
-      this.sql.exec(`INSERT INTO pages VALUES (?, ?, ?)`, crypto.randomUUID(), "Page 1", 0);
+      this.sql.exec(`INSERT INTO pages (id, name, sort) VALUES (?, ?, ?)`, crypto.randomUUID(), "Page 1", 0);
     }
     if (version < MIGRATIONS.length && this.sql.exec(`SELECT 1 FROM nodes WHERE ${PENDING_THUMBS} LIMIT 1`).toArray().length) {
       this.ctx.waitUntil(this.scheduleThumbs());
@@ -105,17 +110,18 @@ export class FileRoom extends DurableObject<Env> {
   // ---- reads -------------------------------------------------------------
 
   pages(): Page[] {
-    return this.sql.exec<Page>(`SELECT id, name, sort FROM pages ORDER BY sort, rowid`).toArray();
+    return this.sql.exec<Page>(`SELECT p.id, p.name, p.sort, coalesce(d.text, '') AS description FROM pages p LEFT JOIN descriptions d ON d.id = p.id ORDER BY p.sort, p.rowid`).toArray();
   }
 
   nodes(ids?: string[]): CanvasNode[] {
-    if (!ids) return this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM nodes ORDER BY sort, id`).toArray();
-    return ids.flatMap((id) => this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM nodes WHERE id = ?`, id).toArray());
+    if (!ids) return this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM ${NODES} ORDER BY sort, nodes.id`).toArray().map(meta);
+    return ids.flatMap((id) => this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM ${NODES} WHERE nodes.id = ?`, id).toArray().map(meta));
   }
 
   /** One node including its source. */
   node(id: string): (CanvasNode & { source: string }) | null {
-    return this.sql.exec<CanvasNode & { source: string }>(`SELECT ${META_COLS}, source FROM nodes WHERE id = ?`, id).toArray()[0] ?? null;
+    const row = this.sql.exec<CanvasNode & { source: string }>(`SELECT ${META_COLS}, source FROM ${NODES} WHERE nodes.id = ?`, id).toArray()[0];
+    return row ? meta(row) : null;
   }
 
   /** Pages with their nodes' metadata (no sources). */
@@ -177,6 +183,14 @@ export class FileRoom extends DurableObject<Env> {
     };
   }
 
+  /** Direct component instances in this file's frames and components: one entry per using node and tag. */
+  instances(): { tag: string; id: string; name: string; kind: NodeKind; pageId: string }[] {
+    const rows = this.sql.exec<{ id: string; name: string; kind: NodeKind; pageId: string; source: string }>(
+      `SELECT id, name, kind, page_id AS pageId, source FROM nodes WHERE kind IN ('frame', 'component') AND instr(lower(source), '<x-') > 0 ORDER BY sort, id`,
+    ).toArray();
+    return rows.flatMap(({ source, ...node }) => [...new Set(instanceTags(source))].map((tag) => ({ tag, ...node })));
+  }
+
   /** What this file's frames render with: its library's design system overridden by its own. */
   async designSystem(): Promise<DesignSystem & { library: { fileId: string; name: string } | null }> {
     const lib = await this.libraryInfo();
@@ -213,12 +227,8 @@ export class FileRoom extends DurableObject<Env> {
       for (const op of ops) {
         switch (op.t) {
           case "page.put": {
-            const { id, name, sort } = op.page;
-            this.sql.exec(
-              `INSERT INTO pages VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sort = excluded.sort`,
-              str(id), str(name).slice(0, 200) || "Untitled", Number(sort) || 0,
-            );
-            touched.pages.add(id);
+            this.putPage(op.page);
+            touched.pages.add(op.page.id);
             break;
           }
           case "page.del": {
@@ -226,6 +236,7 @@ export class FileRoom extends DurableObject<Env> {
             const ids = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE page_id = ?`, op.id).toArray().map((r) => r.id);
             for (const id of ids) this.deleteNode(id, staleThumbs, design, touched.nodeDels);
             this.sql.exec(`DELETE FROM pages WHERE id = ?`, op.id);
+            this.describe(op.id, "");
             touched.pageDels.add(op.id);
             break;
           }
@@ -266,6 +277,22 @@ export class FileRoom extends DurableObject<Env> {
     this.touch(fileId);
   }
 
+  /** Upserts a page. A put without a description keeps the stored one, so a rename from a stale copy can't clobber it. */
+  private putPage({ id, name, sort, description }: Page) {
+    this.sql.exec(
+      `INSERT INTO pages (id, name, sort) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sort = excluded.sort`,
+      str(id), str(name).slice(0, 200) || "Untitled", Number(sort) || 0,
+    );
+    if (description !== undefined) this.describe(str(id), description);
+  }
+
+  /** Sets a page's or section's description; empty removes it. */
+  private describe(id: string, text: string) {
+    const value = str(text).trim().slice(0, DESCRIPTION_MAX);
+    if (value) this.sql.exec(`INSERT OR REPLACE INTO descriptions (id, text) VALUES (?, ?)`, id, value);
+    else this.sql.exec(`DELETE FROM descriptions WHERE id = ?`, id);
+  }
+
   /**
    * Upserts a node. Returns true when what it renders changed (needs a new thumbnail).
    * Moving a section moves everything inside it; nodes that moved along are added to `touched`.
@@ -278,6 +305,7 @@ export class FileRoom extends DurableObject<Env> {
     const kind = cur?.kind ?? (KINDS.includes(input.kind!) ? input.kind! : "frame");
     if (input.layout !== undefined && (kind !== "section" || !["auto", "free"].includes(input.layout))) throw new Error("Layout must be auto or free on a section");
     if (input.order !== undefined && !Number.isFinite(input.order)) throw new Error("Order must be a finite number");
+    if (input.description && kind !== "section") throw new Error("Only sections and pages have descriptions");
     // When a node leaves a managed group, its stored placeholder coordinates must become its actual
     // visible position. The same applies when changing a section's layout mode.
     if (cur) {
@@ -341,6 +369,7 @@ export class FileRoom extends DurableObject<Env> {
       str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
       next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source,
     );
+    if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);
     return changed && (isRendered(kind) || kind === "image" && !thumbLo);
   }
 
@@ -413,6 +442,7 @@ export class FileRoom extends DurableObject<Env> {
     const n = this.node(id);
     if (!n) return;
     this.sql.exec(`DELETE FROM nodes WHERE id = ?`, id);
+    this.describe(id, "");
     deleted.add(id);
     if (isRendered(n.kind)) staleThumbs.push(...thumbKeys(n));
     if (n.kind === "component") design.tags.add(componentTag(n.name));
@@ -761,6 +791,13 @@ const thumbKeys = (n: Pick<CanvasNode, "thumbLo" | "thumbHi">) =>
   [n.thumbLo, n.thumbHi].filter((u): u is string => Boolean(u && /^\/a\/[^/]+\/t\//.test(u))).map((u) => u.slice(3));
 const toPeer = (a: Attachment): Peer => ({ ...a.actor, pageId: a.presence.pageId, selection: a.presence.selection, cursor: a.presence.cursor, cid: a.cid });
 const str = (v: unknown) => String(v ?? "");
+/** Most nodes have no description; leaving the empty field out keeps sync payloads for large pages lean. */
+const meta = <T extends CanvasNode>(row: T): T => {
+  if (!row.description) delete row.description;
+  return row;
+};
+/** Exact custom-element tags opened in HTML, so `<x-button>` doesn't count as `<x-button-primary>`. */
+const instanceTags = (html: string) => [...html.matchAll(/<(x-[a-z0-9-]+)(?=[\s/>])/gi)].map((m) => m[1]!.toLowerCase());
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0);
 const source = (v: unknown) => {
   const s = str(v);
