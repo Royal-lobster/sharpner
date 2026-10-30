@@ -68,6 +68,11 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | Tool | Purpose |
 | --- | --- |
 | `get_app_state` | Workspaces, files, and the member's current page and selection |
+| `list_comments` | Open feedback by default; filter by file page, node, or resolution state, with pagination and excerpts |
+| `get_comment_thread` | Full feedback text, replies, authors, anchor, and resolution state |
+| `add_comment` | Pin a new comment to a node or page coordinate |
+| `reply_to_comment` | Add a visibly attributed agent reply |
+| `resolve_comment` | Resolve addressed feedback, or reopen it with `resolved: false` |
 | `read_guide` | Design-system or screen-design guidance |
 | `create_file` | Create a workspace file, optionally linked to a library |
 | `set_library` | Link or remove a file's workspace library |
@@ -93,6 +98,35 @@ Create screens inside sections without coordinates to use automatic layout.
 Read sources before editing, then inspect screenshots to check the result.
 See the [design-system guide](../worker/guides/design-system.md) and
 [screen guide](../worker/guides/screens.md) for examples.
+
+## Addressing feedback
+
+Members press **C**, then click or tap a spot on the canvas to leave a comment.
+The comments button in the bottom dock opens threads across the file, with
+separate open/resolved lists. Pins follow their designs through layout and page
+changes. Deleting a design leaves its feedback at its last position; deleting a
+page removes its threads. Comments and active-member identities are private to
+workspace members and are excluded from public view links.
+
+When the member asks to "fix the comments":
+
+1. Use `get_app_state` to find the file and its open-comment count.
+2. Call `list_comments({ fileId })`. Follow `nextOffset` until it is `null`;
+   `pageId`, `nodeId`, and `status` (`open`, `resolved`, `all`) narrow the list.
+3. Call `get_comment_thread({ fileId, threadId })` for each relevant thread.
+   List excerpts can be truncated; read the full feedback and replies before editing.
+4. Inspect the anchor's `nodeId` with `read_nodes` and `screenshot_nodes`, make
+   the requested edits, and verify the result. A null `nodeId` means feedback
+   on the page; use the anchor coordinates and surrounding designs for context.
+5. Explain the change with `reply_to_comment({ fileId, threadId, body })`, then
+   `resolve_comment({ fileId, threadId, resolved: true })`. Ask for clarification
+   in a reply when needed and leave that thread open.
+
+Comments do not automatically start agent work. A member must ask the agent to
+address them. Agent replies and resolutions retain their agent attribution;
+resolving feedback preserves the conversation and does not itself edit a design.
+Reading requires `sharpner:read`; posting, replying, and resolving require
+`sharpner:write`, always within the member's current workspace access.
 
 ## Configure OAuth for your deployment
 

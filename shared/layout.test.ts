@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_GAP, dropOrders, isManaged, layoutHeight, layoutRects, SECTION_GAP, SECTION_PAD } from "./layout";
+import { AUTO_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, SECTION_GAP, SECTION_PAD } from "./layout";
 import type { CanvasNode } from "./types";
 
 const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
@@ -8,6 +8,43 @@ const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
 });
 const section = (id: string, patch: Partial<CanvasNode> = {}) => node(id, { kind: "section", layout: "auto", width: 0, height: null, ...patch });
 const rectsOf = (nodes: CanvasNode[]) => layoutRects(nodes, layoutHeight);
+
+describe("component catalogs", () => {
+  const component = (id: string, name: string, order: number, patch: Partial<CanvasNode> = {}) =>
+    node(id, { parentId: "chips", kind: "component", name, order, width: 200, height: 120, ...patch });
+
+  it("packs a family's variants into one tight row and starts each family on a new row", () => {
+    const nodes = [section("chips"), component("active", "Chip/Active", 0), component("default", "Chip/Default", 1),
+      ...Array.from({ length: 4 }, (_, i) => component(`more-${i}`, `Chip/More ${i}`, 2 + i)), component("tab", "Tab/Active", 6, { height: 90 })];
+    const rects = rectsOf(nodes);
+    const left = CATALOG_PAD + CATALOG_GUTTER;
+    expect(rects.get("active")).toMatchObject({ x: left, y: CATALOG_PAD });
+    expect(rects.get("default")).toMatchObject({ x: left + 200 + CATALOG_GAP, y: CATALOG_PAD });
+    // Six chips share a row: catalogs aren't capped at four columns like screens.
+    expect(rects.get("more-3")!.y).toBe(CATALOG_PAD);
+    expect(rects.get("tab")).toMatchObject({ x: left, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP });
+    expect(rects.get("chips")).toMatchObject({ w: CATALOG_GUTTER + 6 * 200 + 5 * CATALOG_GAP + CATALOG_PAD * 2, h: 120 + CATALOG_ROW_GAP + 90 + CATALOG_PAD * 2 });
+    expect(catalogFamilyLabels(nodes, rects, catalogSectionIds(nodes))).toEqual([
+      { family: "Chip", x: CATALOG_PAD, y: CATALOG_PAD },
+      { family: "Tab", x: CATALOG_PAD, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP },
+    ]);
+  });
+
+  it("wraps a long family at the row width without repeating its name", () => {
+    const nodes = [section("chips"), ...Array.from({ length: 4 }, (_, i) => component(`${i}`, `Card/${i}`, i, { width: 600 }))];
+    const rects = rectsOf(nodes);
+    expect(rects.get("2")).toMatchObject({ x: CATALOG_PAD + CATALOG_GUTTER, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP });
+    expect(catalogFamilyLabels(nodes, rects, catalogSectionIds(nodes))).toHaveLength(1);
+  });
+
+  it("drops the gutter when no component names a family, and keeps screen spacing once a frame joins", () => {
+    const loose = [section("chips"), component("card", "Card", 0), component("toast", "Toast", 1)];
+    expect(rectsOf(loose).get("toast")).toMatchObject({ x: CATALOG_PAD + 200 + CATALOG_GAP, y: CATALOG_PAD });
+    const mixed = [...loose, node("screen", { parentId: "chips", order: 2 })];
+    expect(catalogSectionIds(mixed).size).toBe(0);
+    expect(rectsOf(mixed).get("card")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD });
+  });
+});
 
 describe("automatic sections", () => {
   it("wraps after four screens and positions the next row below the tallest measured screen", () => {

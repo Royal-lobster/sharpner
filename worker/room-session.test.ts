@@ -52,13 +52,24 @@ function fixture(...sockets: ReturnType<typeof socket>[]) {
     viewerAccess: new ViewerAccess(),
     apply, node,
     libraryInfo: vi.fn(async () => null),
-    pages: () => [], nodes: () => [], setMeta: vi.fn(),
+    pages: () => [], nodes: () => [], comments: () => [], setMeta: vi.fn(),
   });
   const broadcast = (msg: ServerMsg) => (room as unknown as { broadcast(msg: ServerMsg): void }).broadcast(msg);
   return { room, lookup, apply, node, acceptWebSocket, broadcast };
 }
 
 describe("FileRoom member session issuer", () => {
+  it("does not allow presence payloads to impersonate another member in the avatar stack", async () => {
+    const ws = socket();
+    const { room } = fixture(ws);
+    await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: "presence", presence: {
+      pageId: "screens", selection: [], cursor: null, id: "forged", name: "Someone else", avatar: "https://example.test/forged", agent: true,
+    } }));
+    expect(room.peers()).toEqual([{ ...member, cid: "member", pageId: "screens", selection: [], cursor: null }]);
+    await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: "presence", presence: { pageId: "screens", selection: [], cursor: { x: "invalid", y: 4 } } }));
+    expect(room.peers()[0]!.cursor).toBeNull();
+  });
+
   it("stamps the configured issuer at upgrade, ignoring a forged request header", async () => {
     const server = socket();
     const { room, acceptWebSocket } = fixture();

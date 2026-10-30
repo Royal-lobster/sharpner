@@ -8,10 +8,12 @@ import { sourceBatches, type SourceItem } from "../shared/source-batches";
 import { layoutHeight, layoutRects } from "../shared/layout";
 import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
+import { Comments, COMMENT_SCHEMA } from "./comments";
+import { presenceMessage } from "./presence";
 import {
   componentTag, mergeDesignSystems, renderedHtml,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
-  type Op, type Page, type Peer, type Presence, type ServerMsg,
+  type Op, type Page, type Peer, type Presence, type ServerMsg, type CommentAnchor, type CommentDetail, type CommentThread,
 } from "../shared/types";
 
 /** `shareToken` marks a view-only link viewer: anonymous, invisible to others, and unable to edit. */
@@ -64,6 +66,7 @@ const MIGRATIONS = [
    CREATE INDEX nodes_sort ON nodes(sort);`,
   // Refresh existing design-system previews after removing the old specimen card presentation.
   `UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind IN ('component', 'tokens');`,
+  COMMENT_SCHEMA,
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -79,6 +82,7 @@ export const fileUrl = (key: string) => `/a/${key}`;
  */
 export class FileRoom extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
+  private commentStore = new Comments(this.sql);
   private touchedAt = 0;
   private viewerAccess = new ViewerAccess();
   /** Cached library info; undefined = not fetched since wake-up. */
@@ -127,6 +131,41 @@ export class FileRoom extends DurableObject<Env> {
     });
   }
 
+  comments(): CommentThread[] { return this.commentStore.list(); }
+  comment(id: string): CommentDetail { return this.commentStore.get(id); }
+
+  createComment(fileId: string, anchor: CommentAnchor, body: string, by: Actor): CommentDetail {
+    let thread!: CommentDetail;
+    this.ctx.storage.transactionSync(() => {
+      if (!this.pages().some((p) => p.id === anchor.pageId)) throw new Error("Page not found");
+      if (anchor.nodeId) {
+        const node = this.node(anchor.nodeId);
+        if (!node || node.pageId !== anchor.pageId) throw new Error("The design is no longer on this page");
+      }
+      thread = this.commentStore.create(anchor, body, by);
+    });
+    this.publishComment(fileId, thread);
+    return thread;
+  }
+
+  replyComment(fileId: string, id: string, body: string, by: Actor): CommentDetail {
+    const thread = this.ctx.storage.transactionSync(() => this.commentStore.reply(id, body, by));
+    this.publishComment(fileId, thread);
+    return thread;
+  }
+
+  resolveComment(fileId: string, id: string, resolved: boolean, by: Actor): CommentDetail {
+    const thread = this.ctx.storage.transactionSync(() => this.commentStore.resolve(id, resolved, by));
+    this.publishComment(fileId, thread);
+    return thread;
+  }
+
+  private publishComment(fileId: string, thread: CommentDetail) {
+    const { messages: _messages, ...summary } = thread;
+    this.broadcast({ type: "comments", threads: [summary] });
+    this.touch(fileId);
+  }
+
   /** This file's own token sheets and components (what it offers when used as a library). */
   ownDesignSystem(): DesignSystem {
     const rows = this.sql.exec<{ kind: NodeKind; name: string; source: string }>(
@@ -166,6 +205,9 @@ export class FileRoom extends DurableObject<Env> {
     const design = { tags: new Set<string>(), tokens: false };
     let renderChanged = false;
     const staleThumbs: string[] = [];
+    const reconcileComments = ops.some((op) => op.t === "page.del" || op.t === "node.del" || op.t === "node.put" && op.node.pageId !== undefined);
+    const before = reconcileComments && this.comments().length ? layoutRects(this.nodes(), layoutHeight) : null;
+    let commentChanges: { threads: CommentThread[]; deleted: string[] } | undefined;
 
     this.ctx.storage.transactionSync(() => {
       for (const op of ops) {
@@ -205,6 +247,7 @@ export class FileRoom extends DurableObject<Env> {
       for (const id of this.invalidate(design.tokens, design.tags)) touched.nodes.add(id);
       if (design.tokens || design.tags.size) renderChanged = true;
       for (const id of touched.nodeDels) touched.nodes.delete(id);
+      if (before) commentChanges = this.commentStore.reconcile(new Map(this.nodes().map((n) => [n.id, n])), new Set(this.pages().map((p) => p.id)), before);
     });
 
     this.broadcast({
@@ -215,6 +258,7 @@ export class FileRoom extends DurableObject<Env> {
       nodeDels: touched.nodeDels.size ? [...touched.nodeDels] : undefined,
       by,
     });
+    if (commentChanges && (commentChanges.threads.length || commentChanges.deleted.length)) this.broadcast({ type: "comments", ...commentChanges });
     if (staleThumbs.length) this.ctx.waitUntil(this.env.FILES.delete(staleThumbs));
     if (renderChanged) await this.scheduleThumbs();
     if (design.tokens || design.tags.size) this.ctx.waitUntil(this.notifyDependents(fileId, design.tokens, [...design.tags]));
@@ -597,7 +641,9 @@ export class FileRoom extends DurableObject<Env> {
       }
       for (const batch of sourceBatches(items())) this.send(ws, { type: "source", items: batch });
     } else if (msg.type === "presence") {
-      att.presence = msg.presence;
+      const parsed = presenceMessage.safeParse(msg.presence);
+      if (!parsed.success) return;
+      att.presence = parsed.data;
       ws.serializeAttachment(att);
       this.broadcast({ type: "peer", peer: toPeer(att) }, ws);
     }
@@ -639,7 +685,8 @@ export class FileRoom extends DurableObject<Env> {
     const library = await this.libraryInfo();
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
-    this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library });
+    this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
+      comments: att.shareToken ? [] : this.comments() });
   }
 
   private broadcast(msg: ServerMsg, except?: WebSocket) {
@@ -712,7 +759,7 @@ export class FileRoom extends DurableObject<Env> {
 
 const thumbKeys = (n: Pick<CanvasNode, "thumbLo" | "thumbHi">) =>
   [n.thumbLo, n.thumbHi].filter((u): u is string => Boolean(u && /^\/a\/[^/]+\/t\//.test(u))).map((u) => u.slice(3));
-const toPeer = (a: Attachment): Peer => ({ ...a.actor, ...a.presence, cid: a.cid });
+const toPeer = (a: Attachment): Peer => ({ ...a.actor, pageId: a.presence.pageId, selection: a.presence.selection, cursor: a.presence.cursor, cid: a.cid });
 const str = (v: unknown) => String(v ?? "");
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0);
 const source = (v: unknown) => {

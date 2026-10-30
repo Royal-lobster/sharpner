@@ -25,7 +25,7 @@ Design System (page)
 
 Screens go on other pages (e.g. "Screens", or one page per platform), in sections per flow.
 
-Create sections without coordinates and add nodes with `sectionId`. New sections arrange their children automatically in creation order, wrapping rows after four previews. Nested groups and top-level automatic sections stack vertically; measured preview heights reflow the rows without overlaps. Use `order` only when changing the sequence. Older sections keep their authored free layout until `update_nodes` sets `layout: "auto"`; `layout: "free"` opts out while preserving the current positions.
+Create sections without coordinates and add nodes with `sectionId`. New sections arrange their children automatically in creation order, wrapping rows after four previews. A section that holds only components becomes a **catalog**: specimens pack tightly, each family (`Chip` in `Chip/Active`) starts its own row with the family named once in a left gutter, and each specimen is labelled with its variant. Keep a family's variants adjacent and keep screens or token sheets out of component sections, so the catalog applies. Nested groups and top-level automatic sections stack vertically; measured preview heights reflow the rows without overlaps. Use `order` only when changing the sequence. Older sections keep their authored free layout until `update_nodes` sets `layout: "auto"`; `layout: "free"` opts out while preserving the current positions.
 
 ## 3. Tokens: one token sheet, semantic names
 
@@ -92,7 +92,7 @@ A component is a node with `kind: "component"`. Its name becomes its tag: `Butto
 - **States worth seeing** (hover, focus, disabled, selected, error) get their own variants when a screen needs to show them: `Field/Error`, `Button/Primary · Disabled`.
 - Give each component node a sensible canvas `width` (the context it's usually used in) and leave `height` empty.
 
-Component nodes display their default instance on the file's own background, with a small caption for the tag and props/slot information. Give them an auto height so the preview can fit its content and caption; old short fixed-height nodes use a compact preview. Keep variants in creation order inside a named family section ("Buttons", "Inputs", "Cards"); automatic layout arranges them from their measured sizes, never by their names.
+Component nodes display their default instance on the file's own background, with a small caption for the tag and props/slot information. Give them an auto height so the preview can fit its content and caption; old short fixed-height nodes use a compact preview. Keep variants in creation order inside a named group section ("Actions", "Inputs", "Selection"); the catalog layout rows them by family name and sizes rows from their measured heights.
 
 Token sheets display as foundations catalogs, including per-theme swatches and resolved values, typography, spacing, radii, and shadows. Declare a real `.dark` or `[data-theme="dark"]` override to show light and dark specimens together. Preview presentation is separate from component definitions: instances in screens keep the original component HTML without the specimen caption.
 

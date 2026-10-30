@@ -18,7 +18,7 @@ and the whole app runs on Cloudflare.
 
 1. Create a file in your workspace and connect a coding agent over MCP.
 2. Ask it to explore a screen, a flow, or a design system.
-3. Pan around the canvas, compare directions, and select what needs attention.
+3. Pan around the canvas, compare directions, and pin comments where something needs attention.
 4. The agent edits the same file. Your team sees the changes as they happen.
 
 The canvas stays small and focused: pages, navigation, selection, and organization.
@@ -27,12 +27,16 @@ Agents write the designs and inspect their rendered screenshots.
 ## Room to think
 
 - **An infinite canvas.** Pan, pinch, zoom to fit, and organize work across pages.
-  Controls stay out of the way in a compact floating dock.
+  Preview navigation stays around the designs, with the fitted overview as its
+  zoom-out limit. Controls stay out of the way in a compact floating dock.
 - **Sections that breathe.** Screens flow into rows, nested groups stack, and
   content height changes reflow the layout. Drag to reorder; use free layout
   when positioning matters.
 - **A workspace for the team.** Searchable files with preview cards, live cursors,
-  shared selections, and a visible indication of what an agent is working on.
+  an active-member avatar stack, shared selections, and a visible indication of
+  what an agent is working on.
+- **Feedback that agents can act on.** Pin comments to designs, discuss them in
+  threads, then ask an agent to address the feedback and resolve it when fixed.
 - **Design systems that carry through.** Define tokens and reusable components
   once. Link another file as a library to share them across designs.
 - **A link for the review.** Share a live, view-only canvas without requiring an

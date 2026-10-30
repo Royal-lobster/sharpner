@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Actor, Peer, ServerMsg } from "../shared/types";
 import { viewerMessage } from "./viewer-message";
+import type { CommentThread } from "../shared/types";
 
 const actor: Actor = { id: "member-private-id", name: "Private member name", avatar: "https://example.test/member-photo" };
 const peer: Peer = { ...actor, cid: "private-connection", pageId: "page", selection: ["node"], cursor: { x: 10, y: 20 } };
@@ -28,5 +29,15 @@ describe("public viewer messages", () => {
     expect(viewerMessage(library)).toBe(library);
     const thumbnail: ServerMsg = { type: "sync", nodes: [], by: null };
     expect(viewerMessage(thumbnail)).toBe(thumbnail);
+  });
+
+  it("keeps feedback and its authors out of public view links", () => {
+    const thread: CommentThread = { id: "private-feedback", number: 1, anchor: { pageId: "page", nodeId: null, x: 0, y: 0 },
+      firstMessage: { id: "message", author: actor, body: "Private feedback", createdAt: 1 },
+      messageCount: 1, createdAt: 1, updatedAt: 1, resolvedAt: null, resolvedBy: null, revision: 1 };
+    expect(viewerMessage({ type: "comments", threads: [thread] })).toBeNull();
+    const initial: ServerMsg = { type: "init", pages: [], nodes: [], cid: "viewer", peers: [], library: null, comments: [thread] };
+    expect(viewerMessage(initial)).toEqual({ ...initial, comments: [] });
+    expect(initial.comments).toEqual([thread]);
   });
 });

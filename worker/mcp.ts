@@ -11,6 +11,7 @@ import { layoutHeight, layoutRects, union, type Rect } from "../shared/layout";
 import { componentTag, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op } from "../shared/types";
 import designSystemGuide from "./guides/design-system.md?raw";
 import screensGuide from "./guides/screens.md?raw";
+import { commentAnchor, commentBody } from "./comment-schema";
 
 const GUIDES = { "design-system": designSystemGuide, screens: screensGuide } as const;
 
@@ -28,7 +29,8 @@ Workflow:
 3. read_guide("screens") before designing screens. One frame per screen/state, in sections per flow, left to right.
 4. Use only tokens and component instances for styling; promote repeated markup into components.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
-6. The canvas is multiplayer: re-read if something changed, never undo others' edits.`;
+6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
+7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.`;
 
 export const mcp = new Hono<AppEnv>();
 
@@ -80,7 +82,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const open = files.find((f) => f.id === me?.last_file_id);
     if (open) {
       const stub = room(env, open.id);
-      const [peers, outline] = await Promise.all([stub.peers(), stub.outline()]);
+      const [peers, outline, comments] = await Promise.all([stub.peers(), stub.outline(), stub.comments()]);
       const mine = peers.find((p) => p.id === user.id && !p.agent);
       const page = outline.find((p) => p.id === mine?.pageId);
       const nodes = outline.flatMap((p) => p.nodes);
@@ -92,6 +94,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         currentPage: page ? { id: page.id, name: page.name } : null,
         selection: (mine?.selection ?? []).map((id) => nodes.find((n) => n.id === id)).filter(Boolean).map((n) => ({ id: n!.id, kind: n!.kind, name: n!.name })),
         othersOnline: [...new Set(peers.filter((p) => p.id !== user.id).map((p) => p.name))],
+        openCommentCount: comments.filter((t) => t.resolvedAt === null).length,
       };
     }
     return json({
@@ -103,6 +106,64 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       })),
       screenshots: Boolean(env.BROWSER),
     });
+  });
+
+  server.registerTool("list_comments", {
+    description: "List canvas feedback with excerpts, authors, resolution state and anchored design context. Open threads by default. Follow nextOffset until null; call get_comment_thread to read each relevant thread's full text and replies before fixing it.",
+    inputSchema: {
+      fileId: z.string(), pageId: z.string().optional(), nodeId: z.string().optional(),
+      status: z.enum(["open", "resolved", "all"]).default("open"),
+      offset: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(50).default(20),
+    },
+    annotations: { readOnlyHint: true },
+  }, async ({ fileId, pageId, nodeId, status, offset, limit }) => {
+    const { stub } = await access(fileId);
+    const [all, nodes, pages] = await Promise.all([stub.comments(), stub.nodes(), stub.pages()]);
+    const matches = all.filter((t) => (!pageId || t.anchor.pageId === pageId) && (!nodeId || t.anchor.nodeId === nodeId)
+      && (status === "all" || (status === "resolved") === (t.resolvedAt !== null)));
+    const threads = matches.slice(offset, offset + limit);
+    const rects = layoutRects(nodes, layoutHeight);
+    return json({ total: matches.length, nextOffset: offset + limit < matches.length ? offset + limit : null,
+      threads: threads.map((t) => ({ ...t,
+        pageName: pages.find((p) => p.id === t.anchor.pageId)?.name ?? null,
+        node: (() => { const node = nodes.find((n) => n.id === t.anchor.nodeId); return node ? { id: node.id, name: node.name, kind: node.kind, ...nodeGeometry(node, rects) } : null; })(),
+      })),
+    });
+  });
+
+  server.registerTool("get_comment_thread", {
+    description: "Read a single comment thread with full messages and replies, including resolved feedback.",
+    inputSchema: { fileId: z.string(), threadId: z.string() }, annotations: { readOnlyHint: true },
+  }, async ({ fileId, threadId }) => {
+    const { stub } = await access(fileId);
+    return json(await stub.comment(threadId));
+  });
+
+  server.registerTool("add_comment", {
+    description: "Leave feedback pinned to a design or canvas point. With nodeId, x/y are offsets from its computed top-left; otherwise x/y are page coordinates. This does not change any designs.",
+    inputSchema: { fileId: z.string(), anchor: commentAnchor, body: commentBody },
+  }, async ({ fileId, anchor, body }) => {
+    requireScope(identity, "sharpner:write");
+    const { stub } = await access(fileId);
+    return json(await stub.createComment(fileId, anchor, body, actor));
+  });
+
+  server.registerTool("reply_to_comment", {
+    description: "Reply to a canvas comment thread, e.g. to explain a verified design fix or ask for clarification. Replies are visibly attributed to the member's agent.",
+    inputSchema: { fileId: z.string(), threadId: z.string(), body: commentBody },
+  }, async ({ fileId, threadId, body }) => {
+    requireScope(identity, "sharpner:write");
+    const { stub } = await access(fileId);
+    return json(await stub.replyComment(fileId, threadId, body, actor));
+  });
+
+  server.registerTool("resolve_comment", {
+    description: "Resolve feedback after making and verifying the requested fix, or reopen it with resolved: false. The conversation is preserved. Resolving a thread does not change the design.",
+    inputSchema: { fileId: z.string(), threadId: z.string(), resolved: z.boolean() },
+  }, async ({ fileId, threadId, resolved }) => {
+    requireScope(identity, "sharpner:write");
+    const { stub } = await access(fileId);
+    return json(await stub.resolveComment(fileId, threadId, resolved, actor));
   });
 
   server.registerTool("read_guide", {
@@ -228,7 +289,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row), nested groups and top-level sections stack, and measured heights reflow without overlaps. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row), nested groups and top-level sections stack, and measured heights reflow without overlaps. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
     inputSchema: {
       fileId: z.string(),
       name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),

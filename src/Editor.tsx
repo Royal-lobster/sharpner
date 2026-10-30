@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronUp as ChevronUp, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronUp as ChevronUp, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
-import { api, colorFor, type FileInfo, type User, type Workspace } from "./api";
+import { api, type FileInfo, type User, type Workspace } from "./api";
+import { Avatar } from "./Avatar";
+import { CommentsPanel } from "./Comments";
+import type { CommentAnchor, CommentThread } from "../shared/types";
+import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { Room } from "./room";
 import { Link } from "./router";
@@ -22,8 +26,8 @@ import { Separator } from "@/components/ui/separator";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Item, ItemGroup, ItemActions } from "@/components/ui/item";
-import { Avatar as AvatarRoot, AvatarImage, AvatarFallback, AvatarBadge, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { Kbd } from "@/components/ui/kbd";
+import { AvatarStack } from "@/components/ui/avatar-stack";
 
 type FileMeta = { user: User; file: FileInfo; workspace: Workspace; files: { id: string; name: string }[]; shareToken: string | null };
 type SharedMeta = { file: { id: string; name: string }; workspace: { name: string } };
@@ -92,18 +96,48 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   room: Room; meta: FileMeta; user: User; onChange: (f: Partial<FileInfo>) => void; onShare?: (token: string | null) => void; readOnly?: boolean;
 }) {
   useSyncExternalStore(room.subscribe, room.getVersion);
+  const desktop = useDesktop();
   const { file, workspace } = meta;
   const [pageId, setPageId] = useState<string | null>(() => localStorage.getItem(`sharpner:page:${file.id}`));
   const [selection, setSelection] = useState<string[]>([]);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [open, setOpen] = useState<"pages" | "file" | "share" | null>(null);
+  const [open, setOpen] = useState<"pages" | "file" | "share" | "people" | null>(null);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [commentMode, setCommentMode] = useState(false);
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
+  const [draftComment, setDraftComment] = useState<CommentAnchor | null>(null);
+  const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
   const [dialog, setDialog] = useState<"library" | "help" | null>(null);
   const fileTrigger = useRef<HTMLButtonElement>(null);
+  const commentsTrigger = useRef<HTMLButtonElement>(null);
   const pendingFileAction = useRef<(() => void) | null>(null);
   const cancelRename = useRef(false);
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
   const page = room.pages.find((p) => p.id === pageId) ?? room.pages[0];
+  const closeComments = () => { setCommentsOpen(false); commentsTrigger.current?.focus({ preventScroll: true }); };
+  const startComment = () => {
+    setActiveCommentId(null); setOpen(null);
+    if (draftComment) { setCommentMode(false); setCommentsOpen(true); }
+    else { setCommentMode(true); setCommentsOpen(false); }
+  };
+  const selectComment = (thread: CommentThread | null) => {
+    setActiveCommentId(thread?.id ?? null); setCommentMode(false); setCommentsOpen(true);
+    if (thread) { setPageId(thread.anchor.pageId); setSelection([]); setCommentFocus((f) => ({ id: thread.id, request: (f?.request ?? 0) + 1 })); }
+  };
+
+  useEffect(() => {
+    if (readOnly) return;
+    const key = (event: KeyboardEvent) => {
+      if ((event.target as HTMLElement).closest?.("input,textarea,[contenteditable=true],[role=dialog],[role=menu]")) return;
+      if (event.key === "Escape") { setCommentMode(false); setCommentsOpen(false); }
+      else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
+        event.preventDefault(); startComment();
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [readOnly, draftComment]);
 
   useEffect(() => {
     if (!page) return;
@@ -136,8 +170,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     } catch (error) { toast((error as Error).message, { tone: "error" }); }
   };
 
-  // One avatar per person, even with several tabs open.
-  const peers = [...new Map([...room.peers.values()].filter((p) => p.id !== user.id).map((p) => [p.id, p])).values()];
+  const people = room.status === "open" ? peopleInFile(room.peers.values(), { id: user.id, name: user.name, avatar: user.avatar_url }, page?.id ?? null) : [];
+  const openComments = [...room.comments.values()].filter((t) => t.resolvedAt === null).length;
   const counts = new Map<string, number>();
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
@@ -152,9 +186,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   };
   return (
     <div className="editor" ref={trackKeyboardInset}>
-      <main className="stage">
+      <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} onSelect={setSelection} readOnly={readOnly} />
+          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} onSelect={setSelection} readOnly={readOnly}
+            commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
+            onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
           <Loading label="Connecting…" />
         )}
@@ -163,6 +199,9 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             <span className="truncate">{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span><b>· visible to agents</b>
           </Badge>
         )}
+        {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
+        {!readOnly && <CommentsPanel room={room} open={commentsOpen && !commentMode} activeId={activeCommentId} draft={draftComment}
+          onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       </main>
       {/* Keyboard interaction with the dock and its panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
       <div className="editor-dock" onKeyDown={(e) => e.stopPropagation()}>
@@ -237,6 +276,31 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             </ItemGroup>
           </DockPanel>
           {!readOnly && <>
+            <Separator orientation="vertical" className="dock-divider dock-people-divider" />
+            <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people"
+              trigger={<Button variant="ghost" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
+                title={people.map((p) => p.id === user.id ? `${p.name} (you)` : p.name).join(", ") || "Reconnecting…"}>
+                <AvatarStack max={desktop ? 4 : 2} size={desktop ? 28 : 24}>{people.length
+                  ? people.map((p) => <Avatar key={p.id} id={p.id} name={p.name} src={p.avatar} />)
+                  : <Avatar id={user.id} name={user.name} src={user.avatar_url} />}</AvatarStack>
+                <span className={`presence-dot${room.status !== "open" ? " disconnected" : ""}`} aria-hidden />
+              </Button>}>
+              {people.map((person) => <Button key={person.id} variant="ghost" className="person-row" onClick={() => {
+                const target = person.pageIds.includes(page?.id ?? "") ? page?.id : person.pageIds[0];
+                if (target) { setPageId(target); setSelection([]); setOpen(null); }
+              }}>
+                <Avatar id={person.id} name={person.name} src={person.avatar} />
+                <span><strong>{person.name}{person.id === user.id ? " (you)" : ""}</strong><small>{person.pageIds.map((id) => room.pages.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || "Opening file…"}</small></span>
+                <span className="presence-dot" aria-label="Online" />
+              </Button>)}
+              {room.status !== "open" && <p className="text-xs text-muted-foreground">Reconnecting to see who’s here…</p>}
+              {room.agentActivity.size > 0 && <div className="agent-presence"><IconSparkles aria-hidden />An agent is working in this file</div>}
+            </DockPanel>
+            <Button ref={commentsTrigger} variant="ghost" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
+              aria-expanded={commentsOpen && !commentMode} aria-controls="comments-panel"
+              title="Comments (C to add)" onClick={() => { setCommentsOpen((value) => !value); setCommentMode(false); setOpen(null); }}>
+              <IconMessageCircle className="size-4" aria-hidden /><span className="dock-comments-count">{openComments || ""}</span>
+            </Button>
             <Separator orientation="vertical" className="dock-divider dock-share-divider" />
             <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share"
               trigger={
@@ -246,17 +310,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 </Button>
               }>
               <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />
-              {(peers.length > 0 || room.agentActivity.size > 0) && <>
-                <Separator />
-                <div className="dock-presence">
-                  <span className="text-xs text-muted-foreground">In this file</span>
-                  <AvatarGroup>
-                    {peers.slice(0, 4).map((p) => <Avatar key={p.cid} name={p.name} id={p.id} src={p.avatar} />)}
-                    {peers.length > 4 && <AvatarGroupCount title={peers.slice(4).map((p) => p.name).join(", ")}>+{peers.length - 4}</AvatarGroupCount>}
-                    {room.agentActivity.size > 0 && <Avatar name="Agent" id="agent" src={null} title="An agent is editing" agent />}
-                  </AvatarGroup>
-                </div>
-              </>}
             </DockPanel>
           </>}
         </ButtonGroup></nav>
@@ -282,6 +335,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag</dd>
                 <dt>Images</dt><dd>Drop or paste</dd>
                 <dt>Delete</dt><dd>⌫</dd>
+                <dt>Comment</dt><dd><Kbd>C</Kbd>, then click a spot</dd>
               </>}
             </dl>
           </div>
@@ -397,16 +451,6 @@ function trackKeyboardInset(el: HTMLElement | null) {
   vv.addEventListener("resize", update);
   vv.addEventListener("scroll", update);
   return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
-}
-
-export function Avatar({ name, id, src, title, agent }: { name: string; id: string; src: string | null; title?: string; agent?: boolean }) {
-  return (
-    <AvatarRoot title={title ?? name}>
-      {src && <AvatarImage src={src} alt="" />}
-      <AvatarFallback style={{ backgroundColor: agent ? "var(--primary)" : colorFor(id), color: "var(--primary-foreground)" }}>{name.slice(0, 1).toUpperCase()}</AvatarFallback>
-      {agent && <AvatarBadge><IconSparkles aria-label="Agent" /></AvatarBadge>}
-    </AvatarRoot>
-  );
 }
 
 /** View-only link sharing for a file: off, or one link anyone can open to watch. */
