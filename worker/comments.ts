@@ -3,11 +3,11 @@ import { commentPoint } from "../shared/comments";
 import type { Rect } from "../shared/layout";
 import type { Actor, CanvasNode, CommentAnchor, CommentDetail, CommentMessage, CommentThread } from "../shared/types";
 
-export const COMMENT_SCHEMA = `CREATE TABLE comment_threads (
+export const COMMENT_SCHEMA = `CREATE TABLE IF NOT EXISTS comment_threads (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, node_id TEXT, data TEXT NOT NULL);
-  CREATE INDEX comment_threads_page ON comment_threads(page_id);
-  CREATE TABLE comment_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, data TEXT NOT NULL);
-  CREATE INDEX comment_messages_thread ON comment_messages(thread_id);`;
+  CREATE INDEX IF NOT EXISTS comment_threads_page ON comment_threads(page_id);
+  CREATE TABLE IF NOT EXISTS comment_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, data TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS comment_messages_thread ON comment_messages(thread_id);`;
 
 /** Synchronous SQLite operations run within the room's transaction. Authors always come from verified identity. */
 export class Comments {

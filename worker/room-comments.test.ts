@@ -42,10 +42,20 @@ function fixture() {
   };
   const room = wake(), pageId = room.pages()[0]!.id;
   const apply = (ops: Parameters<FileRoom["apply"]>[2]) => room.apply("file", "https://sharpner.example", ops, human);
-  return { room, wake, apply, pageId, broadcasts };
+  return { db, room, wake, apply, pageId, broadcasts };
 }
 
 describe("persistent file comments", () => {
+  it("preserves feedback if an older deployment lowers the recorded migration version", () => {
+    const { db, room, wake, pageId } = fixture();
+    const thread = room.createComment("file", { pageId, nodeId: null, x: 10, y: 20 }, "Keep this feedback", human);
+    // The pre-comments constructor recorded its own schema length even when storage was newer.
+    db.prepare("UPDATE meta SET v = '4' WHERE k = 'schema'").run();
+    const recovered = wake();
+    expect(recovered.comment(thread.id).messages[0]!.body).toBe("Keep this feedback");
+    expect(recovered.createComment("file", thread.anchor, "More feedback", human).number).toBeGreaterThan(thread.number);
+  });
+
   it("preserves full feedback, human/agent attribution and resolution across hibernation", () => {
     const { room, wake, pageId, broadcasts } = fixture();
     const body = "Please improve the spacing. ".repeat(30);
