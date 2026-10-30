@@ -473,7 +473,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
         // Dropping into (or out of) a section re-parents the node.
         if (parentId !== f.parentId) op.node.parentId = parentId;
         if (orders.has(id)) op.node.order = orders.get(id);
-        // Reordering page sections keeps the stack's anchor stable.
+        // Reordering page sections keeps the layout's anchor stable.
         if (!parentId && f.kind === "section" && f.layout === "auto") Object.assign(op.node, anchors.get(id));
       }
       return [op];

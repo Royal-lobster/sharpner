@@ -53,7 +53,7 @@ A node showing an uploaded picture.
 _Avoid_: Asset, photo
 
 **Section**:
-A labeled group that wraps the nodes inside it and can contain other sections. New sections arrange their contents automatically in ordered rows; nested sections stack. A section can use free layout for explicit positioning. Existing manual sections retain free layout.
+A labeled group that wraps the nodes inside it and can contain other sections. New sections arrange their contents automatically in ordered rows; sections of screens (flows) take a row each, and other sibling sections tile into columns. A section can use free layout for explicit positioning. Existing manual sections retain free layout.
 _Avoid_: Group, area, container, folder
 
 **Selection**:
