@@ -10,7 +10,7 @@ Give your agent room to design. Browse the result, arrange screens, and explore
 ideas together on an infinite canvas. The designs are HTML, the changes are live,
 and the whole app runs on Cloudflare.
 
-[Open Sharpner](https://sharpner.srujangs8.workers.dev) · [Run locally](CONTRIBUTING.md#run-locally) · [Connect an agent](docs/agents.md) · [Contribute](CONTRIBUTING.md)
+[Open Sharpner](https://sharpner.app) · [Run locally](CONTRIBUTING.md#run-locally) · [Connect an agent](docs/agents.md) · [Contribute](CONTRIBUTING.md)
 
 </div>
 
@@ -94,6 +94,6 @@ rendering model, access rules, and current limitations.
 
 Sharpner is open source under the [MIT license](LICENSE). Run it locally, host your
 own instance, or contribute a change. Self-hosting uses your own Cloudflare and
-Clerk accounts; the hosted preview currently uses a Clerk development instance.
+Clerk accounts.
 
 Start with [Contributing](CONTRIBUTING.md) for setup, verification, and deployment.

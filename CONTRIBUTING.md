@@ -50,7 +50,8 @@ Use a dedicated application in the [Clerk Dashboard](https://dashboard.clerk.com
 4. To connect an agent with OAuth, follow [the agent setup guide](docs/agents.md).
 
 Each deployment uses its own Clerk application URLs, OAuth clients, and webhook
-endpoint. The hosted preview is configured with a Clerk development instance.
+endpoint. [sharpner.app](https://sharpner.app) uses a production Clerk instance;
+use a development instance for local work.
 
 ## Verify changes
 
