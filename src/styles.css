@@ -238,6 +238,8 @@ body:has(.editor) { --toast-offset: 84px; }
 .editor-navigation { top: calc(16px + var(--safe-top)); bottom: auto; }
 .editor-collaboration { max-width: calc(100% - 260px - var(--safe-left) - var(--safe-right)); }
 .dock-bar { max-width: 100%; position: relative; }
+/* Floating controls are spaced apart, so each keeps the design system's button radius. */
+.dock-bar > :is(button, a), .zoom > button { border-radius: var(--radius-md); }
 .dock-button { gap: 8px; min-width: 0; max-width: 240px; flex-shrink: 1; }
 .dock-button > span:first-of-type { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .dock-chevron { flex: none; transition: transform 0.16s var(--ease); }
