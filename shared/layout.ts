@@ -11,6 +11,14 @@ export const SECTION_GAP = 160;
 export const AUTO_ROW_WIDTH = 6400;
 export const AUTO_COLUMNS = 4;
 /**
+ * Sibling sections (nested groups, or a page's automatic sections) share rows of about √n so a page
+ * grows roughly as wide as it is tall. The count depends only on how many there are, never on measured
+ * heights, so content that resizes moves later rows down without reshuffling which row a section is in.
+ */
+export const sectionColumns = (count: number) => Math.max(1, Math.ceil(Math.sqrt(count)));
+/** A row of sections may run a quarter past its widest member, so a narrow sheet can sit beside a full-width group. */
+export const sectionRowWidth = (widths: number[]) => Math.max(AUTO_ROW_WIDTH, ...widths.map((w) => w * 1.25));
+/**
  * A component-only automatic section is a catalog: specimens pack tightly, each component family
  * ("Chip" in "Chip/Active") starts its own row, and the family name sits once in a left gutter.
  */
@@ -56,14 +64,17 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
         const catalog = isCatalog(children);
         const pad = catalog ? CATALOG_PAD : SECTION_PAD, gap = catalog ? CATALOG_GAP : AUTO_GAP, rowGap = catalog ? CATALOG_ROW_GAP : AUTO_GAP;
         const gutter = catalog && children.some((k) => familyOf(k.name)) ? CATALOG_GUTTER : 0;
+        const groupRects = inner.filter((_, i) => children[i]!.kind === "section");
+        const groupColumns = sectionColumns(groupRects.length), groupRowWidth = sectionRowWidth(groupRects.map((g) => g.w));
         let x = 0, y = 0, rowHeight = 0, columns = 0, width = 0;
         for (let i = 0; i < children.length; i++) {
           const child = children[i]!, cr = inner[i]!;
-          // Nested groups take their own row; their full measured height moves the following group.
+          // Nested groups share rows only with other groups; their measured heights move the following row.
           // Catalogs wrap per family instead of after a fixed column count.
+          const group = child.kind === "section";
           const wraps = catalog
             ? familyOf(child.name) !== familyOf(children[i - 1]?.name ?? "") || x + cr.w > CATALOG_ROW_WIDTH
-            : child.kind === "section" || columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
+            : group !== (children[i - 1]?.kind === "section") || columns >= (group ? groupColumns : AUTO_COLUMNS) || x + cr.w > (group ? groupRowWidth : AUTO_ROW_WIDTH);
           if (columns && wraps) {
             y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
           }
@@ -75,9 +86,6 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
           width = Math.max(width, x + cr.w);
           rowHeight = Math.max(rowHeight, cr.h);
           x += cr.w + gap; columns++;
-          if (child.kind === "section" && i < children.length - 1) {
-            y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
-          }
         }
         r = { x: f.x, y: f.y, w: gutter + width + pad * 2, h: y + rowHeight + pad * 2 };
       } else {
@@ -96,12 +104,16 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
   for (const roots of pages.values()) {
     const anchors = roots.filter((f) => !floating?.has(f.id));
     const base = anchors.length ? anchors : roots;
-    const sorted = ordered(roots), x = Math.min(...base.map((f) => f.x));
-    let y = Math.min(...base.map((f) => f.y));
+    const sorted = ordered(roots), left = Math.min(...base.map((f) => f.x)), top = Math.min(...base.map((f) => f.y));
+    const perRow = sectionColumns(sorted.length), rowWidth = sectionRowWidth(sorted.map((f) => rects.get(f.id)!.w));
+    let x = 0, y = 0, rowHeight = 0, columns = 0;
     for (const root of sorted) {
       const r = rects.get(root.id)!;
-      if (!floating?.has(root.id)) shift(root, x - r.x, y - r.y);
-      y += r.h + SECTION_GAP;
+      if (columns && (columns >= perRow || x + r.w > rowWidth)) {
+        y += rowHeight + SECTION_GAP; x = 0; rowHeight = 0; columns = 0;
+      }
+      if (!floating?.has(root.id)) shift(root, left + x - r.x, top + y - r.y);
+      x += r.w + SECTION_GAP; rowHeight = Math.max(rowHeight, r.h); columns++;
     }
   }
   return rects;
@@ -183,7 +195,7 @@ export function dropOrders(frames: CanvasNode[], rects: Map<string, Rect>, ids: 
   return placed;
 }
 
-/** Finds a pointer's insertion slot: rows use horizontal midpoints, stacked sections use vertical ones. */
+/** Finds a pointer's insertion slot: rows use horizontal midpoints, a section alone in its row uses vertical ones. */
 function dropIndex(siblings: CanvasNode[], rects: ReadonlyMap<string, Rect>, point: { x: number; y: number }) {
   const rows: CanvasNode[][] = [];
   for (const node of siblings) {
@@ -206,7 +218,7 @@ function dropIndex(siblings: CanvasNode[], rects: ReadonlyMap<string, Rect>, poi
     if (point.y > nextRowBoundary) continue;
     const following = row.find((node) => {
       const rect = rects.get(node.id)!;
-      return node.kind === "section" ? point.y < rect.y + rect.h / 2 : point.x < rect.x + rect.w / 2;
+      return node.kind === "section" && row.length === 1 ? point.y < rect.y + rect.h / 2 : point.x < rect.x + rect.w / 2;
     });
     return following ? siblings.indexOf(following) : siblings.indexOf(row.at(-1)!) + 1;
   }
