@@ -128,6 +128,10 @@ Put optional public OAuth settings in `wrangler.jsonc`'s `vars`; actual credenti
 belong in Worker secrets. Verify sign-in, workspace creation, file creation, and
 agent authorization against your own instance.
 
+When moving to a custom domain, set `APP_ORIGIN` to its HTTPS origin in `vars`.
+Browser file links on the old host then open the same path on the new domain
+before Clerk initializes. Keep the old hostname enabled while those links are in use.
+
 ## Pull requests
 
 Explain the trigger, resulting behavior, and relevant verification. Keep unrelated

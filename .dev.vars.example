@@ -8,3 +8,5 @@ CLERK_MCP_CLIENT_ID=
 CLERK_MCP_CALLBACK_PORT=
 # Set to 1 only after enabling Clerk's API Keys feature; hidden by default.
 CLERK_API_KEYS_ENABLED=
+# Optional HTTPS origin for the hosted app; browser file links on older hosts open here.
+APP_ORIGIN=

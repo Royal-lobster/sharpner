@@ -238,3 +238,20 @@ describe("Clerk public configuration and webhook boundary", () => {
     expect(authErrorStatus(new Error("Unrelated"))).toBeNull();
   });
 });
+
+describe("canonical app origin", () => {
+  it("publishes the configured HTTPS origin for browser file-link redirects", async () => {
+    const response = await app().request("/auth/config", {}, { ...env, APP_ORIGIN: "https://sharpner.app/" });
+    expect(await response.json()).toMatchObject({ appOrigin: "https://sharpner.app", configured: true });
+  });
+
+  it.each([undefined, "", "http://sharpner.app", "https://user:password@sharpner.app", "https://sharpner.app/path", "https://sharpner.app?next=elsewhere", "not a URL"])(
+    "omits an absent or invalid canonical origin %s without breaking sign-in configuration",
+    async (APP_ORIGIN) => {
+      const response = await app().request("/auth/config", {}, { ...env, APP_ORIGIN });
+      const config = await response.json() as { configured: boolean };
+      expect(config).not.toHaveProperty("appOrigin");
+      expect(config.configured).toBe(true);
+    },
+  );
+});

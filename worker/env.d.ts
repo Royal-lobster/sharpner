@@ -6,5 +6,6 @@ type Env = Omit<CloudflareBindings, "BROWSER"> & {
   CLERK_PUBLISHABLE_KEY: string;
   CLERK_SECRET_KEY: string;
   CLERK_WEBHOOK_SIGNING_SECRET: string;
+  APP_ORIGIN?: string;
   BROWSER?: BrowserRun;
 };

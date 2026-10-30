@@ -10,7 +10,7 @@ import { LoginShowcase } from "./LoginShowcase";
 
 export type Me = { user: User; workspaces: Workspace[]; activeWorkspaceId: string | null };
 export type AgentConnectionConfig = { mcpClientId: string | null; mcpCallbackPort: number | null; agentKeysEnabled: boolean };
-type AuthConfig = { publishableKey: string; configured: boolean } & AgentConnectionConfig;
+type AuthConfig = { publishableKey: string; configured: boolean; appOrigin?: string } & AgentConnectionConfig;
 
 type Appearance = NonNullable<ComponentProps<typeof ClerkProvider>["appearance"]>;
 
@@ -75,7 +75,12 @@ function SignedApp() {
     fetch("/auth/config", { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Sign-in could not be loaded.");
-        setConfig(await response.json() as AuthConfig);
+        const config = await response.json() as AuthConfig;
+        if (config.appOrigin && config.appOrigin !== location.origin) {
+          location.replace(`${config.appOrigin}${location.pathname}${location.search}${location.hash}`);
+          return;
+        }
+        setConfig(config);
       })
       .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); });
     return () => controller.abort();

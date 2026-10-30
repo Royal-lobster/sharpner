@@ -79,7 +79,19 @@ export function requireScope(identity: Identity, scope: Scope) {
 
 export const auth = new Hono<AppEnv>();
 
+/** A configured production origin lets browser file links survive a hostname change. */
+function configuredAppOrigin(value?: string): string | null {
+  try {
+    const url = new URL(value ?? "");
+    return url.protocol === "https:" && !url.username && !url.password && url.pathname === "/" && !url.search && !url.hash
+      ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 auth.get("/config", (c) => {
+  const appOrigin = configuredAppOrigin(c.env.APP_ORIGIN);
   const clientId = c.env.CLERK_MCP_CLIENT_ID?.trim() ?? "";
   const callbackPort = c.env.CLERK_MCP_CALLBACK_PORT?.trim() ?? "";
   const port = Number(callbackPort);
@@ -90,6 +102,7 @@ auth.get("/config", (c) => {
   return c.json({
     publishableKey: c.env.CLERK_PUBLISHABLE_KEY || "",
     configured: Boolean(c.env.CLERK_PUBLISHABLE_KEY && c.env.CLERK_SECRET_KEY),
+    ...(appOrigin ? { appOrigin } : {}),
     mcpClientId: publicClient ? clientId : null,
     mcpCallbackPort: publicClient ? port : null,
     agentKeysEnabled: c.env.CLERK_API_KEYS_ENABLED === "1",
