@@ -4,7 +4,7 @@ import type { Camera } from "./canvas-render-plan";
 export const MAX_CANVAS_ZOOM = 8;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-/** A page's preview stays within its content, with space for labels and the editor controls. */
+/** Fit locks the page overview; zoomed previews can be panned freely to inspect any detail. */
 export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) {
   const bounds = rects.length ? union(rects) : { x: 0, y: 0, w: 800, h: 600 };
   const width = Math.max(1, size.w), height = Math.max(1, size.h);
@@ -23,18 +23,14 @@ export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) 
   const overview = fitRect(bounds, 1);
   const minZoom = overview.z;
 
-  const axis = (offset: number, start: number, extent: number, viewStart: number, viewExtent: number, z: number) => {
-    const center = viewStart + (viewExtent - extent * z) / 2 - start * z;
-    // A cluster that fits on an axis stays centered there instead of sliding into empty space.
-    if (extent * z <= viewExtent) return center;
-    const desired = Number.isFinite(offset) ? offset : center;
-    return clamp(desired, viewStart + viewExtent - (start + extent) * z, viewStart - start * z);
-  };
   const constrain = (camera: Camera): Camera => {
     const z = Number.isFinite(camera.z) && camera.z > 0 ? clamp(camera.z, minZoom, MAX_CANVAS_ZOOM) : minZoom;
+    if (z === minZoom) return overview;
+    // A zoomed page must be movable past its edges, including on an axis where it still fits.
+    // Otherwise labels and details can get trapped behind the floating editor controls.
     return { z,
-      x: axis(camera.x, bounds.x, bounds.w, viewport.x, viewport.w, z),
-      y: axis(camera.y, bounds.y, bounds.h, viewport.y, viewport.h, z),
+      x: Number.isFinite(camera.x) ? camera.x : viewport.x + viewport.w / 2 - (bounds.x + bounds.w / 2) * z,
+      y: Number.isFinite(camera.y) ? camera.y : viewport.y + viewport.h / 2 - (bounds.y + bounds.h / 2) * z,
     };
   };
 

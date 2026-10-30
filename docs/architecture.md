@@ -77,16 +77,16 @@ Component nodes show their real default instance directly on the file's backgrou
 
 Known limitations: the initial sync still includes geometry for the whole file, including other pages; HTML and image loading are lazy. Canvas-layer nodes paint beneath DOM-layer nodes, so overlapping nodes of very different on-screen sizes can stack incorrectly. Zoomed-out edits appear after the replacement thumbnail is ready. Generating new previews is separate from opening an existing file with previews ready.
 
-Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding.
+Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding. Responsive layouts retain the same Mira component sizes and padding; mobile changes rearrange controls and constrain widths, rather than enlarging buttons, tabs, inputs, or menus.
 
-Preview navigation stays within the current page's computed content bounds,
-with margins for labels and controls. The fitted overview is the minimum zoom
-(capped at 100% for small designs); a cluster that fits on an axis stays centered
-there. Zoomed-in views can pan between the content's edges. All camera writes,
-including mouse/trackpad, touch, keyboard, animated focus and restored views,
+Preview navigation locks panning at the fitted overview, which is also the minimum
+zoom. Above that zoom, panning is free on both axes so any part of a design can be
+centered and titles can be moved clear of floating controls. Returning to Fit or
+pinching back to the minimum zoom restores the content overview and its margins.
+All camera writes, including mouse/trackpad, touch, keyboard, animated focus and restored views,
 use the same constraints. Bounds update with live layout and viewport changes;
 visible comment pins also contribute so detached feedback remains reachable.
-Empty pages use a bounded 800×600 area until content arrives. Page changes cancel
+Empty pages fit a virtual 800×600 area until content arrives. Page changes cancel
 pending camera animation and persistence work.
 
 ## Identity and access
@@ -106,9 +106,9 @@ position, and page deletion removes its threads. Comment writes do not invalidat
 sources, layout caches, thumbnails, or design libraries. Public viewers receive
 neither comment summaries nor conversations.
 
-The comment panel reserves canvas space on desktop and mobile, so camera bounds
-and focused pins use the visible preview area. Closing the panel or switching
-threads preserves unfinished text during the editor session; closing also returns
+The comment panel floats over the desktop canvas. On mobile, its actual height
+reserves canvas space so focused pins use the visible preview area. Closing the
+panel or switching threads preserves unfinished text during the editor session; closing also returns
 keyboard focus to the comments control.
 
 Clerk Users identify people; Clerk Organizations are workspaces. Personal Accounts are disabled. The browser uses Clerk sign-in, the organization switcher, and the account menu. Workspace membership and invitations are managed in Clerk rather than separate Sharpner forms.
