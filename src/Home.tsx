@@ -223,11 +223,15 @@ function AgentSettings({ config, open, onOpenChange }: { config: AgentConnection
         <ItemGroup>
           <Item role="listitem" className="items-start p-0">
             <ItemMedia><Badge variant="outline" aria-label="Step 1">1</Badge></ItemMedia>
-            <ItemContent className="min-w-0 gap-2"><ItemTitle>Add Sharpner to Claude Code</ItemTitle><CopyBlock label="Terminal" text={cli} /></ItemContent>
+            <ItemContent className="min-w-0 gap-2"><ItemTitle>Add Sharpner to Claude Code</ItemTitle><ItemDescription>This saves the connection. Sign in separately in the next step.</ItemDescription><CopyBlock label="Terminal" text={cli} /></ItemContent>
           </Item>
           <Item role="listitem" className="items-start p-0">
             <ItemMedia><Badge variant="outline" aria-label="Step 2">2</Badge></ItemMedia>
-            <ItemContent className="min-w-0"><ItemTitle>Sign in when the browser opens</ItemTitle><ItemDescription>Approve access, and your agent can open and edit this workspace’s files.</ItemDescription></ItemContent>
+            <ItemContent className="min-w-0 gap-2"><ItemTitle>Start authentication</ItemTitle><ItemDescription>Run this in the same project directory.</ItemDescription><CopyBlock label="Terminal" text="claude mcp login sharpner" /><ItemDescription>Inside Claude Code, you can also use <code>/mcp</code> → <strong>sharpner</strong> → <strong>Authenticate</strong>.</ItemDescription></ItemContent>
+          </Item>
+          <Item role="listitem" className="items-start p-0">
+            <ItemMedia><Badge variant="outline" aria-label="Step 3">3</Badge></ItemMedia>
+            <ItemContent className="min-w-0"><ItemTitle>Approve access in your browser</ItemTitle><ItemDescription>Sign in to Sharpner and approve your agent’s access to your workspace files.</ItemDescription></ItemContent>
           </Item>
         </ItemGroup>
         <Collapsible className="border-t pt-2">

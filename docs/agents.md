@@ -10,7 +10,25 @@ Copy the command from **Connect an agent**. When a public Claude Code client is 
 claude mcp add --transport http --client-id <public-client-id> --callback-port 54765 sharpner https://<your-domain>/mcp
 ```
 
-On first use, Claude Code opens Clerk's browser sign-in/consent flow and receives its result on the registered local callback. The client ID and callback port are public configuration; no client secret or bearer header is needed.
+The add command saves the connection; it does not sign you in. Authenticate it
+separately from the same project directory:
+
+```sh
+claude mcp login sharpner
+```
+
+Alternatively, open or restart Claude Code, run `/mcp`, select **sharpner**, and
+choose **Authenticate**. Complete Clerk's browser sign-in and approve access.
+Claude Code receives the result on the registered local callback and stores the
+credentials for later sessions. If Sharpner is already registered, skip the add
+command and retry authentication directly.
+
+For SSH or headless terminals, use `claude mcp login sharpner --no-browser` and
+follow its authorization URL and callback prompts. See [Claude Code's MCP
+authentication guide](https://code.claude.com/docs/en/mcp#authenticate-from-the-command-line).
+
+The client ID and callback port are public configuration; no client secret or
+bearer header is needed.
 
 There is no Sharpner OAuth callback or token broker. Clerk handles authorization, PKCE, and token refresh. Other agents need their own registered public OAuth client or a CIMD metadata URL approved in Clerk; the JSON connection snippet alone does not register a client. Automatic client registration is disabled.
 
@@ -66,6 +84,12 @@ register both `http://localhost:54765/callback` and
 `http://127.0.0.1:54765/callback`. Set `CLERK_MCP_CLIENT_ID` and
 `CLERK_MCP_CALLBACK_PORT` in local `.dev.vars` or production Wrangler `vars`.
 These are public configuration; the client needs no secret.
+
+The registered client must allow every scope Sharpner requests: `openid`,
+`profile`, `email`, and `offline_access`. Setting instance-wide default scopes
+does not grant those scopes to an existing client. A missing client scope
+causes an `invalid_scope` callback error; correct the allowed scopes in Clerk,
+then start authentication again.
 
 Publish Clerk's OAuth server. Other agents need their own registered public
 client or an approved Client ID Metadata Document (CIMD). Use pre-registered
