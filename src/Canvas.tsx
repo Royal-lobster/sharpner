@@ -5,6 +5,7 @@ import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
 import { toast } from "./toast";
+import { Avatar } from "./Avatar";
 import { ThumbnailCache, thumbnailSource } from "./thumbnail-cache";
 import { applyTouch, TouchNavigator } from "./touch-gestures";
 import { canvasGestureBoundary } from "./canvas-gesture-boundary";
@@ -669,10 +670,10 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
           const point = commentPoint(thread.anchor, rects);
           return <button key={thread.id} className={`comment-pin${thread.id === activeCommentId ? " active" : ""}${thread.resolvedAt ? " resolved" : ""}`}
             style={{ left: point.x, top: point.y }} aria-label={`Comment ${thread.number} by ${thread.firstMessage.author.name}: ${thread.firstMessage.body}`}
-            aria-pressed={thread.id === activeCommentId} title={thread.firstMessage.body}
+            aria-pressed={thread.id === activeCommentId} title={`#${thread.number} · ${thread.firstMessage.author.name}: ${thread.firstMessage.body}`}
             onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerMove={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onOpenComment?.(thread); }}>
-            {thread.number}
+            <Avatar id={thread.firstMessage.author.id} name={thread.firstMessage.author.name} src={thread.firstMessage.author.avatar} agent={thread.firstMessage.author.agent} />
           </button>;
         })}
         {!readOnly && draftComment?.pageId === pageId && <span className="comment-pin draft" role="img" aria-label="New comment location"
