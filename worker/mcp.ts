@@ -21,7 +21,7 @@ Vocabulary:
 - Workspace → files → pages → nodes. Node kinds: "frame" (HTML rendered at a viewport width: a screen, state, slide), "image", "section" (a labeled group that auto-fits its contents and can nest), "component" (reusable HTML), "tokens" (a token sheet: Tailwind v4 CSS defining the design tokens).
 - A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
 - Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
-- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows; nested groups, like automatic top-level sections, fill their own balanced rows (about √n per row, wrapping at the row width) so a page grows about as wide as it is tall. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
+- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
 
 Workflow:
 1. get_app_state: what the user has open and selected ("this frame" means the selection).
@@ -289,7 +289,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row); nested groups and top-level sections fill their own rows of about √n in reading order; measured heights move later rows without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a labeled section, optionally nested. Defaults to automatic layout: children wrap in order (up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
     inputSchema: {
       fileId: z.string(),
       name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),
