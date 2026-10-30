@@ -235,6 +235,8 @@ body:has(.editor) { --toast-offset: 84px; }
 .stage { position: relative; flex: 1; min-width: 0; overflow: hidden; overscroll-behavior: none; }
 .editor-dock { position: absolute; z-index: 20; left: calc(16px + var(--safe-left)); bottom: calc(16px + var(--safe-bottom) + var(--keyboard)); max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right)); transition: bottom 0.2s var(--ease); }
 .dock-bar, .zoom { align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--popover); box-shadow: 0 4px 20px rgb(0 0 0 / 0.3); }
+.editor-navigation { top: calc(16px + var(--safe-top)); bottom: auto; }
+.editor-collaboration { max-width: calc(100% - 260px - var(--safe-left) - var(--safe-right)); }
 .dock-bar { max-width: 100%; position: relative; }
 .dock-button { gap: 8px; min-width: 0; max-width: 240px; flex-shrink: 1; }
 .dock-button > span:first-of-type { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
@@ -271,7 +273,7 @@ body:has(.editor) { --toast-offset: 84px; }
 .person-row small { color: var(--muted-foreground); font-size: 11px; }
 .agent-presence { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 12px; }
 .agent-presence svg { width: 16px; height: 16px; }
-.dock-comments-button { flex: none; gap: 5px; }
+.dock-comments-button { flex: none; min-width: 44px; gap: 5px; }
 .dock-comments-button[aria-pressed=true] { color: var(--primary); background: var(--accent); }
 .dock-comments-count { font-size: 11px; font-variant-numeric: tabular-nums; }
 .canvas-help dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 20px; margin: 0; font-size: 12px; }
@@ -284,34 +286,31 @@ body:has(.editor) { --toast-offset: 84px; }
 .share-url { min-width: 0; font-family: var(--font-mono); text-overflow: ellipsis; }
 .selection-pill { position: absolute; top: calc(14px + var(--safe-top)); left: 50%; transform: translateX(-50%); max-width: min(480px, calc(100% - 32px)); gap: 6px; padding: 7px 12px; pointer-events: none; }
 .selection-pill b { color: var(--primary); font-weight: 500; }
-.zoom { position: absolute; right: calc(16px + var(--safe-right)); bottom: calc(16px + var(--safe-bottom)); }
+.zoom { position: absolute; z-index: 20; right: calc(16px + var(--safe-right)); bottom: calc(16px + var(--safe-bottom)); }
 .zoom-pct { min-width: 52px; font-variant-numeric: tabular-nums; }
 @media (hover: none), (pointer: coarse) {
   .touch-help { display: block; } .keyboard-help { display: none; } .page-actions { opacity: 1; }
 }
-@media (max-width: 560px) {
-  .editor-dock { left: calc(10px + var(--safe-left)); right: calc(10px + var(--safe-right)); bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); max-width: none; }
-  .dock-bar { width: 100%; }
+@media (max-width: 700px) {
+  .editor-dock { left: calc(10px + var(--safe-left)); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
+  .editor-navigation { top: calc(10px + var(--safe-top)); right: calc(10px + var(--safe-right)); bottom: auto; }
+  .editor-navigation .dock-bar { width: 100%; }
+  .editor-collaboration { bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); max-width: calc(100% - 140px - var(--safe-left) - var(--safe-right)); }
   .dock-file-button { flex: 1 1 0; }
   .dock-page-button { flex: 0 1 auto; max-width: 44%; }
   .dock-share-divider, .dock-share-label { display: none; }
   .dock-share-button { position: relative; flex: none; width: 44px; padding-inline: 0; }
   .dock-share-button .share-on-dot { position: absolute; top: 7px; right: 7px; }
-  .dock-people-button { min-width: 44px; gap: 4px; }
-  .dock-people-button { position: absolute; left: 0; bottom: calc(100% + 8px); padding: 6px 8px; border: 1px solid var(--border); border-radius: 999px !important; background: var(--popover); }
-  .dock-people-divider { display: none; }
+  .dock-people-button { min-width: 44px; gap: 4px; padding-inline: 8px; }
   .dock-people-button > .presence-dot { display: none; }
   .dock-comments-button { padding-inline: 8px; }
-  .dock-page-button { max-width: 30%; }
-  .selection-pill { top: calc(10px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 150px - var(--safe-left) - var(--safe-right)); }
+  .selection-pill { top: calc(76px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
   .selection-pill b { display: none; }
-  .zoom { top: calc(10px + var(--safe-top)); right: calc(10px + var(--safe-right)); bottom: auto; }
+  .zoom { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); }
   .zoom .zoom-step, .zoom-divider { display: none; }
 }
 @media (max-height: 480px) and (orientation: landscape) {
-  .editor-dock { left: calc(10px + var(--safe-left)); right: auto; bottom: calc(max(8px, var(--safe-bottom)) + var(--keyboard)); max-width: min(520px, calc(100% - 200px)); }
   .dock-popover { max-height: calc(100dvh - 48px - var(--keyboard)); }
-  .zoom { top: auto; bottom: calc(max(8px, var(--safe-bottom))); }
   .zoom .zoom-step, .zoom-divider { display: none; }
 }
 /* Touch targets adapt together, while desktop components retain the preset sizes. */
@@ -361,18 +360,18 @@ body:has(.editor) { --toast-offset: 84px; }
 .comment-pin.draft { pointer-events: none; outline: 3px solid color-mix(in srgb, var(--primary) 45%, transparent); }
 .comments-panel {
   position: absolute; z-index: 15; right: calc(16px + var(--safe-right)); top: calc(16px + var(--safe-top));
-  bottom: calc(80px + var(--safe-bottom) + var(--keyboard)); width: 340px; max-width: calc(100% - 32px);
+  width: 340px; max-width: calc(100% - 32px);
+  max-height: min(520px, calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom) - var(--keyboard)));
   display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden;
   background: var(--popover); user-select: text;
 }
 .comments-panel[hidden] { display: none; }
-.stage.comments-open .canvas { right: 370px; }
 .comments-heading { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid var(--border); flex: none; }
 .comments-heading h2 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 500; }
 .comment-count { display: inline-grid; place-items: center; min-width: 20px; padding: 1px 5px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); font-size: 11px; }
 .comment-filters { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .comment-filters span { color: var(--muted-foreground); font-size: 10px; }
-.comment-list, .comment-messages { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.comment-list, .comment-messages { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .comment-card { display: flex; flex-direction: column; gap: 8px; width: 100%; padding: 16px; text-align: left; border-bottom: 1px solid var(--border); cursor: pointer; }
 .comment-card:hover, .comment-card:focus-visible { background: var(--accent); }
 .comment-card:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
@@ -381,7 +380,7 @@ body:has(.editor) { --toast-offset: 84px; }
 .comment-card-top > span { color: var(--primary); }
 .comment-card-body { font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .comment-card-meta { color: var(--muted-foreground); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.comments-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 24px; text-align: center; }
+.comments-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px; text-align: center; }
 .comments-empty > svg { width: 28px; height: 28px; color: var(--muted-foreground); }
 .comments-empty p { font-size: 13px; font-weight: 500; }
 .comments-empty > span, .comment-hint { font-size: 11px; line-height: 1.6; color: var(--muted-foreground); }
@@ -409,21 +408,20 @@ body:has(.editor) { --toast-offset: 84px; }
 .comment-offline { flex: none; padding: 10px 16px; color: var(--muted-foreground); font-size: 11px; border-top: 1px solid var(--border); }
 .comment-placement { position: absolute; top: calc(16px + var(--safe-top)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 16px; max-width: calc(100% - 32px); padding: 8px 12px; border-radius: var(--radius-lg); background: var(--popover); font-size: 12px; z-index: 16; }
 @media (max-width: 700px) {
-  .editor { --comments-height: min(60dvh, calc(100dvh - 140px - var(--keyboard))); }
-  .stage.comments-open .canvas { right: 0; bottom: calc(var(--comments-height) + 80px + var(--safe-bottom) + var(--keyboard)); }
-  .comments-panel { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(80px + var(--safe-bottom) + var(--keyboard)); height: var(--comments-height); max-height: var(--comments-height); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
+  .stage.comments-open .canvas { bottom: calc(var(--comments-panel-height, 0px) + 80px + var(--safe-bottom) + var(--keyboard)); }
+  .comments-panel { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(80px + var(--safe-bottom) + var(--keyboard)); max-height: min(60dvh, calc(100dvh - 160px - var(--safe-top) - var(--safe-bottom) - var(--keyboard))); max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
   .comment-placement { left: calc(10px + var(--safe-left)); right: calc(10px + var(--safe-right)); top: calc(68px + var(--safe-top)); transform: none; max-width: none; justify-content: space-between; }
   .comment-pin { width: 36px; height: 36px; }
   .comment-composer textarea { font-size: 16px; }
 }
-@media (max-width: 560px) {
-  .editor:has(.comments-open) .dock-people-button { transform: translateY(calc(-1 * var(--comments-height) - 24px)); }
+@media (min-width: 701px) and (max-width: 1000px) {
+  .selection-pill, .comment-placement { top: calc(76px + var(--safe-top)); }
 }
-@media (min-width: 561px) and (max-width: 1000px) {
-  .zoom { top: calc(16px + var(--safe-top)); bottom: auto; }
+@media (min-width: 701px) {
+  .editor:has(.comments-open) .editor-navigation { max-width: calc(100% - 390px - var(--safe-left) - var(--safe-right)); }
 }
-@media (min-width: 1001px) {
-  .editor-dock { max-width: calc(100% - 240px - var(--safe-left) - var(--safe-right)); }
+@media (max-width: 360px) {
+  .dock-comments-count { display: none; }
 }
 .raster { position: absolute; left: 0; top: 0; pointer-events: none; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }

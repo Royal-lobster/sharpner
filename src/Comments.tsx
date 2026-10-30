@@ -32,6 +32,15 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
     return next;
   }) });
 
+  // Only the mobile sheet reserves canvas space, and only as much as it actually uses.
+  useEffect(() => {
+    const element = panel.current, stage = element?.parentElement;
+    if (!element || !stage) return;
+    const observer = new ResizeObserver(() => stage.style.setProperty("--comments-panel-height", `${element.getBoundingClientRect().height}px`));
+    observer.observe(element);
+    return () => { observer.disconnect(); stage.style.removeProperty("--comments-panel-height"); };
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const target = panel.current?.querySelector<HTMLElement>("textarea,button");

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconChevronUp as ChevronUp, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User, type Workspace } from "./api";
 import { Avatar } from "./Avatar";
@@ -204,7 +204,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       </main>
       {/* Keyboard interaction with the dock and its panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
-      <div className="editor-dock" onKeyDown={(e) => e.stopPropagation()}>
+      <div className="editor-dock editor-navigation" onKeyDown={(e) => e.stopPropagation()}>
         <nav aria-label="File and pages"><ButtonGroup className="dock-bar canvas-glass">
           {readOnly ? (
             <Button variant="ghost" size="icon" asChild className="back"><a href="/" aria-label="Sharpner"><img src="/mark.svg" width={24} height={24} alt="" /></a></Button>
@@ -219,7 +219,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 <ChevronDown className="dock-chevron size-3" aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="top" align="start" sideOffset={10} collisionPadding={16} className="canvas-glass w-56" aria-label="File actions"
+            <DropdownMenuContent side="bottom" align="start" sideOffset={10} collisionPadding={16} className="canvas-glass w-56" aria-label="File actions"
               onCloseAutoFocus={(event) => {
                 const action = pendingFileAction.current;
                 if (!action) return;
@@ -239,7 +239,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           </DropdownMenu>
           <span className="sr-only" role="status">{status}</span>
           <Separator orientation="vertical" className="dock-divider" />
-          <DockPanel label="Pages" count={room.pages.length} open={open === "pages"} onOpenChange={toggle("pages")} className="dock-pages"
+          <DockPanel label="Pages" count={room.pages.length} open={open === "pages"} onOpenChange={toggle("pages")} className="dock-pages" side="bottom"
             action={!readOnly && <Button variant="secondary" size="sm" onClick={addPage}><Plus aria-hidden />Add page</Button>}
             // Escape while renaming cancels the rename instead of closing the panel.
             onEscapeKeyDown={(e) => { if (renaming) { e.preventDefault(); cancelRename.current = true; setRenaming(null); } }}
@@ -247,7 +247,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <Button variant="ghost" className="dock-button dock-page-button">
                 <FileText className="size-4" aria-hidden />
                 <span>{page?.name ?? "Pages"}</span>
-                <ChevronUp className="dock-chevron size-3" aria-hidden />
+                <ChevronDown className="dock-chevron size-3" aria-hidden />
               </Button>
             }>
             <ItemGroup className="page-list gap-1">
@@ -275,45 +275,46 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               ))}
             </ItemGroup>
           </DockPanel>
-          {!readOnly && <>
-            <Separator orientation="vertical" className="dock-divider dock-people-divider" />
-            <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people"
-              trigger={<Button variant="ghost" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
-                title={people.map((p) => p.id === user.id ? `${p.name} (you)` : p.name).join(", ") || "Reconnecting…"}>
-                <AvatarStack max={desktop ? 4 : 2} size={desktop ? 28 : 24}>{people.length
-                  ? people.map((p) => <Avatar key={p.id} id={p.id} name={p.name} src={p.avatar} />)
-                  : <Avatar id={user.id} name={user.name} src={user.avatar_url} />}</AvatarStack>
-                <span className={`presence-dot${room.status !== "open" ? " disconnected" : ""}`} aria-hidden />
-              </Button>}>
-              {people.map((person) => <Button key={person.id} variant="ghost" className="person-row" onClick={() => {
-                const target = person.pageIds.includes(page?.id ?? "") ? page?.id : person.pageIds[0];
-                if (target) { setPageId(target); setSelection([]); setOpen(null); }
-              }}>
-                <Avatar id={person.id} name={person.name} src={person.avatar} />
-                <span><strong>{person.name}{person.id === user.id ? " (you)" : ""}</strong><small>{person.pageIds.map((id) => room.pages.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || "Opening file…"}</small></span>
-                <span className="presence-dot" aria-label="Online" />
-              </Button>)}
-              {room.status !== "open" && <p className="text-xs text-muted-foreground">Reconnecting to see who’s here…</p>}
-              {room.agentActivity.size > 0 && <div className="agent-presence"><IconSparkles aria-hidden />An agent is working in this file</div>}
-            </DockPanel>
-            <Button ref={commentsTrigger} variant="ghost" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
-              aria-expanded={commentsOpen && !commentMode} aria-controls="comments-panel"
-              title="Comments (C to add)" onClick={() => { setCommentsOpen((value) => !value); setCommentMode(false); setOpen(null); }}>
-              <IconMessageCircle className="size-4" aria-hidden /><span className="dock-comments-count">{openComments || ""}</span>
-            </Button>
-            <Separator orientation="vertical" className="dock-divider dock-share-divider" />
-            <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share"
-              trigger={
-                <Button variant="ghost" className="dock-button dock-share-button" aria-label="Share file">
-                  <Link2 className="size-4" aria-hidden />
-                  <span className="dock-share-label">Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
-                </Button>
-              }>
-              <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />
-            </DockPanel>
-          </>}
         </ButtonGroup></nav>
       </div>
+      {!readOnly && <div className="editor-dock editor-collaboration" onKeyDown={(e) => e.stopPropagation()}>
+        <nav aria-label="Collaboration"><ButtonGroup className="dock-bar canvas-glass">
+          <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people"
+            trigger={<Button variant="ghost" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
+              title={people.map((p) => p.id === user.id ? `${p.name} (you)` : p.name).join(", ") || "Reconnecting…"}>
+              <AvatarStack max={desktop ? 4 : 2} size={desktop ? 28 : 24}>{people.length
+                ? people.map((p) => <Avatar key={p.id} id={p.id} name={p.name} src={p.avatar} />)
+                : <Avatar id={user.id} name={user.name} src={user.avatar_url} />}</AvatarStack>
+              <span className={`presence-dot${room.status !== "open" ? " disconnected" : ""}`} aria-hidden />
+            </Button>}>
+            {people.map((person) => <Button key={person.id} variant="ghost" className="person-row" onClick={() => {
+              const target = person.pageIds.includes(page?.id ?? "") ? page?.id : person.pageIds[0];
+              if (target) { setPageId(target); setSelection([]); setOpen(null); }
+            }}>
+              <Avatar id={person.id} name={person.name} src={person.avatar} />
+              <span><strong>{person.name}{person.id === user.id ? " (you)" : ""}</strong><small>{person.pageIds.map((id) => room.pages.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || "Opening file…"}</small></span>
+              <span className="presence-dot" aria-label="Online" />
+            </Button>)}
+            {room.status !== "open" && <p className="text-xs text-muted-foreground">Reconnecting to see who’s here…</p>}
+            {room.agentActivity.size > 0 && <div className="agent-presence"><IconSparkles aria-hidden />An agent is working in this file</div>}
+          </DockPanel>
+          <Button ref={commentsTrigger} variant="ghost" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
+            aria-expanded={commentsOpen && !commentMode} aria-controls="comments-panel"
+            title="Comments (C to add)" onClick={() => { setCommentsOpen((value) => !value); setCommentMode(false); setOpen(null); }}>
+            <IconMessageCircle className="size-4" aria-hidden /><span className="dock-comments-count">{openComments > 99 ? "99+" : openComments || ""}</span>
+          </Button>
+          <Separator orientation="vertical" className="dock-divider dock-share-divider" />
+          <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share"
+            trigger={
+              <Button variant="ghost" className="dock-button dock-share-button" aria-label="Share file">
+                <Link2 className="size-4" aria-hidden />
+                <span className="dock-share-label">Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
+              </Button>
+            }>
+            <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />
+          </DockPanel>
+        </ButtonGroup></nav>
+      </div>}
       {!readOnly && <LibraryDialog file={file} files={meta.files} open={dialog === "library"} onOpenChange={(next) => setDialog(next ? "library" : null)} onChange={(libraryId) => onChange({ library_id: libraryId })} />}
       <ResponsiveDialog title="Canvas controls" open={dialog === "help"} onOpenChange={(next) => setDialog(next ? "help" : null)}>
         <div className="canvas-help">
@@ -346,12 +347,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
 }
 
 /**
- * One dock control and its panel: a popover above the dock on wide screens, a bottom sheet on phones.
+ * One corner control and its panel: a popover beside its dock on wide screens, a bottom sheet on phones.
  * The panel's label is its one visible heading, so content inside never repeats it.
  */
-function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, trigger, className, children }: {
+function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, trigger, className, side = "top", children }: {
   label: string; count?: number; action?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void;
-  onEscapeKeyDown?: (e: globalThis.KeyboardEvent) => void; trigger: ReactElement; className?: string; children: ReactNode;
+  onEscapeKeyDown?: (e: globalThis.KeyboardEvent) => void; trigger: ReactElement; className?: string; side?: "top" | "bottom"; children: ReactNode;
 }) {
   const desktop = useDesktop();
   const content = useRef<HTMLDivElement>(null);
@@ -371,7 +372,7 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
   if (desktop) return (
     <Popover open={open} onOpenChange={change}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent ref={content} side="top" align="start" sideOffset={10} collisionPadding={16} aria-label={label}
+      <PopoverContent ref={content} side={side} align="start" sideOffset={10} collisionPadding={16} aria-label={label}
         onEscapeKeyDown={onEscapeKeyDown} onFocusOutside={keepForModal} onInteractOutside={keepForModal}
         className={cn("dock-popover canvas-glass w-[340px] gap-0 p-0", className)}>
         {heading("h2")}
