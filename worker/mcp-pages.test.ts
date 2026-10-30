@@ -54,23 +54,35 @@ beforeEach(() => {
 });
 
 describe("page and section descriptions for agents", () => {
-  it("advertises a table of contents and page updates", async () => {
+  it("advertises a table of contents and page updates, keeping rename_page for older callers", async () => {
     const names = (await call("tools/list", {})).tools!.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["list_pages", "update_page", "create_page", "get_file"]));
-    expect(names).not.toContain("rename_page");
+    expect(names).toEqual(expect.arrayContaining(["list_pages", "update_page", "create_page", "get_file", "rename_page"]));
+    await call("rename_page", { fileId: "file", pageId: "ds", name: "Foundations" });
+    expect(applied()).toEqual([{ t: "page.put", page: { id: "ds", name: "Foundations", sort: 0 } }]);
   });
 
   it("lists pages and sections with their descriptions and direct design counts, and flags missing ones", async () => {
     const { value } = await call("list_pages", { fileId: "file" });
     expect(value.pages).toEqual([
-      { id: "ds", name: "Design System", description: outline[0]!.description, designs: 3, sections: [
+      { id: "ds", name: "Design System", description: outline[0]!.description, arrangement: "tiled", designs: 3, sections: [
         { id: "tokens", name: "tokens", description: "The file's one token sheet.", parentId: null, designs: 1 },
         { id: "components", name: "components", description: "", parentId: null, designs: 0 },
         { id: "forms", name: "forms", description: "Inputs and validation states.", parentId: "components", designs: 2 },
       ] },
-      { id: "screens", name: "Screens", description: "", designs: 1, sections: [] },
+      { id: "screens", name: "Screens", description: "", arrangement: "manual", designs: 1, sections: [] },
     ]);
     expect(value.hint).toMatch(/no description/);
+  });
+
+  it("says when hand-placed content keeps a page's automatic sections in one column", async () => {
+    mocks.outline.mockResolvedValue([{ ...outline[0]!, nodes: [...outline[0]!.nodes,
+      node("placed", { kind: "section", layout: "free", name: "Components (placed)" }), node("loose-1"), node("loose-2")] }]);
+    const page = (await call("list_pages", { fileId: "file" })).value.pages[0];
+    expect(page).toMatchObject({ arrangement: "stacked", stackedBy: [
+      { id: "placed", name: "Components (placed)", kind: "section" }, { id: "loose-1", name: "loose-1", kind: "frame" }, { id: "loose-2", name: "loose-2", kind: "frame" },
+    ] });
+    expect(page.reason).toBe('Automatic sections stay in one column because of free section "Components (placed)" and 2 loose nodes. Set those sections to layout "auto", or move loose nodes into a section, to let the page tile.');
+    expect((await call("get_file", { fileId: "file", pageId: "ds" })).value.pages[0]).toMatchObject({ arrangement: "stacked", reason: page.reason });
   });
 
   it("reads a single page with descriptions, and rejects an unknown page", async () => {

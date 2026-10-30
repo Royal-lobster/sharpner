@@ -76,11 +76,11 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `read_guide` | Design-system or screen-design guidance |
 | `create_file` | Create a workspace file, optionally linked to a library |
 | `set_library` | Link or remove a file's workspace library |
-| `list_pages` | A file's table of contents: page and section descriptions with design counts |
+| `list_pages` | A file's table of contents: page and section descriptions with design counts, and whether each page tiles or stacks (and why) |
 | `get_file` | Pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
 | `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
 | `find_instances` | Frames and components using a component, here and in files using this one as a library |
-| `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes |
+| `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes. `rename_page` remains as a deprecated alias |
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |

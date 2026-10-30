@@ -7,7 +7,7 @@ import { authenticate, authErrorStatus, requireScope, type AppEnv, type Identity
 import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
 import { capture, loadFrame } from "./render";
-import { layoutHeight, layoutRects, union, type Rect } from "../shared/layout";
+import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
 import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
 import designSystemGuide from "./guides/design-system.md?raw";
 import screensGuide from "./guides/screens.md?raw";
@@ -26,7 +26,7 @@ Vocabulary:
 - A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
 - Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
 - Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Token sheet and component catalogs grouped by role. Check before building any screen."), and update them when you reorganize. Members can edit them too.
-- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
+- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column; list_pages and get_file report that as arrangement "stacked" with the reason, so set those sections to "auto" or move the loose nodes into a section to let the page tile. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
 
 Workflow:
 1. get_app_state: what the user has open and selected ("this frame" means the selection), with the open file's page descriptions.
@@ -207,7 +207,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const { file, stub } = await access(fileId);
     const outline = await stub.outline();
     const pages = outline.map((p) => ({
-      id: p.id, name: p.name, description: p.description ?? "",
+      id: p.id, name: p.name, description: p.description ?? "", ...arrangementOf(p.nodes),
       designs: p.nodes.filter((n) => n.kind !== "section").length,
       sections: p.nodes.filter((n) => n.kind === "section").map((s) => ({
         id: s.id, name: s.name, description: s.description ?? "", parentId: s.parentId,
@@ -233,6 +233,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         id: p.id,
         name: p.name,
         description: p.description ?? "",
+        ...arrangementOf(p.nodes),
         sections: p.nodes.filter((n) => n.kind === "section").map((n) => ({ id: n.id, name: n.name, description: n.description ?? "", parentId: n.parentId, layout: n.layout ?? "free", order: n.order, ...rects.get(n.id) })),
         nodes: p.nodes.filter((n) => n.kind !== "section").map((n) => ({
           id: n.id, kind: n.kind, name: n.name, sectionId: n.parentId, order: n.order,
@@ -308,16 +309,24 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json(page);
   });
 
-  server.registerTool("update_page", {
-    description: "Rename a page or change its description.",
-    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional() },
-  }, async ({ fileId, pageId, name, description }) => {
+  const updatePage = async (fileId: string, pageId: string, name?: string, description?: string) => {
     const { stub, apply } = await access(fileId);
     const page = (await stub.pages()).find((p) => p.id === pageId);
     if (!page) throw new Error(`Page ${pageId} not found`);
     await apply([{ t: "page.put", page: { id: page.id, sort: page.sort, name: name ?? page.name, ...description !== undefined && { description } } }]);
     return json({ ok: true });
-  });
+  };
+
+  server.registerTool("update_page", {
+    description: "Rename a page or change its description.",
+    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional() },
+  }, ({ fileId, pageId, name, description }) => updatePage(fileId, pageId, name, description));
+
+  // Kept so cached tool lists and saved prompts that rename pages keep working.
+  server.registerTool("rename_page", {
+    description: "Deprecated: use update_page. Renames a page and keeps its description.",
+    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1) },
+  }, ({ fileId, pageId, name }) => updatePage(fileId, pageId, name));
 
   server.registerTool("delete_page", {
     description: "Delete a page and every node on it. Only do this when explicitly asked.",
@@ -589,6 +598,20 @@ function buildServer(env: Env, identity: Identity, origin: string) {
 }
 
 /** Tool responses expose computed bounds, while heightMode retains the node's authored sizing choice. */
+/** Whether a page tiles its automatic top-level sections, and if they stay in one column, what to change. */
+function arrangementOf(nodes: CanvasNode[]) {
+  const page = pageArrangement(nodes);
+  if (page.arrangement !== "stacked") return { arrangement: page.arrangement };
+  const free = page.stackedBy.filter((n) => n.kind === "section"), loose = page.stackedBy.length - free.length;
+  const named = free.slice(0, 5).map((n) => `"${n.name}"`).join(", ") + (free.length > 5 ? ` and ${free.length - 5} more` : "");
+  const causes = [free.length ? `free section${free.length === 1 ? "" : "s"} ${named}` : "", loose ? `${loose} loose node${loose === 1 ? "" : "s"}` : ""];
+  return {
+    arrangement: page.arrangement,
+    reason: `Automatic sections stay in one column because of ${causes.filter(Boolean).join(" and ")}. Set those sections to layout "auto", or move loose nodes into a section, to let the page tile.`,
+    stackedBy: page.stackedBy.map((n) => ({ id: n.id, name: n.name, kind: n.kind })),
+  };
+}
+
 function nodeGeometry(node: { id: string; height?: number | null }, rects: ReadonlyMap<string, Rect>) {
   const rect = rects.get(node.id)!;
   return {
