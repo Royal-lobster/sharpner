@@ -14,6 +14,7 @@ edits and fan out changes.
 | `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition |
 | `src/presence.ts` | Active member grouping across tabs and pages |
 | `src/Canvas.tsx` | Camera, gestures, selection, and canvas composition |
+| `src/canvas-layout.ts` | One active page's cached geometry, catalog labels, and navigation bounds |
 | `src/canvas-render-plan.ts` | Viewport culling, preview layers, and live-content budgets |
 | `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
 | `src/room.ts` | Realtime client, optimistic edits, and demand-loaded sources |
@@ -56,6 +57,19 @@ Components use light-DOM custom elements so Tailwind works inside them. Editing 
 Agents start with `get_design_system` and `read_guide("design-system")`, reuse existing definitions, then inspect screenshots before building screens. See the [design-system guide](../worker/guides/design-system.md), [screen guide](../worker/guides/screens.md), and [architecture decision](adr/0001-html-native-design-system.md).
 
 ## Rendering and loading
+
+Each mounted canvas keeps one world-layout snapshot. Camera movement, presence,
+source delivery, preview loading and agent effects reuse its rectangles and
+catalog labels. Node/page changes, measured heights and exact drag membership
+invalidate it. Changing pages replaces the snapshot instead of retaining a
+geometry cache for every visited page. Painting remains Canvas 2D with DOM/live
+HTML promotion at close zoom.
+
+Navigation caches the page's world bounds separately from comment state and
+viewport size. Comment summaries, resolution, deletion and HTTP write completion
+invalidate navigation without invalidating node geometry. A resolved thread
+contributes its pin only while it is active. Resizing the comments panel updates
+camera constraints through the visible canvas size.
 
 Only visible nodes, plus a margin, are considered. Rendering switches with on-screen size:
 

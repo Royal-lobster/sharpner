@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { CATALOG_GUTTER, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, contains, descendantsOf, dropOrders, familyOf, isManaged, layoutRects, SECTION_PAD, union, type Rect } from "../shared/layout";
+import { CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, SECTION_PAD, union, type Rect } from "../shared/layout";
 import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
@@ -16,7 +16,8 @@ import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-react";
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
-import { canvasNavigation, MAX_CANVAS_ZOOM } from "./canvas-navigation";
+import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
+import { CanvasLayout } from "./canvas-layout";
 
 type Tier = "lo" | "hi";
 
@@ -79,21 +80,11 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
-  const frames = room.pageNodes(pageId);
-  // Sections wrap their contents; nodes being dragged don't stretch the section they're leaving.
-  const rects = layoutRects(frames, (f) => room.heightOf(f), room.dragging);
+  const layout = useMemo(() => new CanvasLayout(room), [room]);
+  const { frames, rects, catalogs, sections, nodes, families } = layout.page(pageId);
   const rectOf = (f: CanvasNode) => rects.get(f.id)!;
-  const catalogs = catalogSectionIds(frames);
-  const sections = frames.filter((f) => f.kind === "section");
-  const nodes = frames.filter((f) => f.kind !== "section");
   const topLevel = () => frames.filter((f) => !f.parentId).map(rectOf);
-  const navigationRects = [...rects.values()];
-  // Page feedback remains reachable too, including threads left after a design was deleted.
-  for (const thread of room.comments.values()) {
-    if (thread.anchor.pageId !== pageId || thread.resolvedAt !== null && thread.id !== activeCommentId) continue;
-    navigationRects.push({ ...commentPoint(thread.anchor, rects), w: 1, h: 1 });
-  }
-  const navigation = canvasNavigation(navigationRects, size);
+  const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId);
   const navigationRef = useRef(navigation);
   navigationRef.current = navigation;
 
@@ -440,8 +431,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
 
   const sendMoves = (roots: string[], dropped: boolean, anchors: Map<string, { x: number; y: number }>, start: Map<string, { x: number; y: number }>, point?: { x: number; y: number }) => {
     const moving = new Set(room.dragging);
-    const currentFrames = room.pageNodes(pageId);
-    const currentRects = layoutRects(currentFrames, (f) => room.heightOf(f), moving);
+    const { frames: currentFrames, rects: currentRects } = layout.page(pageId);
     const destinations = new Map<string, string | null>();
     const orders = new Map<string, number>();
     if (dropped) {
@@ -609,7 +599,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   useLayoutEffect(() => {
     if (rasterRef.current) {
       paintRaster(rasterRef.current, size, cam, visibleSections, rasterFrames, selected, peerSelections, catalogs,
-        catalogFamilyLabels(frames, rects, catalogs), { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current,
+        families, { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current,
         { cache: highPreviewCache.current, enabled: prefetchPreviews, settled });
     }
   });

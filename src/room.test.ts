@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setApiTokenGetter } from "./api";
 import { Room } from "./room";
+import { CanvasLayout } from "./canvas-layout";
 import type { CanvasNode, ClientMsg, CommentThread, ServerMsg } from "../shared/types";
 
 class Socket {
@@ -108,6 +109,160 @@ const start = (nodes: CanvasNode[], socket = Socket.instances.at(-1)!) => {
 const sourceIds = (socket: Socket) => socket.sent.flatMap((message) => message.type === "source" ? message.ids : []);
 const tick = () => vi.advanceTimersByTimeAsync(0);
 const supply = (socket: Socket, id: string, source = `<p>${id}</p>`, rev = 1) => socket.receive({ type: "source", items: [{ id, source, rev }] });
+
+describe("cached canvas layout", () => {
+  const viewport = { w: 1440, h: 960 };
+  const feedback: CommentThread = { id: "pin", number: 1, anchor: { pageId: "page_one", nodeId: null, x: 5000, y: -200 },
+    firstMessage: { id: "message", author: { id: "alice", name: "Alice", avatar: null }, body: "Spacing", createdAt: 1 },
+    messageCount: 1, createdAt: 1, updatedAt: 1, resolvedAt: null, resolvedBy: null, revision: 1 };
+
+  it("reuses geometry and navigation through cursor, source and agent traffic", () => {
+    const socket = start([node("screen")]);
+    const layout = new CanvasLayout(room), geometry = layout.page("page_one"), view = layout.navigation("page_one", viewport);
+    socket.receive({ type: "peer", peer: { id: "other", cid: "tab", name: "Other", avatar: null, pageId: "page_one", selection: [], cursor: { x: 10, y: 20 } } });
+    supply(socket, "screen");
+    socket.receive({ type: "activity", by: { id: "agent", name: "Agent", avatar: null }, ids: ["screen"] });
+    socket.receive({ type: "library", library: { fileId: "library", name: "Library", design: { tokens: "", components: [] } } });
+    expect(layout.page("page_one")).toBe(geometry);
+    expect(layout.navigation("page_one", { ...viewport })).toBe(view);
+    expect(geometry.rects.get("screen")).toEqual({ x: 0, y: 0, w: 400, h: 600 });
+  });
+
+  it("refreshes geometry after optimistic movement, resize, deletion and creation", () => {
+    start([node("screen")]);
+    const layout = new CanvasLayout(room), before = layout.page("page_one");
+    room.moveLocal(new Map([["screen", { x: 80, y: 100 }]]));
+    expect(layout.page("page_one")).not.toBe(before);
+    expect(layout.page("page_one").rects.get("screen")).toEqual({ x: 80, y: 100, w: 400, h: 600 });
+    room.send([{ t: "node.put", id: "screen", node: { width: 500, height: 700 } }]);
+    expect(layout.page("page_one").rects.get("screen")).toEqual({ x: 80, y: 100, w: 500, h: 700 });
+    room.send([{ t: "node.del", ids: ["screen"] }]);
+    expect(layout.page("page_one").rects.size).toBe(0);
+    room.send([{ t: "node.put", id: "replacement", node: { pageId: "page_one", x: -40, y: 20, width: 100, height: 200 } }]);
+    expect(layout.page("page_one").rects.get("replacement")).toEqual({ x: -40, y: 20, w: 100, h: 200 });
+  });
+
+  it("keeps zoomed panning free while cached navigation still locks the fitted overview", () => {
+    start([node("section", { kind: "section", x: 0, y: 0 }), node("screen", { width: 2000, height: 4000 })]);
+    const layout = new CanvasLayout(room), view = layout.navigation("page_one", viewport);
+    const requested = { x: 180, y: 160, z: 1 };
+    expect(view.navigation.constrain(requested)).toEqual(requested);
+    expect(layout.navigation("page_one", viewport)).toBe(view);
+    expect(view.navigation.constrain({ x: 1e10, y: -1e10, z: view.navigation.minZoom })).toEqual(view.navigation.overview);
+  });
+
+  it("uses live heights and drops stale heights after a source revision or reconnect", () => {
+    const frame = node("auto", { height: null, measuredHeight: 200 });
+    const socket = start([frame]), layout = new CanvasLayout(room);
+    room.setHeight("auto", 500);
+    expect(layout.page("page_one").rects.get("auto")?.h).toBe(500);
+    start([frame]);
+    expect(layout.page("page_one").rects.get("auto")?.h).toBe(500);
+    socket.receive({ type: "sync", nodes: [{ ...frame, rev: 2 }], by: null });
+    expect(layout.page("page_one").rects.get("auto")?.h).toBe(200);
+    room.setHeight("auto", 900);
+    expect(layout.page("page_one").rects.get("auto")?.h).toBe(900);
+    start([{ ...frame, rev: 3, measuredHeight: 300 }]);
+    expect(layout.page("page_one").rects.get("auto")?.h).toBe(300);
+  });
+
+  it("invalidates when a drag starts or ends without a geometry revision", () => {
+    start([node("group", { kind: "section", width: 480, height: null }), node("child", { parentId: "group", x: 200, y: 300, width: 100, height: 100 })]);
+    const layout = new CanvasLayout(room), before = layout.page("page_one"), revision = room.dataRevision;
+    expect(before.rects.get("group")).toEqual({ x: 72, y: 172, w: 356, h: 356 });
+    room.dragging.add("child");
+    const floating = layout.page("page_one");
+    expect(floating.rects.get("group")).toEqual({ x: 0, y: 0, w: 480, h: 280 });
+    room.dragging.clear();
+    const dropped = layout.page("page_one");
+    expect(dropped).not.toBe(floating);
+    expect(dropped.rects.get("group")).toEqual(before.rects.get("group"));
+    expect(room.dataRevision).toBe(revision);
+  });
+
+  it("compares exact drag membership even when serialized IDs would collide", () => {
+    start([node("group", { kind: "section", height: null }), ...["a,b", "c", "a", "b,c"].map((id, i) => node(id, { parentId: "group", x: i * 1000 }))]);
+    const layout = new CanvasLayout(room);
+    room.dragging.add("a,b"); room.dragging.add("c");
+    const first = layout.page("page_one");
+    room.dragging.clear(); room.dragging.add("a"); room.dragging.add("b,c");
+    const second = layout.page("page_one");
+    expect(second).not.toBe(first);
+    expect(second.rects.get("group")).not.toEqual(first.rects.get("group"));
+  });
+
+  it("refreshes catalog labels and partitions after component and section edits", () => {
+    start([node("catalog", { kind: "section", layout: "auto", height: null }), node("button", { kind: "component", name: "Button/Primary", parentId: "catalog", width: 180, height: 40 })]);
+    const layout = new CanvasLayout(room);
+    expect(layout.page("page_one").catalogs.has("catalog")).toBe(true);
+    expect(layout.page("page_one").families.map((label) => label.family)).toEqual(["Button"]);
+    room.send([{ t: "node.put", id: "button", node: { name: "Input/Text" } }]);
+    expect(layout.page("page_one").families.map((label) => label.family)).toEqual(["Input"]);
+    room.send([{ t: "node.put", id: "button", node: { kind: "frame", parentId: null } }]);
+    expect(layout.page("page_one").catalogs.size).toBe(0);
+    expect(layout.page("page_one").families).toEqual([]);
+    room.send([{ t: "node.put", id: "catalog", node: { kind: "frame", width: 200, height: 300 } }]);
+    expect(layout.page("page_one").sections).toHaveLength(0);
+    expect(layout.page("page_one").nodes).toHaveLength(2);
+  });
+
+  it("updates comment bounds independently and includes only the active resolved thread", () => {
+    const socket = start([node("screen")]), layout = new CanvasLayout(room), geometry = layout.page("page_one");
+    const original = layout.navigation("page_one", viewport);
+    socket.receive({ type: "comments", threads: [feedback, { ...feedback, id: "other-page", anchor: { ...feedback.anchor, pageId: "page_two", x: 1e9 } }] });
+    expect(layout.page("page_one")).toBe(geometry);
+    expect(layout.navigation("page_one", viewport).navigation.bounds).toEqual({ x: 0, y: -200, w: 5001, h: 800 });
+    socket.receive({ type: "comments", threads: [{ ...feedback, resolvedAt: 10, revision: 2 }] });
+    expect(layout.navigation("page_one", viewport).navigation.bounds).toEqual(original.navigation.bounds);
+    expect(layout.navigation("page_one", viewport, "pin").navigation.bounds).toEqual({ x: 0, y: -200, w: 5001, h: 800 });
+    socket.receive({ type: "comments", threads: [], deleted: ["pin"] });
+    expect(layout.navigation("page_one", viewport, "pin").navigation.bounds).toEqual(original.navigation.bounds);
+  });
+
+  it("follows node-relative pins and recomputes camera limits after viewport changes", () => {
+    const socket = start([node("screen", { x: 100, y: 200 })]), layout = new CanvasLayout(room);
+    socket.receive({ type: "comments", threads: [{ ...feedback, anchor: { pageId: "page_one", nodeId: "screen", x: 10, y: 20 } }] });
+    expect(layout.navigation("page_one", viewport).navigationRects).toContainEqual({ x: 110, y: 220, w: 1, h: 1 });
+    room.moveLocal(new Map([["screen", { x: 1000, y: -2000 }]]));
+    expect(layout.navigation("page_one", viewport).navigationRects).toContainEqual({ x: 1010, y: -1980, w: 1, h: 1 });
+    const geometry = layout.page("page_one"), wide = layout.navigation("page_one", viewport);
+    const narrow = layout.navigation("page_one", { w: 390, h: 400 });
+    expect(layout.page("page_one")).toBe(geometry);
+    expect(narrow.navigation.minZoom).toBeLessThan(wide.navigation.minZoom);
+  });
+
+  it("invalidates navigation for HTTP comments and ignores stale realtime summaries", async () => {
+    const socket = start([node("screen")]), layout = new CanvasLayout(room);
+    const before = layout.navigation("page_one", viewport);
+    fetcher.mockResolvedValue(Response.json({ ...feedback, messages: [feedback.firstMessage] }));
+    await room.createComment(feedback.anchor, feedback.firstMessage.body);
+    const posted = layout.navigation("page_one", viewport);
+    expect(posted).not.toBe(before);
+    expect(posted.navigation.bounds.w).toBe(5001);
+    socket.receive({ type: "comments", threads: [{ ...feedback, revision: 3, resolvedAt: 20 }] });
+    const resolved = layout.navigation("page_one", viewport);
+    socket.receive({ type: "comments", threads: [{ ...feedback, revision: 2 }] });
+    expect(layout.navigation("page_one", viewport)).toBe(resolved);
+    socket.receive({ type: "comments", threads: [], deleted: ["pin"] });
+    const deleted = layout.navigation("page_one", viewport);
+    socket.receive({ type: "comments", threads: [feedback] });
+    expect(layout.navigation("page_one", viewport)).toBe(deleted);
+  });
+
+  it("retains only the current page snapshot and refreshes page membership on reconnect", () => {
+    const frame = node("screen"), socket = start([frame, node("other", { pageId: "page_two" })]), layout = new CanvasLayout(room);
+    const first = layout.page("page_one");
+    expect(layout.page("page_two").frames.map((n) => n.id)).toEqual(["other"]);
+    expect(layout.page("page_one")).not.toBe(first);
+    socket.receive({ type: "sync", nodes: [{ ...frame, pageId: "page_two" }], by: null });
+    expect(layout.page("page_one").frames).toEqual([]);
+    start([node("replacement", { x: -500 })]);
+    expect(layout.page("page_one").frames.map((n) => n.id)).toEqual(["replacement"]);
+    expect(layout.page("page_two").rects.size).toBe(0);
+    expect(layout.navigation("page_two", viewport).navigationRects).toEqual([]);
+    expect(layout.navigation("page_two", viewport).navigation.bounds).toEqual({ x: 0, y: 0, w: 800, h: 600 });
+  });
+});
 
 describe("live comments and people", () => {
   const thread: CommentThread = { id: "feedback", number: 1, anchor: { pageId: "page_one", nodeId: null, x: 10, y: 20 },
