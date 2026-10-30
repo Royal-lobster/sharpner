@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import puppeteer from "@cloudflare/puppeteer";
+import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
 import { capture, loadFrame, loadImagePreview, withTimeout } from "./render";
 import { imagePreviewFor } from "../shared/image-preview";
@@ -14,7 +15,12 @@ import {
 } from "../shared/types";
 
 /** `shareToken` marks a view-only link viewer: anonymous, invisible to others, and unable to edit. */
-type Attachment = { cid: string; fileId: string; origin: string; actor: Actor; presence: Presence; sessionExpiresAt: number; shareToken?: string };
+type Attachment = {
+  cid: string; fileId: string; origin: string; actor: Actor; presence: Presence; sessionExpiresAt: number;
+  /** Member leases are tied to the Clerk instance that authenticated the upgrade. Legacy leases have no issuer. */
+  sessionIssuer?: string;
+  shareToken?: string;
+};
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
 type BrowserTab = Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>;
 
@@ -117,7 +123,7 @@ export class FileRoom extends DurableObject<Env> {
   peers(): Peer[] {
     return this.ctx.getWebSockets().flatMap((ws) => {
       const att = ws.deserializeAttachment() as Attachment;
-      return currentSession(ws, att) && !att.shareToken ? [toPeer(att)] : [];
+      return this.currentSession(ws, att) && !att.shareToken ? [toPeer(att)] : [];
     });
   }
 
@@ -537,20 +543,21 @@ export class FileRoom extends DurableObject<Env> {
       actor: shareToken ? VIEWER : JSON.parse(req.headers.get("x-actor")!) as Actor,
       presence: { pageId: null, selection: [], cursor: null },
       sessionExpiresAt,
-      ...(shareToken ? { shareToken } : {}),
+      // Stamp trusted Worker configuration, never a client-supplied issuer header.
+      ...(shareToken ? { shareToken } : { sessionIssuer: clerkIssuer(this.env.CLERK_PUBLISHABLE_KEY) }),
     };
     this.setMeta("fileId", att.fileId);
     this.setMeta("origin", att.origin);
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(att);
     await this.sendInit(server, att);
-    if (!shareToken && currentSession(server, att)) this.broadcast({ type: "peer", peer: toPeer(att) }, server);
+    if (!shareToken && this.currentSession(server, att)) this.broadcast({ type: "peer", peer: toPeer(att) }, server);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     const att = ws.deserializeAttachment() as Attachment;
-    if (!currentSession(ws, att)) return;
+    if (!this.currentSession(ws, att)) return;
     let msg: ClientMsg;
     try {
       msg = JSON.parse(typeof raw === "string" ? raw : new TextDecoder().decode(raw));
@@ -571,7 +578,7 @@ export class FileRoom extends DurableObject<Env> {
       ws.close(4403, "Workspace access changed");
       return;
     }
-    if (!currentSession(ws, att)) return;
+    if (!this.currentSession(ws, att)) return;
     if (msg.type === "ops") {
       try {
         await this.apply(att.fileId, att.origin, msg.ops, att.actor);
@@ -588,7 +595,7 @@ export class FileRoom extends DurableObject<Env> {
           if (n) yield { id: n.id, rev: n.rev, source: n.source };
         }
       }
-      for (const batch of sourceBatches(items())) send(ws, { type: "source", items: batch });
+      for (const batch of sourceBatches(items())) this.send(ws, { type: "source", items: batch });
     } else if (msg.type === "presence") {
       att.presence = msg.presence;
       ws.serializeAttachment(att);
@@ -628,11 +635,11 @@ export class FileRoom extends DurableObject<Env> {
   }
 
   private async sendInit(ws: WebSocket, att: Attachment) {
-    if (!currentSession(ws, att)) return;
+    if (!this.currentSession(ws, att)) return;
     const library = await this.libraryInfo();
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
-    send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library });
+    this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library });
   }
 
   private broadcast(msg: ServerMsg, except?: WebSocket) {
@@ -643,11 +650,32 @@ export class FileRoom extends DurableObject<Env> {
       if (ws === except) continue;
       const viewing = (ws.deserializeAttachment() as Attachment | undefined)?.shareToken;
       if (viewing && !publicData) continue;
-      if (!currentSession(ws)) continue;
+      if (!this.currentSession(ws)) continue;
       try {
         ws.send(viewing ? publicData! : data);
       } catch {}
     }
+  }
+
+  /** Hibernation-safe: every read/write path checks the persisted lease and its Clerk instance. */
+  private currentSession(ws: WebSocket, att = ws.deserializeAttachment() as Attachment | undefined) {
+    if (ws.readyState !== WebSocket.OPEN) return false;
+    if (typeof att?.sessionExpiresAt !== "number" || !Number.isFinite(att.sessionExpiresAt) || att.sessionExpiresAt <= Date.now()) {
+      try { ws.close(4001, "Session expired; reconnect"); } catch {}
+      return false;
+    }
+    if (!att.shareToken) {
+      try {
+        if (att.sessionIssuer === clerkIssuer(this.env.CLERK_PUBLISHABLE_KEY)) return true;
+      } catch {}
+      try { ws.close(4001, "Sign-in configuration changed; reconnect"); } catch {}
+      return false;
+    }
+    return true;
+  }
+
+  private send(ws: WebSocket, msg: ServerMsg) {
+    if (this.currentSession(ws)) ws.send(JSON.stringify(msg));
   }
 
   // ---- misc --------------------------------------------------------------
@@ -685,16 +713,6 @@ export class FileRoom extends DurableObject<Env> {
 const thumbKeys = (n: Pick<CanvasNode, "thumbLo" | "thumbHi">) =>
   [n.thumbLo, n.thumbHi].filter((u): u is string => Boolean(u && /^\/a\/[^/]+\/t\//.test(u))).map((u) => u.slice(3));
 const toPeer = (a: Attachment): Peer => ({ ...a.actor, ...a.presence, cid: a.cid });
-/** Hibernation-safe: every read/write path checks the persisted lease, without a resident timer. */
-const currentSession = (ws: WebSocket, att = ws.deserializeAttachment() as Attachment | undefined) => {
-  if (ws.readyState !== WebSocket.OPEN) return false;
-  if (typeof att?.sessionExpiresAt === "number" && Number.isFinite(att.sessionExpiresAt) && att.sessionExpiresAt > Date.now()) return true;
-  try { ws.close(4001, "Session expired; reconnect"); } catch {}
-  return false;
-};
-const send = (ws: WebSocket, msg: ServerMsg) => {
-  if (currentSession(ws)) ws.send(JSON.stringify(msg));
-};
 const str = (v: unknown) => String(v ?? "");
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Math.round(Number(v)) : 0);
 const source = (v: unknown) => {

@@ -7,6 +7,7 @@ import { FileRoom } from "./room";
 
 const member: Actor = { id: "private-member", name: "Private name", avatar: "https://example.test/private-photo" };
 const token = "A".repeat(43);
+const issuer = "https://sharpner-test.clerk.accounts.dev";
 
 beforeEach(() => vi.stubGlobal("WebSocket", { OPEN: 1 }));
 afterEach(() => vi.unstubAllGlobals());
@@ -15,7 +16,7 @@ function socket(viewing: boolean) {
   const attachment = {
     cid: viewing ? "viewer" : "member", fileId: "file", origin: "https://example.test", actor: member,
     presence: { pageId: null, selection: [], cursor: null }, sessionExpiresAt: Date.now() + 60_000,
-    ...(viewing ? { shareToken: token } : {}),
+    ...(viewing ? { shareToken: token } : { sessionIssuer: issuer }),
   };
   const ws = { readyState: 1, deserializeAttachment: () => attachment, send: vi.fn(), close: vi.fn() };
   ws.close.mockImplementation(() => { ws.readyState = 2; });
@@ -29,7 +30,7 @@ function fixture(lookup = vi.fn<() => Promise<unknown>>(async () => ({ shared: t
   const apply = vi.fn();
   Object.assign(room, {
     ctx: { getWebSockets: () => viewers },
-    env: { DB: { prepare: () => ({ bind: () => ({ first: lookup }) }) } },
+    env: { CLERK_PUBLISHABLE_KEY: `pk_test_${btoa("sharpner-test.clerk.accounts.dev$")}`, DB: { prepare: () => ({ bind: () => ({ first: lookup }) }) } },
     viewerAccess: new ViewerAccess(), apply,
   });
   const broadcast = (message: ServerMsg) => (room as unknown as { broadcast(message: ServerMsg): void }).broadcast(message);
