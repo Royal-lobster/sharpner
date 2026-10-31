@@ -12,6 +12,7 @@ edits and fan out changes.
 | `src/Landing.tsx` | Minimal signed-out introduction and hosted sign-in action |
 | `src/Home.tsx` | Workspace file grid, search, and agent connection |
 | `src/Editor.tsx` | File lifecycle, page organization, sharing, and presence |
+| `src/file-startup.ts` | Bounded direct-file preconnection, identity verification, and ownership transfer |
 | `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition |
 | `src/presence.ts` | Active member grouping across tabs and pages |
 | `src/Canvas.tsx` | Camera, gestures, selection, and canvas composition |
@@ -32,6 +33,7 @@ edits and fan out changes.
 | `worker/mcp.ts` | Agent tools and input validation |
 | `worker/render.ts` | Browser Rendering and screenshot helpers |
 | `shared/types.ts` | Wire messages, documents, and design-system composition |
+| `shared/session-principal.ts` | Immutable Clerk identity binding across HTTP, socket init, and SDK |
 | `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
 | `shared/specimens.ts` | Component and token-sheet presentations |
@@ -90,6 +92,33 @@ Initial sync sends geometry, with HTML fetched only for live nodes and the file'
 Hashed build assets under `/assets/` have immutable browser caching, so cached refreshes do not revalidate each JavaScript, CSS, and font file. HTML and authenticated responses retain their separate cache policies. The direct-file preload script runs before the built stylesheet, after the public auth bootstrap, avoiding a stylesheet wait before editor downloads. Ready canvas content appears immediately, without a blur-and-fade entrance.
 
 Account reconciliation still fetches current Clerk user and membership data on every authenticated request. Its normal database path uses two batches: read the previous author and removed memberships, then write the projection and return the reconciled author and workspaces atomically. Removed-member sockets must finish revoking before the projection batch can prune membership.
+
+Direct file startup can overlap Clerk SDK initialization. After public configuration
+has passed the canonical-origin check and the lazy editor module is available, a
+nonempty `__session` cookie is only a hint to start one abortable cookie-authenticated
+metadata request and one quiet Room. Both requests still perform ordinary server
+authorization and fresh membership reconciliation. Workspace routes do no editor,
+socket, or file API prefetch; shared links retain their anonymous startup.
+
+The route owns the pending attempt until Editor claims it. A claim does not expose
+data: metadata and authenticated socket `init` must carry matching verified Clerk
+user ID, session ID, and active organization context, and all three must match the
+loaded SDK identity. Local author and workspace IDs cannot establish this binding.
+The file's workspace can differ from the credential's active organization; the
+existing workspace switch closes that attempt and starts under the new context.
+Anonymous socket init omits the principal and member lease entirely.
+
+Pending state lives only in memory for at most five seconds, with at most 128
+socket messages / 4 MiB of UTF-16 message data and 1 MiB of metadata. The Room sends
+no presence, source requests, renewal, or reconnect work before adoption. Failures,
+expired leases, unsupported old init/metadata, identity mismatches, route departure,
+and sign-out discard the attempt. Editor owns adopted Room cleanup; same-file page,
+selection, and query navigation retain it. Account, session, and organization changes
+remount the authenticated destination. The normal SDK-backed path remains the
+rolling-deployment fallback for old servers without principal fields; when either
+response supplies a principal, both must match the SDK before canvas display.
+Adopted/current-server connections also recheck the binding on reconnect. Nothing
+stores auth or prefetched private data in localStorage or a service worker.
 
 Worker fetch handlers use Cloudflare Smart Placement to reduce waits on upstream services. Static build assets still serve at the edge. Placement needs traffic to learn suitable locations; inspect `cf-placement` and measure authenticated socket readiness and preview loading after deployment. Asset routes use the location's Cache API, so a placement change can initially miss previews cached elsewhere.
 

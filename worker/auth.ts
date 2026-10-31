@@ -2,6 +2,7 @@ import { createClerkClient } from "@clerk/backend";
 import { verifyWebhook } from "@clerk/backend/webhooks";
 import { Hono } from "hono";
 import { AccountError, handleAccountWebhook, syncAccount, type AccountUser, type AccountWorkspace } from "./accounts";
+import type { SessionPrincipal } from "../shared/session-principal";
 
 export type User = AccountUser;
 export type Scope = "sharpner:read" | "sharpner:write";
@@ -22,6 +23,13 @@ type AuthBindings = Env & {
   CLERK_API_KEYS_ENABLED?: string;
 };
 export type AppEnv = { Bindings: AuthBindings; Variables: { user: User; identity: Identity } };
+
+/** Publish only immutable claims from the verified browser credential, never the local author ID. */
+export function sessionPrincipal(identity: Identity): SessionPrincipal | null {
+  return identity.method === "session" && identity.clerkUserId && identity.sessionId
+    ? { clerkUserId: identity.clerkUserId, sessionId: identity.sessionId, organizationId: identity.organizationId }
+    : null;
+}
 
 /** OAuth agents can use the design tools, within their member's current workspaces. */
 export const AGENT_SCOPES: Scope[] = ["sharpner:read", "sharpner:write"];

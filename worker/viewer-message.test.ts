@@ -7,6 +7,12 @@ const actor: Actor = { id: "member-private-id", name: "Private member name", ava
 const peer: Peer = { ...actor, cid: "private-connection", pageId: "page", selection: ["node"], cursor: { x: 10, y: 20 } };
 
 describe("public viewer messages", () => {
+  it("omits every authenticated identity and lease even from an otherwise empty init", () => {
+    const initial: ServerMsg = { type: "init", pages: [], nodes: [], cid: "viewer", peers: [], library: null,
+      principal: { clerkUserId: "private-user", sessionId: "private-session", organizationId: "private-org" }, sessionExpiresAt: 12345 };
+    expect(viewerMessage(initial)).toEqual({ type: "init", pages: [], nodes: [], cid: "viewer", peers: [], library: null });
+    expect(initial.principal?.clerkUserId).toBe("private-user");
+  });
   it("keeps edits live without revealing the member who made them or changing the member message", () => {
     const edit: ServerMsg = { type: "sync", nodeDels: ["deleted-node"], by: actor };
     expect(viewerMessage(edit)).toEqual({ type: "sync", nodeDels: ["deleted-node"], by: null });

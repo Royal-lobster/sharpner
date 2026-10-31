@@ -116,13 +116,30 @@ function SignedApp() {
 
 function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
   const clerk = useClerk();
-  const { isLoaded, isSignedIn, userId, orgId, getToken } = useAuth();
+  const { isLoaded, isSignedIn, userId, sessionId, orgId, getToken } = useAuth();
   const loc = useLocation();
+  const fileId = new URL(loc, location.origin).pathname.match(/^\/f\/([\w-]+)\/?$/)?.[1] ?? null;
+  const loaded = useRef(isLoaded);
+  loaded.current = isLoaded;
+  // Config and canonical origin have already been checked by SignedApp. The lazy editor owns the
+  // optional startup seam, keeping Room and all file work off the workspace/landing path.
+  useEffect(() => {
+    if (!fileId || loaded.current) return;
+    let cancelled = false;
+    let release: (() => void) | undefined;
+    void loadEditor().then((module) => {
+      if (!cancelled && !loaded.current) release = module.prepareFileStartup(fileId);
+    }).catch(() => {}); // EditorRoute retains the download retry/error flow.
+    return () => { cancelled = true; release?.(); };
+  }, [fileId]);
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) editorModule?.cancelFileStartup();
+  }, [isLoaded, isSignedIn]);
   // Initialize before child effects; replacing the getter cancels requests waiting for an old token.
   useLayoutEffect(() => {
     setApiTokenGetter(isSignedIn ? (options) => getToken(options) : null);
     return () => setApiTokenGetter(null);
-  }, [getToken, isSignedIn, userId, orgId]);
+  }, [getToken, isSignedIn, userId, sessionId, orgId]);
 
   if (!isLoaded) return <OpeningLoading />;
   if (!isSignedIn) {
@@ -131,7 +148,7 @@ function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
     return <Landing onSignIn={() => clerk.redirectToSignIn({ signInForceRedirectUrl: returnTo, signUpForceRedirectUrl: returnTo })} />;
   }
   // An identity or workspace change must never retain a previous editor's socket or data.
-  return <AuthenticatedApp key={`${userId}:${orgId ?? "none"}`} agentConfig={agentConfig} />;
+  return <AuthenticatedApp key={`${userId}:${sessionId}:${orgId ?? "none"}`} agentConfig={agentConfig} />;
 }
 
 function AuthenticatedApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {

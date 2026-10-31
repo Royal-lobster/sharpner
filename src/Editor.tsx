@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
 import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
-import { api, type FileInfo, type User, type Workspace } from "./api";
+import { api, type FileInfo, type User } from "./api";
+import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
 import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
@@ -25,13 +26,15 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Separator } from "@/components/ui/separator";
+import { claimFileStartup, type FileMeta } from "./file-startup";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Item, ItemGroup, ItemActions } from "@/components/ui/item";
 import { Kbd } from "@/components/ui/kbd";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 
-type FileMeta = { user: User; file: FileInfo; workspace: Workspace; files: { id: string; name: string }[]; shareToken: string | null };
+export { prepareFileStartup, cancelFileStartup } from "./file-startup";
+
 type SharedMeta = { file: { id: string; name: string }; workspace: { name: string } };
 
 const shareUrl = (token: string, view: CanvasLocation) => `${location.origin}${canvasLocationUrl(new URL(`/s/${token}`, location.origin), view)}`;
@@ -62,7 +65,7 @@ export function SharedEditor({ token }: { token: string }) {
 }
 
 export function Editor({ fileId }: { fileId: string }) {
-  const { orgId } = useAuth();
+  const { userId, sessionId, orgId } = useAuth();
   const clerk = useClerk();
   const [meta, setMeta] = useState<FileMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,23 +76,50 @@ export function Editor({ fileId }: { fileId: string }) {
     const controller = new AbortController();
     setMeta(null); setRoom(null); setError(null);
     // Metadata and the socket each authorize access; neither needs to wait for the other.
-    const active = new Room(fileId);
-    api<FileMeta>(`/files/${fileId}`, { signal: controller.signal }).then(async (data) => {
+    let active: Room | null = null;
+    let unsubscribe: (() => void) | undefined;
+    const identity = userId && sessionId ? { clerkUserId: userId, sessionId, organizationId: orgId ?? null } : null;
+    const startup = identity ? claimFileStartup(fileId, identity) : null;
+    void (async () => {
+      const opened = await startup?.ready;
+      if (cancelled) return;
+      if (opened) { active = opened.room; return opened.meta; }
+      active = new Room(fileId);
+      return api<FileMeta>(`/files/${fileId}`, { signal: controller.signal });
+    })().then(async (data) => {
+      if (!data) return;
       if (cancelled) return;
       if (orgId !== data.workspace.clerkOrganizationId) {
-        active.close();
+        active?.close();
         await clerk.setActive({ organization: data.workspace.clerkOrganizationId });
         return;
       }
       if (cancelled) return;
-      setMeta(data);
-      setRoom(active);
+      const expose = () => {
+        if (cancelled || !active) return;
+        if (active.status === "denied" || active.status === "gone") {
+          unsubscribe?.(); setError("You no longer have access to this file."); return;
+        }
+        // A legacy metadata response cannot establish whether the socket will carry identity.
+        // Keep listening until init arrives before deciding whether legacy fallback applies.
+        if (active.status !== "open") return;
+        // During a rolling deployment an old server can only use the original SDK-backed path.
+        // Any identity-bearing response must match all three identities before rendering.
+        if (data.principal || active.principal) {
+          if (!identity || !samePrincipal(identity, data.principal) || !active.bindIdentity(identity)) {
+            unsubscribe?.(); active.close(); setError("Your session changed. Reload this file to continue."); return;
+          }
+        }
+        unsubscribe?.(); setMeta(data); setRoom(active);
+      };
+      unsubscribe = active!.subscribe(expose);
+      expose();
     }).catch((e: Error) => {
-      active.close();
+      active?.close();
       if (!cancelled && e.name !== "AbortError") setError(e.message);
     });
-    return () => { cancelled = true; controller.abort(); active.close(); };
-  }, [fileId, orgId, clerk]);
+    return () => { cancelled = true; controller.abort(); unsubscribe?.(); startup?.dispose(); active?.close(); };
+  }, [fileId, userId, sessionId, orgId, clerk]);
 
   if (error) return <Notice title="This file couldn’t open" message={error} action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
   if (!room || !meta) return <Loading label="Opening file…" canvas />;
