@@ -13,7 +13,9 @@ Members see edits live. Re-read content after another member changes it. Preserv
 2. Read page and section descriptions with `list_pages({ fileId })`.
 3. Read the required page with `get_file({ fileId, pageId })`. Use `read_nodes` for sources.
 
-A workspace holds files. Each file has pages with these node kinds:
+A workspace holds files. Each file has canvas pages and at most one Design System document page (`kind: "design-system"`). Its Brand is stored per file with `set_brand`; Foundations and primitive families are generated. Components on that page are primitives. A linked library’s Brand, tokens and primitives appear read-only alongside marked local additions; edit inherited content in the library. Read the design-system reference for details.
+
+Pages hold these node kinds:
 
 - **Frame:** HTML at a viewport width, such as a screen or slide.
 - **Image:** a picture.

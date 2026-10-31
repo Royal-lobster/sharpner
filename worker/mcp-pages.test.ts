@@ -1,19 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { componentTag, type CanvasNode, type Op, type Page } from "../shared/types";
+import { componentTag, emptyBrand, type CanvasNode, type Op, type Page } from "../shared/types";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), apply: vi.fn(), outline: vi.fn(), instances: vi.fn(), dependents: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), apply: vi.fn(), outline: vi.fn(), instances: vi.fn(), dependents: vi.fn(), brand: vi.fn(), catalog: vi.fn(), library: vi.fn() }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor,
   room: (_env: Env, id: string) => {
     const outline = async () => (await mocks.outline(id)) as (Page & { nodes: CanvasNode[] })[];
     return {
+      brand: async () => mocks.brand(id), catalog: async () => mocks.catalog(id),
       apply: mocks.apply, outline, peers: async () => [], instances: () => mocks.instances(id),
       cover: async () => ({ nodeId: null, url: null }),
       theme: async () => null,
       pages: async () => (await outline()).map(({ nodes: _nodes, ...page }) => page),
       nodes: async () => (await outline()).flatMap((p) => p.nodes),
-      designSystem: async () => ({ tokens: "", components: [], library: null, fileTheme: null }),
-      ownDesignSystem: async () => ({ tokens: "", components: (await outline()).flatMap((p) => p.nodes).filter((n) => n.kind === "component").map((n) => ({ tag: componentTag(n.name), html: "" })) }),
+      designSystem: async () => ({ tokens: "", components: [], library: mocks.library(), fileTheme: null }),
+      ownDesignSystem: async () => ({ tokens: "", components: (await outline()).flatMap((p) => p.nodes).filter((n) => n.kind === "component").map((n) => ({ tag: componentTag(n.name), html: "", theme: n.theme })) }),
     };
   },
 }));
@@ -53,6 +54,9 @@ beforeEach(() => {
   mocks.outline.mockResolvedValue(outline);
   mocks.instances.mockReturnValue([]);
   mocks.dependents.mockReturnValue([]);
+  mocks.brand.mockReturnValue(emptyBrand());
+  mocks.catalog.mockReturnValue({ brand: emptyBrand(), pageId: null, primitives: [], tokenSheets: 0 });
+  mocks.library.mockReturnValue(null);
 });
 
 describe("page and section descriptions for agents", () => {
@@ -173,3 +177,55 @@ describe("moving nodes between pages", () => {
   });
 });
 
+
+
+describe("agent Design System documents and Brand", () => {
+  it("creates and converts document pages without changing nodes", async () => {
+    await call("create_page", { fileId: "file", name: "Design System", kind: "design-system" });
+    await call("update_page", { fileId: "file", pageId: "ds", kind: "design-system" });
+    await call("update_page", { fileId: "file", pageId: "ds", kind: "canvas" });
+    expect(applied()).toMatchObject([
+      { t: "page.put", page: { kind: "design-system" } },
+      { t: "page.put", page: { id: "ds", kind: "design-system" } },
+      { t: "page.put", page: { id: "ds", kind: "canvas" } },
+    ]);
+    expect((await call("update_page", { fileId: "file", pageId: "ds", kind: "other" })).isError).toBe(true);
+  });
+
+  it("reports document kind, Brand and primitive locations and patches only requested fields", async () => {
+    mocks.outline.mockResolvedValue([{ ...outline[0]!, kind: "design-system" }, outline[1]!]);
+    mocks.brand.mockReturnValue({ ...emptyBrand(), name: "FraxNet", voice: ["Plain verbs"] });
+    const system = (await call("get_design_system", { fileId: "file" })).value;
+    expect(system).toMatchObject({ brand: { name: "FraxNet", voice: ["Plain verbs"] }, designSystemPageId: "ds", components: [{ primitive: true, pageId: "ds" }, { primitive: true, pageId: "ds" }] });
+    expect((await call("list_pages", { fileId: "file" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "document" });
+    expect((await call("get_file", { fileId: "file", pageId: "ds" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "document" });
+    await call("set_brand", { fileId: "file", guidelines: "Paper and ink." });
+    expect(applied()).toEqual([{ t: "brand.set", brand: { guidelines: "Paper and ink." } }]);
+    await call("create_nodes", { fileId: "file", pageId: "ds", nodes: [{ kind: "component", name: "Button/Default", source: "<button>Go</button>" }] });
+    expect(applied().at(-1)).toMatchObject({ t: "node.put", node: { pageId: "ds", kind: "component" } });
+  });
+
+  it("returns inherited Brand and primitives, with local tag replacement and source labels", async () => {
+    const inherited = [{ id: "lib-ds", name: "Library system", kind: "design-system", sort: 0, nodes: [node("lib-field", { pageId: "lib-ds", kind: "component", name: "Field" }), node("lib-button", { pageId: "lib-ds", kind: "component", name: "Button/Default" })] }];
+    mocks.library.mockReturnValue({ fileId: "library", name: "fraxnet" });
+    mocks.outline.mockImplementation(async (id: string) => id === "library" ? inherited : [{ ...outline[0]!, kind: "design-system" }, outline[1]!]);
+    mocks.catalog.mockReturnValue({ brand: { ...emptyBrand(), name: "FraxNet", voice: ["Direct"] }, pageId: "lib-ds", primitives: inherited[0]!.nodes, tokenSheets: 1 });
+    const system = (await call("get_design_system", { fileId: "file" })).value;
+    expect(system.libraryCatalog).toEqual({ brand: { ...emptyBrand(), name: "FraxNet", voice: ["Direct"] }, designSystemPageId: "lib-ds" });
+    expect(system.components.filter((c: { tag: string }) => c.tag === "x-field")).toMatchObject([{ source: "file", nodeId: "field" }]);
+    expect(system.components.find((c: { tag: string }) => c.tag === "x-button-default")).toMatchObject({ primitive: true, source: "library", libraryFileId: "library", pageId: "lib-ds" });
+    await call("set_brand", { fileId: "file", name: "Product" });
+    expect(mocks.apply.mock.calls.at(-1)![0]).toBe("file");
+  });
+
+  it("enforces membership and write scope for Brand and page conversion", async () => {
+    mocks.authenticate.mockResolvedValue({ user, method: "oauth", scopes: ["sharpner:read"] });
+    expect((await call("get_design_system", { fileId: "file" })).isError).not.toBe(true);
+    expect((await call("set_brand", { fileId: "file", name: "Denied" })).isError).toBe(true);
+    expect((await call("update_page", { fileId: "file", pageId: "ds", kind: "design-system" })).isError).toBe(true);
+    mocks.authenticate.mockResolvedValue({ user, method: "oauth", scopes: ["sharpner:read", "sharpner:write"] });
+    mocks.fileFor.mockResolvedValue(null);
+    expect((await call("set_brand", { fileId: "other", name: "Denied" })).isError).toBe(true);
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+});

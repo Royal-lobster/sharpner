@@ -8,11 +8,15 @@ A single graphic, exploration, or slide can use one token sheet or skip the syst
 
 ## Organize the file
 
-Keep the design system on a page named Design System, with the same three sections in every file so systems read alike across files:
+Choose one document page per file with `create_page({ fileId, name: "Design System", kind: "design-system" })`, or convert an existing page with `update_page({ fileId, pageId, kind: "design-system" })`. Members choose **Use as Design System page** from page options. Choosing another page restores the previous one to canvas; conversion preserves all nodes. `kind: "canvas"` restores canvas explicitly. Existing pages stay canvas until chosen.
 
-1. **Brand:** one frame with the name and logo, a short guidelines paragraph, and the voice in a few bullets.
-2. **Foundations:** the token sheets, including themes.
-3. **Primitive components:** one catalog section per family the file defines. Put families from the recommended list first, in its order, then the file's own.
+The document always has these three sections, with a theme switcher that re-themes its previews:
+
+1. **Brand:** name, image logo, a short guidelines paragraph, and voice bullets. Store these per file with `set_brand({ fileId, name, logoUrl, guidelines, voice })`; omitted fields stay unchanged and empty strings/arrays clear them. Use `upload_image` for a permanent logo URL. Members edit Brand in place. `get_design_system` returns Brand and the Design System page ID.
+2. **Foundations:** generated from every token sheet in the file and its library. Colors appear in theme columns, recommended shadcn/ui slots first, then other colors behind **Show all**. Type, spacing, radii and shadows follow. Add short CSS comments to token declarations for descriptions; otherwise the document shows their utility class. Undeclared tokens have no rows.
+3. **Primitive components:** generated from component nodes on the Design System page. Placement registers a primitive: use `create_nodes` with that `pageId`, or move a definition there with `update_nodes`. Families from the recommended list come first, then the file's own. Aliases such as `Radio/*` and `Tab/*` take the Radio Group and Tabs positions. Theme overrides appear alongside their default. More than six variants collapse behind **Show all**. Previews respond to real hover, focus, pressed and disabled states; only on-screen previews run live, with at most sixteen iframes, and existing thumbnails serve as off-screen stills.
+
+If the file uses a library, the same document includes its Brand, Foundations and registered primitives, marked read-only with **From library: <name> · Open**. Edit those in the library file. Local tokens and primitives appear alongside, marked **This file**. A local token override keeps the original library value visible in its read-only row. Any local definition of a tag replaces all library definitions of that tag under the existing merge rule. Libraries export their own catalog only, not a linked library's catalog. Non-component designs preserved by conversion are listed compactly at the end with a move option; token sheets feed Foundations and sections retain grouping metadata. There is no canvas, extra panel, per-row comments UI or phone-specific tabs in this document.
 
 Keep anything else, such as product compositions and explorations, on feature pages.
 
@@ -162,8 +166,8 @@ When a theme changes a component's structure, such as extra decoration elements,
 
 ## Build and maintain
 
-1. Read the existing system or link a library.
-2. Create tokens and the primitives needed now.
+1. Read the existing system or link a library; choose the Design System document page for the file.
+2. Set Brand with `set_brand`, then create token sheets and the primitives needed now on the Design System page.
 3. Check them with `screenshot_nodes` when available.
 4. Read `read_skill({ path: "references/screens.md" })` before building screens.
 5. Extract repeated feature markup on its feature page. Verify each section of work.

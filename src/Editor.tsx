@@ -10,6 +10,7 @@ import { themeNames, themeSwatches } from "../shared/themes";
 import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
+import { DesignSystemPage } from "./DesignSystemPage";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { Room } from "./room";
 import { Link } from "./router";
@@ -154,9 +155,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
   const page = room.pages.find((p) => p.id === pageId) ?? room.pages[0];
+  const isDesignSystem = page?.kind === "design-system";
   const closeComments = () => { setCommentsOpen(false); commentsTrigger.current?.focus({ preventScroll: true }); };
   const startComment = () => {
     setActiveCommentId(null); setOpen(null);
+    if (isDesignSystem && page) { setDraftComment({ pageId: page.id, nodeId: null, x: 0, y: 0 }); setCommentMode(false); setCommentsOpen(true); return; }
     if (draftComment) { setCommentMode(false); setCommentsOpen(true); }
     else { setCommentMode(true); setCommentsOpen(false); }
   };
@@ -176,7 +179,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [readOnly, draftComment]);
+  }, [readOnly, draftComment, isDesignSystem, page?.id]);
 
   useEffect(() => {
     if (!page) return;
@@ -246,13 +249,13 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
+          isDesignSystem ? <DesignSystemPage key={page.id} room={room} fileId={file.id} fileName={file.name} pageId={page.id} readOnly={readOnly} /> : <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
-        {!readOnly && !commentMode && selected.length > 0 && (
+        {!isDesignSystem && !readOnly && !commentMode && selected.length > 0 && (
           <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
             <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
             <span className="selection-agents">visible to agents</span>
@@ -267,7 +270,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 </TooltipTrigger><TooltipContent side="bottom">Use as file cover</TooltipContent></Tooltip>)}
           </div>
         )}
-        {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
+        {!isDesignSystem && !readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
         {!readOnly && <CommentsPanel room={room} open={commentsOpen && !commentMode} activeId={activeCommentId} draft={draftComment}
           onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       </main>
@@ -337,12 +340,15 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                   ) : (
                     <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
                       <span className="page-option-text">
-                        <span className="truncate">{p.name}</span>
+                        <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System document</span>}</span>
                         {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
                       </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
                     </Button>
                   )}
                   {!readOnly && renaming !== p.id && <ItemActions className="page-actions">
+                    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Page options for ${p.name}`}><IconLibrary aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent>
+                      <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => { room.send([{ t: "page.put", page: { id: p.id, name: p.name, sort: p.sort, kind: p.kind === "design-system" ? "canvas" : "design-system" } }]); selectNodes([]); setOpen(null); }}> {p.kind === "design-system" ? "Use as canvas page" : "Use as Design System page"}</DropdownMenuItem>
+                    </DropdownMenuContent></DropdownMenu>
                     <IconAction label={`Rename ${p.name}`} onClick={() => setRenaming(p.id)}><Pencil aria-hidden /></IconAction>
                     <IconAction label={`Describe ${p.name}`} onClick={() => void describePage(p)}><IconAlignLeft aria-hidden /></IconAction>
                     {room.pages.length > 1 && <IconAction label={`Delete ${p.name}`} onClick={() => void deletePage(p)}><Trash2 aria-hidden /></IconAction>}
@@ -351,7 +357,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               ))}
             </ItemGroup>
           </DockPanel>
-          {!readOnly && hasThemes && <>
+          {!isDesignSystem && !readOnly && hasThemes && <>
             <Separator orientation="vertical" className="dock-divider dock-theme-divider" />
             <FileThemeMenu themes={themes} swatches={swatches} value={room.fileTheme} overrides={overriding.length} disabled={room.status !== "open"}
               onChange={(theme) => room.send([{ t: "theme.set", theme }])} onFollowAll={() => void followFileTheme()} />
