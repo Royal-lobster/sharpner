@@ -8,7 +8,13 @@ A single graphic, exploration, or slide can use one token sheet or skip the syst
 
 ## Organize the file
 
-Keep foundations and generic primitives on a page named Design System.
+Keep the design system on a page named Design System, with the same three sections in every file so systems read alike across files:
+
+1. **Brand:** one frame with the name and logo, a short guidelines paragraph, and the voice in a few bullets.
+2. **Foundations:** the token sheets, including themes.
+3. **Primitives:** one catalog section per family, in the core-set order below.
+
+Keep anything else, such as product compositions and explorations, on feature pages.
 
 Base primitives on the shadcn/ui component set. Use its component names and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`. In a shared design-system file, cover the core set below. In a product file without a library, add the primitives its current screens need.
 
@@ -20,8 +26,9 @@ Give each large feature a page for its screens, states, and reused components. K
 
 ```text
 Design System
+├─ Brand: name, logo, guidelines, voice
 ├─ Foundations: tokens and themes
-└─ Primitives: Button/*, Input/*, Tabs, Badge/* (shadcn/ui names)
+└─ Primitives: Button/*, Badge/*, Input/*, … (shadcn/ui names, core-set order)
 Trade
 ├─ Screens: sections for each flow
 └─ Components: Trade/OrderForm, Trade/MarketHeader
