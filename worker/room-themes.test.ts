@@ -110,16 +110,20 @@ describe("file and screen themes", () => {
 
   it("refreshes thumbnails on pages people are viewing before the rest of the file", async () => {
     const viewer = { presence: { pageId: "viewed", selection: [], cursor: null } };
-    const { room, apply, create, cached } = fixture(true, [{ deserializeAttachment: () => viewer }]);
+    const { room, apply, create, cached, broadcasts } = fixture(true, [{ deserializeAttachment: () => viewer }]);
     for (let i = 0; i < 30; i++) await create(`elsewhere-${i}`);
     await apply([{ t: "page.put", page: { id: "viewed", name: "Viewed", sort: 2 } }]);
     await apply(["a", "b"].map((id) => ({ t: "node.put", id: `viewed-${id}`, node: { pageId: "viewed", width: 400, height: 600, source: `<p>${id}</p>` } })));
     cached();
     await apply([{ t: "theme.set", theme: "dark" }]);
     renderer.loadFrame.mockClear();
+    const before = broadcasts.length;
     await room.alarm();
     const rendered = renderer.loadFrame.mock.calls.map(([, node]) => (node as { id: string }).id);
     expect(rendered.slice(0, 2).sort()).toEqual(["viewed-a", "viewed-b"]);
+    // Each preview is published as soon as it renders, not once per batch.
+    const published = broadcasts.slice(before).map((m) => m.type === "sync" ? m.nodes?.map((n) => n.id) : []);
+    expect(published).toEqual(rendered.map((id) => [id]));
     expect(room.node("viewed-a")).toMatchObject({ thumbRev: room.node("viewed-a")!.rev });
   });
 

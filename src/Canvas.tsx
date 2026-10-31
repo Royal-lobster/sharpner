@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
-import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
+import { frameDocument, previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
 import { effectiveTheme, themeLabel } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
@@ -772,7 +772,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
     return () => clearTimeout(fallback);
   }, [handoff, top]);
   const showLive = (live || handoff) && html !== undefined;
-  const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh"].filter(Boolean).join(" ");
+  const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh", outdated(f) && "outdated"].filter(Boolean).join(" ");
   return (
     <div
       className={cls}
@@ -872,6 +872,10 @@ function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
   return KIND_PREFIX[f.kind] + name + (f.kind === "component" && f.theme ? ` · ${themeLabel(f.theme)}` : "");
 }
 
+/** Previews behind their node's revision: kept on screen, dimmed, until the renderer catches up. */
+const OUTDATED_ALPHA = 0.45;
+const outdated = (f: CanvasNode) => f.kind !== "image" && !!f.thumbHi && !previewCurrent(f);
+
 /** Per canvas, the preview last painted for each node: it stays up while a replacement loads. */
 const lastPainted = new WeakMap<HTMLCanvasElement, Map<string, HTMLImageElement>>();
 
@@ -955,7 +959,8 @@ export function paintRaster(
     if (img) paintedNow.set(f.id, img);
     const born = fx.appeared.get(f.id);
     const fresh = fx.reducedMotion || born === undefined ? 1 : Math.min(1, (fx.now - born) / MATERIALIZE_MS);
-    ctx.globalAlpha = 1 - (1 - fresh) ** 3;
+    // A preview from an earlier revision (say, the previous theme) stays dimmed until its re-render lands.
+    ctx.globalAlpha = (1 - (1 - fresh) ** 3) * (img && outdated(f) ? OUTDATED_ALPHA : 1);
     ctx.fillStyle = box ? COLORS.box : img ? "#fff" : COLORS.placeholder;
     if (f.kind !== "image" || !img) ctx.fillRect(x, y, sw, sh);
     if (img) {
