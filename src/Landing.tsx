@@ -1,5 +1,5 @@
-import { IconArrowRight } from "@tabler/icons-react";
-import { useEffect, useRef, useState } from "react";
+import { IconArrowRight, IconMessageCircle, IconPlugConnected, IconSparkles } from "@tabler/icons-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import "./landing.css";
@@ -36,50 +36,107 @@ export function Landing({ onSignIn }: { onSignIn: () => Promise<unknown> }) {
     <div className="landing">
       <header className="landing-bar">
         <span className="landing-brand"><img src="/mark.svg" width={24} height={24} alt="" />Sharpner</span>
+        <Button variant="ghost" className="landing-bar-sign-in" onClick={signIn} disabled={busy}>Sign in</Button>
       </header>
       <main className="landing-main">
-        <div className="landing-copy">
-          <h1>Your team and your agents, on one canvas.</h1>
-          <p>
-            Sharpner is a shared infinite canvas for designing product UI. People and AI agents work on the same
-            frames, drawing on your design system's tokens and components.
-          </p>
-          <div className="landing-actions">
-            <Button size="lg" className="landing-cta" onClick={signIn} aria-busy={busy || undefined}>
-              Sign in
-              {busy ? <Spinner data-icon="inline-end" aria-hidden /> : <IconArrowRight data-icon="inline-end" aria-hidden />}
-            </Button>
+        <section className="landing-hero">
+          <div className="landing-copy">
+            <span className="landing-eyebrow"><span className="aperture" />A live canvas your agents can draw on</span>
+            <h1>Your team and your agents, <em>on one canvas.</em></h1>
+            <p>
+              Sharpner is a shared infinite canvas for designing product UI. People and AI agents work on the same
+              frames, drawing on your design system's tokens and components.
+            </p>
+            <div className="landing-actions">
+              <Button size="lg" className="landing-cta" onClick={signIn} aria-busy={busy || undefined}>
+                Get started
+                {busy ? <Spinner data-icon="inline-end" aria-hidden /> : <IconArrowRight data-icon="inline-end" aria-hidden />}
+              </Button>
+              <span className="landing-note">Works with Claude Code and other MCP clients.</span>
+            </div>
             <p className="landing-error" role="status" aria-live="polite">{error}</p>
           </div>
-        </div>
-        <CanvasCue />
+          <CanvasCue />
+        </section>
+        <section className="landing-steps" aria-labelledby="landing-steps-title">
+          <h2 id="landing-steps-title">How it works</h2>
+          <ol>
+            <Step n="01" icon={<IconPlugConnected />} title="Connect your agent">
+              Add Sharpner as an MCP server. Your agent signs in as you and works in the files you can open.
+            </Step>
+            <Step n="02" icon={<IconSparkles />} title="Watch it draw">
+              Frames appear on the canvas as your agent writes them, built from your workspace's tokens and components.
+            </Step>
+            <Step n="03" icon={<IconMessageCircle />} title="Point and sharpen">
+              Pin feedback anywhere on the canvas, then ask your agent to address it when you're ready.
+            </Step>
+          </ol>
+        </section>
       </main>
+      <footer className="landing-footer">
+        <span className="landing-brand"><img src="/mark.svg" width={18} height={18} alt="" />Sharpner</span>
+        <span>A shared canvas for people and their agents.</span>
+      </footer>
     </div>
   );
 }
 
-/** Two frames on a page: one a person is pointing at, one an agent is working on. */
+function Step({ n, icon, title, children }: { n: string; icon: ReactNode; title: string; children: ReactNode }) {
+  return (
+    <li className="landing-step">
+      <span className="landing-step-icon" aria-hidden>{icon}</span>
+      <span className="landing-step-n" aria-hidden>{n}</span>
+      <h3>{title}</h3>
+      <p>{children}</p>
+    </li>
+  );
+}
+
+/** One flow on a page: feedback waits on one screen, an agent draws the next, and a person looks over the last. */
 function CanvasCue() {
   return (
     <div className="landing-cue" aria-hidden>
+      <div className="cue-section"><span>Checkout · proposed</span></div>
       <figure className="cue-frame cue-frame-a">
-        <figcaption>Onboarding</figcaption>
+        <figcaption>Cart</figcaption>
         <div className="cue-body">
-          <i className="cue-line cue-title" /><i className="cue-line" /><i className="cue-field" /><i className="cue-field" /><i className="cue-button" />
+          <i className="cue-line cue-title" />
+          <i className="cue-item" /><i className="cue-item" /><i className="cue-item" />
+          <i className="cue-line cue-total" />
+          <i className="cue-button" />
+        </div>
+      </figure>
+      <figure className="cue-frame cue-frame-b">
+        <figcaption>Payment</figcaption>
+        <div className="cue-work">
+          <div className="cue-body cue-building">
+            <i className="cue-line cue-title" />
+            <i className="cue-field" /><i className="cue-field" />
+            <i className="cue-line" />
+            <i className="cue-button cue-accent" />
+            <span className="cue-sheen" />
+          </div>
+          <svg className="cue-trace"><rect className="cue-trace-rail" pathLength={100} /><rect className="cue-trace-lead" pathLength={100} /></svg>
+        </div>
+        <span className="cue-agent"><span className="aperture" />Agent</span>
+      </figure>
+      <figure className="cue-frame cue-frame-c">
+        <figcaption>Confirmed</figcaption>
+        <div className="cue-body">
+          <i className="cue-check" />
+          <i className="cue-line cue-title cue-center" />
+          <i className="cue-line cue-center" />
+          <i className="cue-button" />
         </div>
         <span className="cue-cursor">
           <svg viewBox="0 0 16 16" width="16" height="16"><path d="M2 1.5 14 7l-5.2 1.6L6.5 14Z" /></svg>
           <span>You</span>
         </span>
       </figure>
-      <figure className="cue-frame cue-frame-b">
-        <figcaption>Settings</figcaption>
-        <div className="cue-body">
-          <i className="cue-line cue-title" /><i className="cue-row" /><i className="cue-row" /><i className="cue-row" />
-          <span className="cue-sheen" />
-        </div>
-        <span className="cue-agent">Agent</span>
-      </figure>
+      <div className="cue-comment">
+        <span className="cue-pin">M</span>
+        <span className="cue-bubble">Can the total stay pinned while scrolling?</span>
+      </div>
     </div>
   );
 }
