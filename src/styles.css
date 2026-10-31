@@ -173,9 +173,6 @@ button { -webkit-tap-highlight-color: transparent; }
   animation: sheen 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite; animation-delay: var(--loading-offset, 0ms);
 }
 .loading-label { position: relative; font-size: 12px; line-height: 1.6; color: var(--muted-text); }
-/* The first fitted view of a page sharpens out of the same blur. */
-@keyframes focus-in { from { opacity: 0; filter: blur(10px); } }
-.canvas[data-ready] > :is(.raster, .world) { animation: focus-in 0.5s var(--ease) both; }
 .home-header-inner, .home-main { width: 100%; max-width: var(--page-width); margin-inline: auto; }
 
 /* Workspace layout; component appearance comes from Mira. */

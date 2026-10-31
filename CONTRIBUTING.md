@@ -77,8 +77,11 @@ interaction changes in a short video when useful. Keep verification media outsid
 the checkout and attach it to the pull request; do not commit recordings or test
 screenshots.
 
-For startup changes, measure direct file opens and cached refreshes through the
-first rendered canvas preview, as well as the workspace file grid. A successful
+For startup changes, measure direct file opens and cached refreshes through a
+visible, fully revealed canvas preview, as well as the workspace file grid. Include
+normal motion, a file with multiple frames using preview batches, and production
+cache headers. Separately measure real sign-in initialization and authenticated
+socket readiness; simulated auth and local responses omit those waits. A successful
 metadata response or an error page does not verify canvas loading.
 
 ## Code conventions
