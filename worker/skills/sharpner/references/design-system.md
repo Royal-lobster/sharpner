@@ -8,14 +8,20 @@ A single graphic, exploration, or slide can use one token sheet or skip the syst
 
 ## Organize the file
 
-Keep foundations and generic primitives on a page named Design System. Add only the controls needed for current screens.
+Keep foundations and generic primitives on a page named Design System.
+
+Base primitives on the shadcn/ui component set. Use its component names and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`. In a shared design-system file, cover the core set below. In a product file without a library, add the primitives its current screens need.
+
+- Core set: Button, Badge, Input, Textarea, Label, Field, Select, Checkbox, Radio Group, Switch, Slider, Toggle Group, Tabs, Card, Alert, Dialog, Sheet, Drawer, Popover, Tooltip, Dropdown Menu, Avatar, Separator, Skeleton, Spinner, Progress, Table, Toast, Breadcrumb, Pagination, Accordion, and Empty.
+- Add others from shadcn/ui when screens need them: Command, Combobox, Calendar, Date Picker, Input OTP, Navigation Menu, Menubar, Sidebar, Carousel, Chart, Hover Card, Context Menu, Resizable, Scroll Area, Collapsible, and Kbd.
+- Name product-specific compositions after their feature, not after shadcn/ui.
 
 Give each large feature a page for its screens, states, and reused components. Keep product-specific compositions, such as an order form, with that feature.
 
 ```text
 Design System
 ├─ Foundations: tokens and themes
-└─ Primitives: Button/*, Input/*, Tabs, Badge/*
+└─ Primitives: Button/*, Input/*, Tabs, Badge/* (shadcn/ui names)
 Trade
 ├─ Screens: sections for each flow
 └─ Components: Trade/OrderForm, Trade/MarketHeader
@@ -109,13 +115,15 @@ Use token utilities in frames and components. Avoid hardcoded colors, arbitrary 
 
 Create a `kind: "component"` node with HTML in `source`. Its name sets the tag: `Button/Primary` → `<x-button-primary>`.
 
-- Name variants as `Family/Variant`, such as `Button/Ghost` or `Field/Error`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
+- Name variants as `Family/Variant`, such as `Button/Ghost` or `Badge/Secondary`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
 - Use props for content. `{{label|Continue}}` takes the instance's label attribute or the default value.
 - Props also work in attributes: `<img src="{{src|/placeholder.png}}">`.
 - Use `<slot></slot>` for child content in cards, dialogs, sidebars, and lists.
 - Components can contain other component instances.
 - Let the parent control layout. Avoid outer margins and fixed page positions. Size to content or use `w-full`.
-- Add visible states when needed: hover, focus, disabled, selected, and error.
+- Make components dynamic. Express interaction states on the same component with Tailwind variants, such as `hover:`, `focus-visible:`, `active:`, `disabled:`, `aria-invalid:`, `aria-selected:` and `data-[state=open]:`, so instances respond when people use them.
+- Do not create a component per state, such as `Button/Default focus` or `Input/Invalid`. Expose states that callers set as props on real attributes, such as `aria-invalid="{{invalid|false}}"` or `data-state="{{state|closed}}"`, and style them with matching variants.
+- Keep variants separate from states: `Button/Ghost` is a variant; hover, focus, disabled and error are states of every variant.
 - Set a suitable preview width. Omit height so content and captions fit.
 
 ```html
