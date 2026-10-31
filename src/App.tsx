@@ -6,9 +6,9 @@ import { useLocation } from "./router";
 import { Loading, Notice } from "./states";
 import { Button } from "@/components/ui/button";
 
-const loadEditor = () => import("./Editor");
-const Editor = lazy(() => loadEditor().then((module) => ({ default: module.Editor })));
-const SharedEditor = lazy(() => loadEditor().then((module) => ({ default: module.SharedEditor })));
+type EditorModule = typeof import("./Editor");
+let editorModule: EditorModule | null = null;
+const loadEditor = () => import("./Editor").then((module) => { editorModule = module; return module; });
 // Signed-in startup never downloads the introduction.
 const Landing = lazy(() => import("./Landing").then((module) => ({ default: module.Landing })));
 
@@ -48,10 +48,26 @@ export function App() {
   return (
     <DestinationBoundary key={shared ? shared[1] : "signed"}>
       <Suspense fallback={<OpeningLoading />}>
-        {shared ? <SharedEditor token={shared[1]!} /> : <SignedApp />}
+        {shared ? <EditorRoute token={shared[1]!} /> : <SignedApp />}
       </Suspense>
     </DestinationBoundary>
   );
+}
+
+/** Keep file bootstrap outside Suspense's fallback delay, including when the editor is already cached. */
+function EditorRoute(props: { fileId: string; token?: never } | { token: string; fileId?: never }) {
+  const [loaded, setLoaded] = useState(() => editorModule);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (loaded) return;
+    let current = true;
+    void loadEditor().then((module) => { if (current) setLoaded(module); })
+      .catch(() => { if (current) setFailed(true); });
+    return () => { current = false; };
+  }, [loaded]);
+  if (failed) throw new Error("The editor could not be loaded.");
+  if (!loaded) return <OpeningLoading />;
+  return props.token !== undefined ? <loaded.SharedEditor token={props.token} /> : <loaded.Editor fileId={props.fileId} />;
 }
 
 class DestinationBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -123,7 +139,7 @@ function AuthenticatedApp({ agentConfig }: { agentConfig: AgentConnectionConfig 
   const path = new URL(loc, location.origin).pathname;
   const file = path.match(/^\/f\/([\w-]+)\/?$/);
   // File metadata includes the verified author; opening a deep link does not need a workspace bootstrap first.
-  if (file) return <Editor key={file[1]} fileId={file[1]!} />;
+  if (file) return <EditorRoute key={file[1]} fileId={file[1]!} />;
   return <WorkspaceHome agentConfig={agentConfig} />;
 }
 
