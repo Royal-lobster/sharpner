@@ -123,6 +123,32 @@ describe("file and screen themes", () => {
     expect(room.node("viewed-a")).toMatchObject({ thumbRev: room.node("viewed-a")!.rev });
   });
 
+  it("lets a component carry one override per theme, used by its instances' screens", async () => {
+    const { room, apply, create, cached } = fixture();
+    await create("button", { kind: "component", name: "Button/Primary", source: "<button>Go</button>" });
+    await create("sakura-button", { kind: "component", name: "Button/Primary", theme: "sakura", source: "<button class=petals>Go</button>" });
+    await create("screen", { source: "<x-button-primary></x-button-primary>" });
+    expect(room.ownDesignSystem().components).toEqual([
+      { tag: "x-button-primary", html: "<button>Go</button>", theme: null },
+      { tag: "x-button-primary", html: "<button class=petals>Go</button>", theme: "sakura" },
+    ]);
+    // A second default, or a second override for the same theme, is still a tag clash.
+    await expect(create("again", { kind: "component", name: "Button / Primary" })).rejects.toThrow(/already uses the tag/);
+    await expect(create("again", { kind: "component", name: "Button/Primary", theme: "sakura" })).rejects.toThrow(/already overrides <x-button-primary> for the sakura theme/);
+    await create("uwu-button", { kind: "component", name: "Button/Primary", theme: "uwu", source: "<button>uwu</button>" });
+
+    cached();
+    const screen = room.node("screen")!.rev, override = room.node("sakura-button")!.rev;
+    // Restructuring an override re-renders the screens using the component.
+    await apply([{ t: "node.put", id: "sakura-button", node: { source: "<button class=petals>Go!</button>" } }]);
+    expect(room.node("screen")!.rev).toBe(screen + 1);
+    // A file theme change re-renders inheriting nodes, not overrides that always show their own theme.
+    await apply([{ t: "theme.set", theme: "dark" }]);
+    expect(room.node("sakura-button")!.rev).toBe(override + 1);
+    expect(room.node("button")!.rev).toBeGreaterThan(1);
+    expect(room.node("screen")!.rev).toBe(screen + 2);
+  });
+
   it("keeps an override through unrelated edits and resumes inheritance when cleared", async () => {
     const { room, apply, create, cached } = fixture();
     await create("screen");
@@ -143,7 +169,7 @@ describe("file and screen themes", () => {
   it("rolls back malformed themes and overrides on unsupported node kinds", async () => {
     const { room, apply, create } = fixture();
     await create("screen");
-    await create("component", { kind: "component", name: "Button" });
+    await create("tokens", { kind: "tokens", source: "@theme { --color-primary: red; }" });
     await apply([{ t: "theme.set", theme: "dark" }]);
     const rev = room.node("screen")!.rev;
     for (const theme of ["", "   ", "x".repeat(81), 42, undefined]) {
@@ -152,9 +178,10 @@ describe("file and screen themes", () => {
       expect(room.theme()).toBe("dark");
       expect(room.node("screen")!.rev).toBe(rev);
     }
-    await expect(apply([{ t: "theme.set", theme: "light" }, { t: "node.put", id: "component", node: { theme: "dark" } }])).rejects.toThrow(/screens/i);
+    // Token sheets compare every theme, so they never take one.
+    await expect(apply([{ t: "theme.set", theme: "light" }, { t: "node.put", id: "tokens", node: { theme: "dark" } }])).rejects.toThrow(/screens and components/i);
     expect(room.theme()).toBe("dark");
-    expect(room.node("component")!.theme ?? null).toBeNull();
+    expect(room.node("tokens")!.theme ?? null).toBeNull();
   });
 
   it("renders cached previews with the same effective theme as live screens, leaving token comparisons intact", async () => {

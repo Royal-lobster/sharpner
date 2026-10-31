@@ -109,7 +109,7 @@ Use token utilities in frames and components. Avoid hardcoded colors, arbitrary 
 
 Create a `kind: "component"` node with HTML in `source`. Its name sets the tag: `Button/Primary` → `<x-button-primary>`.
 
-- Name variants as `Family/Variant`, such as `Button/Ghost` or `Field/Error`. Themes do not need duplicate component definitions.
+- Name variants as `Family/Variant`, such as `Button/Ghost` or `Field/Error`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
 - Use props for content. `{{label|Continue}}` takes the instance's label attribute or the default value.
 - Props also work in attributes: `<img src="{{src|/placeholder.png}}">`.
 - Use `<slot></slot>` for child content in cards, dialogs, sidebars, and lists.
@@ -141,7 +141,9 @@ Themes can change colors, fonts, radii, and shadows. `get_design_system` returns
 - Nested light content in a dark frame needs explicit light token overrides in CSS.
 - Compare themes in separate frames with explicit theme fields. A file theme change then preserves those choices.
 
-Keep feature decoration in CSS with a scoped selector, such as `[data-theme="uwu"] .trade-chart`. Use token variables for colors. A shared screen component is optional. Use a separate frame when the structure differs.
+Keep feature decoration in CSS with a scoped selector, such as `[data-theme="uwu"] .trade-chart`. Use token variables for colors. A shared screen component is optional.
+
+When a theme changes a component's structure, such as extra decoration elements, slots, or a different layout, add a theme override: create a component with the same name and `theme: "uwu"`. Instances inside that theme use it; other themes keep the default, so create the default first. Keep the same props and slot so instances work in every theme, and leave value differences to the token sheet. `get_design_system` lists overrides under `themeOverrides`. Use a separate frame when a whole screen's structure differs.
 
 ## Build and maintain
 
