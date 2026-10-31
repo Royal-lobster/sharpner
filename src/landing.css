@@ -1,0 +1,75 @@
+/* ---- landing ----
+   The signed-out introduction: one statement, one action, and a glimpse of a page where a person and an agent
+   work side by side. Sign-in itself happens on Clerk's hosted page. */
+.landing {
+  --landing-x: calc(24px + var(--safe-left));
+  --landing-x-end: calc(24px + var(--safe-right));
+  display: flex; flex-direction: column; min-height: 100svh; width: 100%; max-width: 72rem; margin-inline: auto;
+}
+.landing-bar { display: flex; align-items: center; height: calc(64px + var(--safe-top)); padding: var(--safe-top) var(--landing-x-end) 0 var(--landing-x); }
+.landing-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.02em; }
+.landing-brand img { flex: none; }
+.landing-main {
+  flex: 1; display: grid; align-content: center; gap: 48px;
+  padding: 24px var(--landing-x-end) calc(48px + var(--safe-bottom)) var(--landing-x);
+}
+.landing-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; max-width: 32rem; animation: rise 0.4s var(--ease) both; }
+.landing-copy h1 { font-size: clamp(2rem, 1.35rem + 2.6vw, 3.25rem); line-height: 1.05; font-weight: 600; letter-spacing: -0.04em; text-wrap: balance; }
+.landing-copy > p { margin: 0; max-width: 28rem; color: var(--muted-foreground); font-size: 15px; line-height: 1.6; text-wrap: pretty; }
+.landing-actions { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 8px; }
+/* A comfortable touch target; Mira's large button is sized for dense toolbars. */
+.landing-cta.landing-cta { height: 44px; padding-inline: 18px 14px; gap: 8px; font-size: 14px; }
+.landing-error { margin: 0; min-height: 1.5em; color: var(--destructive); font-size: 13px; line-height: 1.5; }
+.landing-error:empty { visibility: hidden; }
+
+/* ---- canvas cue ----
+   Proportional units keep the composition intact at any width. */
+.landing-cue {
+  position: relative; width: 100%; max-width: 36rem; aspect-ratio: 4 / 3; overflow: hidden; container-type: inline-size;
+  border: 1px solid var(--border); border-radius: 16px;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.07) 1px, transparent 1px) 50% 50% / 20px 20px, var(--canvas);
+  animation: fade 0.6s 0.12s var(--ease) both;
+}
+.cue-frame { position: absolute; margin: 0; font-size: max(10px, 2.2cqw); }
+.cue-frame figcaption { margin-bottom: 0.6em; color: var(--muted-foreground); font-size: 1em; line-height: 1.2; white-space: nowrap; }
+.cue-frame-a { left: 9%; top: 16%; width: 36%; }
+.cue-frame-b { left: 52%; top: 27%; width: 40%; }
+.cue-body {
+  position: relative; display: flex; flex-direction: column; gap: 0.9em; overflow: hidden;
+  padding: 1.6em 1.4em; border-radius: 0.5em; background: oklch(0.97 0.003 85);
+  box-shadow: 0 1.5em 3em -1.5em rgb(0 0 0 / 0.7);
+}
+.cue-frame-a .cue-body { aspect-ratio: 3 / 4; }
+.cue-frame-b .cue-body { aspect-ratio: 5 / 4; box-shadow: 0 0 0 1.5px var(--primary), 0 1.5em 3em -1.5em rgb(0 0 0 / 0.7); }
+.cue-body i { display: block; flex: none; border-radius: 0.3em; background: oklch(0.88 0.004 85); }
+.cue-line { height: 0.55em; width: 72%; }
+.cue-line.cue-title { height: 0.95em; width: 48%; background: oklch(0.32 0.01 85); }
+.cue-field { height: 2.1em; background: transparent !important; box-shadow: inset 0 0 0 1px oklch(0.88 0.004 85); }
+.cue-body i.cue-button { height: 2.1em; margin-top: auto; background: oklch(0.32 0.01 85); }
+.cue-row { height: 1.7em; }
+
+/* People and agents carry the same marks they do in the editor. */
+.cue-cursor { position: absolute; left: 62%; top: 78%; color: var(--select); animation: cue-drift 7s ease-in-out infinite alternate; }
+.cue-cursor svg { display: block; width: 1.5em; height: 1.5em; fill: currentColor; stroke: #0b0b0d; stroke-width: 1; }
+.cue-cursor span, .cue-agent {
+  position: absolute; padding: 0.2em 0.65em; border-radius: 0.55em; color: #0b0b0d; font-size: 1em; font-weight: 500; line-height: 1.5; white-space: nowrap;
+}
+.cue-cursor span { left: 1.3em; top: 1.3em; background: var(--select); }
+.cue-agent { right: 0; top: -0.25em; background: var(--primary); }
+.cue-sheen {
+  position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 40%, rgb(255 214 120 / 0.28) 48%, rgb(255 236 190 / 0.4) 50%, rgb(255 214 120 / 0.28) 52%, transparent 60%) 0 0 / 300% 100%;
+  animation: sheen 3.2s cubic-bezier(0.45, 0, 0.55, 1) 0.6s infinite;
+}
+@keyframes cue-drift { to { transform: translate(-0.6em, -0.9em); } }
+
+@media (min-width: 960px) {
+  .landing { --landing-x: calc(48px + var(--safe-left)); --landing-x-end: calc(48px + var(--safe-right)); }
+  .landing-bar { height: calc(80px + var(--safe-top)); }
+  .landing-main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 64px; padding-bottom: calc(80px + var(--safe-bottom)); }
+  .landing-cue { justify-self: end; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cue-sheen { display: none; }
+  .cue-cursor { animation: none; }
+}

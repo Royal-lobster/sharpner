@@ -176,40 +176,7 @@ button { -webkit-tap-highlight-color: transparent; }
 /* The first fitted view of a page sharpens out of the same blur. */
 @keyframes focus-in { from { opacity: 0; filter: blur(10px); } }
 .canvas[data-ready] > :is(.raster, .world) { animation: focus-in 0.5s var(--ease) both; }
-.login, .home-header-inner, .home-main { width: 100%; max-width: var(--page-width); margin-inline: auto; }
-
-/* ---- sign-in ----
-   The form is part of the page. The desktop canvas is a quiet collection of finished designs. */
-.login { min-height: 100svh; display: flex; background: var(--bg); }
-.login-stage { display: none; }
-.login-panel {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 32px;
-  padding: calc(48px + var(--safe-top)) calc(24px + var(--safe-right)) calc(40px + var(--safe-bottom)) calc(24px + var(--safe-left));
-}
-.login-intro { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; width: 100%; max-width: 320px; }
-.login-brand { display: inline-flex; align-items: center; gap: 10px; font-size: 20px; line-height: 32px; font-weight: 600; letter-spacing: -0.04em; }
-.login-brand img { flex: none; }
-.login-intro p { margin: 0; max-width: 290px; color: var(--muted-text); font-size: 14px; line-height: 1.6; }
-.login-card { display: flex; justify-content: center; width: 100%; max-width: 320px; min-width: 0; }
-/* Hide only the repeated start-screen heading, keeping OTP, password and recovery instructions. */
-.login-card .cl-signIn-start .cl-header { display: none; }
-/* Keep Clerk's remembered-provider hint inside the button when the card has no padding. */
-.login-card .cl-socialButtonsBlockButton .cl-lastAuthenticationStrategyBadge {
-  position: static; transform: none; order: 1; flex-shrink: 0; box-shadow: none;
-}
-@media (max-width: 640px) {
-  .login-panel { gap: 28px; padding-top: calc(36px + var(--safe-top)); padding-bottom: calc(28px + var(--safe-bottom)); }
-}
-@media (min-width: 900px) {
-  .login-stage {
-    display: block; position: relative; flex: 1; min-width: 0; overflow: hidden;
-    border-right: 1px solid var(--line);
-    background: radial-gradient(circle, rgb(255 255 255 / 0.045) 1px, transparent 1px) 0 0 / 24px 24px, var(--canvas);
-  }
-  .login-panel { flex: 0 0 42%; max-width: 600px; min-width: 380px; }
-}
-
-
+.home-header-inner, .home-main { width: 100%; max-width: var(--page-width); margin-inline: auto; }
 
 /* Workspace layout; component appearance comes from Mira. */
 .home { --page-width: 48rem; min-height: 100%; }

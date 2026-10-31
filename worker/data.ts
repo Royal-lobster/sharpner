@@ -1,6 +1,7 @@
 // Shared D1 queries and access checks used by both the REST API and the MCP server.
 
 export type FileRow = { id: string; workspace_id: string; name: string; library_id: string | null; created_at: number; updated_at: number };
+export type FileSummaryRow = Omit<FileRow, "workspace_id"> & { cover: string | null; used_by: number };
 export type WorkspaceRow = { id: string; name: string; role: "owner" | "member"; clerkOrganizationId: string };
 
 export const room = (env: Env, fileId: string) => env.FILE_ROOM.get(env.FILE_ROOM.idFromName(fileId));
@@ -17,6 +18,14 @@ export const workspaceFor = (env: Env, userId: string, workspaceId: string) =>
     FROM workspaces w JOIN members m ON m.workspace_id = w.id JOIN users u ON u.id = m.user_id
     WHERE m.user_id = ? AND w.id = ? AND w.clerk_organization_id IS NOT NULL AND u.clerk_user_id IS NOT NULL`)
     .bind(userId, workspaceId).first<WorkspaceRow>();
+
+/** File cards for an already-authorized workspace, newest first. */
+export const workspaceFiles = (env: Env, workspaceId: string) =>
+  env.DB.prepare(
+    `SELECT f.id, f.name, f.cover, f.library_id, f.created_at, f.updated_at,
+       (SELECT count(*) FROM files d WHERE d.library_id = f.id) AS used_by
+     FROM files f WHERE f.workspace_id = ? ORDER BY f.updated_at DESC`,
+  ).bind(workspaceId).all<FileSummaryRow>().then((r) => r.results);
 
 const FILE_COLS = `f.id, f.workspace_id, f.name, f.library_id, f.created_at, f.updated_at`;
 
