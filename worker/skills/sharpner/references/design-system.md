@@ -12,14 +12,14 @@ Keep the design system on a page named Design System, with the same three sectio
 
 1. **Brand:** one frame with the name and logo, a short guidelines paragraph, and the voice in a few bullets.
 2. **Foundations:** the token sheets, including themes.
-3. **Primitives:** one catalog section per family, in the core-set order below.
+3. **Primitive components:** one catalog section per family the file defines. Put families from the recommended list first, in its order, then the file's own.
 
 Keep anything else, such as product compositions and explorations, on feature pages.
 
-Base primitives on the shadcn/ui component set. Use its component names and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`. In a shared design-system file, cover the core set below. In a product file without a library, add the primitives its current screens need.
+Use the shadcn/ui component set as the recommended list of primitive components. It is a recommendation, not a requirement: build the families the product needs, which may be only a Button and an Input, and register any component the app's screens are built around. Where a family matches the list, use its component and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`.
 
-- Core set: Button, Badge, Input, Textarea, Label, Field, Select, Checkbox, Radio Group, Switch, Slider, Toggle Group, Tabs, Card, Alert, Dialog, Sheet, Drawer, Popover, Tooltip, Dropdown Menu, Avatar, Separator, Skeleton, Spinner, Progress, Table, Toast, Breadcrumb, Pagination, Accordion, and Empty.
-- Add others from shadcn/ui when screens need them: Command, Combobox, Calendar, Date Picker, Input OTP, Navigation Menu, Menubar, Sidebar, Carousel, Chart, Hover Card, Context Menu, Resizable, Scroll Area, Collapsible, and Kbd.
+- Recommended list: Button, Badge, Input, Textarea, Label, Field, Select, Checkbox, Radio Group, Switch, Slider, Toggle Group, Tabs, Card, Alert, Dialog, Sheet, Drawer, Popover, Tooltip, Dropdown Menu, Avatar, Separator, Skeleton, Spinner, Progress, Table, Toast, Breadcrumb, Pagination, Accordion, and Empty.
+- Further shadcn/ui families when screens need them: Command, Combobox, Calendar, Date Picker, Input OTP, Navigation Menu, Menubar, Sidebar, Carousel, Chart, Hover Card, Context Menu, Resizable, Scroll Area, Collapsible, and Kbd.
 - Name product-specific compositions after their feature, not after shadcn/ui.
 
 Give each large feature a page for its screens, states, and reused components. Keep product-specific compositions, such as an order form, with that feature.
@@ -28,7 +28,7 @@ Give each large feature a page for its screens, states, and reused components. K
 Design System
 ├─ Brand: name, logo, guidelines, voice
 ├─ Foundations: tokens and themes
-└─ Primitives: Button/*, Badge/*, Input/*, … (shadcn/ui names, core-set order)
+└─ Primitive components: Button/*, Input/*, … (recommended ones first, then the file's own)
 Trade
 ├─ Screens: sections for each flow
 └─ Components: Trade/OrderForm, Trade/MarketHeader
