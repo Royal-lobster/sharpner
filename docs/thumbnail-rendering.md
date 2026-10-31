@@ -176,6 +176,13 @@ browser's actual layout and pixels. DOM capture would save roughly another
 $0.01–0.02/team/month in this model; most remaining expense is R2 operations.
 Do not make an unproven capture library the primary path for that small saving.
 
+For interactive adaptation, follow the [live canvas experiments](live-canvas-rendering.md).
+Persistent browser HTML changed forty warmed screens in 51–55 ms without server
+work, while optimized SVG capture still took about 2.4 seconds. The current PR
+adds a conservative theme fast path for already-live documents. A broader
+overview implementation needs bounded hydration and a faithful bitmap handoff;
+it is separate from the server-cost optimization above.
+
 Client capture cannot read compositor pixels from an ordinary web page. Current
 live frames use `sandbox="allow-scripts"`, so their opaque origins also prevent
 parent DOM access. An in-frame SVG/DOM rasterizer would need to inline fonts,

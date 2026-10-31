@@ -80,12 +80,39 @@ export function componentTheme(element: Element, applied: string | null | undefi
   return context ? name(context) : "";
 }
 
+export type FrameThemeChannel = { token: string; generation: number };
+export type FrameThemeReply = FrameThemeChannel & {
+  type: "sharpner:frame-ready" | "sharpner:frame-height" | "sharpner:frame-reload";
+  height?: number;
+};
+
+/** The owning iframe window and its latest command must both match before publishing a result. */
+export function frameThemeReply(event: Pick<MessageEvent, "source" | "data">, source: MessageEventSource | null, channel: FrameThemeChannel): FrameThemeReply | null {
+  const data = event.data as Partial<FrameThemeReply> | null;
+  if (!source || event.source !== source || !data || data.token !== channel.token || data.generation !== channel.generation) return null;
+  if (data.type === "sharpner:frame-reload") return data as FrameThemeReply;
+  if (data.type !== "sharpner:frame-ready" && data.type !== "sharpner:frame-height") return null;
+  return typeof data.height === "number" && Number.isFinite(data.height) && data.height >= 0 ? data as FrameThemeReply : null;
+}
+
 /** Runs inside the rendered document. Stored HTML stays unchanged. */
-function applyDocumentTheme(theme: string) {
+function applyDocumentTheme(theme: string | null, channel?: FrameThemeChannel) {
   // Announced before parsing finishes, so component expansion can pick this theme's definitions.
-  (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme;
+  (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme ?? undefined;
   const selector = "[data-theme],.dark,.light";
+  // Persistent updates are enabled only for declarative documents. Keep exact authored attributes,
+  // including absent attributes, so selecting As authored does not leave theme-owned markup behind.
+  const authored = new Map<HTMLElement, (string | null)[]>();
+  const attributes = ["data-theme", "class", "style"];
+  const restore = () => {
+    for (const [element, values] of authored) for (let i = 0; i < attributes.length; i++) {
+      if (values[i] === null) element.removeAttribute(attributes[i]!);
+      else element.setAttribute(attributes[i]!, values[i]!);
+    }
+  };
   const apply = () => {
+    if (channel) restore();
+    if (theme === null) return;
     // Authored screens may put their theme on wrappers rather than <html>, including separate
     // header and content roots. Replace each outer context; leave nested theme markup alone.
     const contexts = [...document.body.querySelectorAll<HTMLElement>(selector)].filter((element) => {
@@ -94,19 +121,82 @@ function applyDocumentTheme(theme: string) {
     });
     const roots = [document.documentElement, document.body, ...contexts];
     for (const root of roots) {
+      if (channel && !authored.has(root)) authored.set(root, attributes.map((name) => root.getAttribute(name)));
       root.dataset.theme = theme;
       root.classList.remove("dark", "light");
       if (theme === "dark" || theme === "light") root.classList.add(theme);
     }
     document.documentElement.style.colorScheme = theme === "light" ? "light" : theme === "dark" ? "dark" : "normal";
   };
+  if (channel) {
+    let generation = channel.generation;
+    let readyGeneration = -1;
+    let previousHeight = -1;
+    let declarative = false;
+    const post = (type: FrameThemeReply["type"], height?: number) => parent.postMessage({ type, token: channel.token, generation, ...(height === undefined ? {} : { height }) }, "*");
+    const height = () => Math.ceil(document.body.getBoundingClientRect().height);
+    const ready = async (expected: number, waitForFonts = true) => {
+      document.body.getBoundingClientRect();
+      if (waitForFonts) await document.fonts.ready;
+      if (generation !== expected) return;
+      readyGeneration = generation;
+      previousHeight = height();
+      post("sharpner:frame-ready", previousHeight);
+    };
+    addEventListener("message", (event) => {
+      const data = event.data;
+      if (event.source !== parent || data?.type !== "sharpner:frame-theme" || data.token !== channel.token ||
+        !Number.isSafeInteger(data.generation) || data.generation <= generation ||
+        !(data.theme === null || typeof data.theme === "string")) return;
+      const previousTheme = theme;
+      generation = data.generation;
+      readyGeneration = -1;
+      // Props may have produced executable attributes that were encoded in the stored HTML.
+      // Inspect the real expanded DOM, after the shared custom-element runtime has run.
+      if (!declarative) { post("sharpner:frame-reload"); return; }
+      theme = data.theme;
+      (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme ?? undefined;
+      apply();
+      document.body.getBoundingClientRect();
+      // Roll back in this task, before painting, if this change needs cold assets. The parent
+      // will prepare a fresh document behind the shown one using its ordinary no-flicker swap.
+      if (document.fonts.status !== "loaded" || [...document.images].some((image) => !image.complete)) {
+        theme = previousTheme;
+        (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme ?? undefined;
+        apply();
+        post("sharpner:frame-reload");
+        return;
+      }
+      void ready(generation);
+    });
+    const observe = () => {
+      declarative = ![document.documentElement, document.body, ...document.body.querySelectorAll("*")].some((element) =>
+        [...element.attributes].some((attribute) => /^on/i.test(attribute.name) || /^(?:href|src|action|formaction|xlink:href)$/i.test(attribute.name) && /^\s*(?:javascript|vbscript):/i.test(attribute.value)));
+      new ResizeObserver(() => {
+        if (readyGeneration !== generation) return;
+        const next = height();
+        if (next !== previousHeight) { previousHeight = next; post("sharpner:frame-height", next); }
+      }).observe(document.body);
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", observe, { once: true });
+    else observe();
+    // Keep the existing browser-JIT settle allowance for the initial document. Theme-only updates
+    // reuse its loaded compiler, stylesheet and fonts and need no arbitrary delay.
+    const loaded = () => {
+      const expected = generation;
+      setTimeout(() => { void ready(expected, false); }, 120);
+    };
+    if (document.readyState === "complete") loaded();
+    else addEventListener("load", loaded, { once: true });
+  }
   // Component expansion also waits for parsing; registering after it includes authored component roots.
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply, { once: true });
   else apply();
 }
 
-export function documentThemeScript(theme?: string | null): string {
-  if (theme == null) return "";
-  const value = JSON.stringify(theme).replace(/</g, "\\u003c");
-  return `<script>(${applyDocumentTheme.toString()})(${value})</script>`;
+export function documentThemeScript(theme?: string | null, channel?: FrameThemeChannel): string {
+  if (theme == null && !channel) return "";
+  const value = JSON.stringify(theme ?? null).replace(/</g, "\\u003c");
+  const control = channel ? `,${JSON.stringify(channel).replace(/</g, "\\u003c")}` : "";
+  return `<script>(${applyDocumentTheme.toString()})(${value}${control})</script>`;
 }
