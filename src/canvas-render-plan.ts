@@ -1,5 +1,5 @@
 import type { Rect } from "../shared/layout";
-import type { CanvasNode } from "../shared/types";
+import { previewCurrent, type CanvasNode } from "../shared/types";
 
 /** Screen position = world position * z + camera offset. */
 export type Camera = { x: number; y: number; z: number };
@@ -53,8 +53,9 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
   let liveIds: Set<string>;
   if (settled) {
     liveCandidates.sort((a, b) => b.visibleArea - a.visibleArea);
-    const withPreview = liveCandidates.filter(({ node }) => node.thumbHi).slice(0, MAX_LIVE_WITH_PREVIEW);
-    const withoutPreview = liveCandidates.filter(({ node }) => !node.thumbHi).slice(0, MAX_LIVE_WITHOUT_PREVIEW);
+    // An outdated preview (after a theme or source change) is as unusable as a missing one.
+    const withPreview = liveCandidates.filter(({ node }) => previewCurrent(node)).slice(0, MAX_LIVE_WITH_PREVIEW);
+    const withoutPreview = liveCandidates.filter(({ node }) => !previewCurrent(node)).slice(0, MAX_LIVE_WITHOUT_PREVIEW);
     liveIds = new Set([...withPreview, ...withoutPreview].map(({ node }) => node.id));
   } else {
     liveIds = keepEligible(previous.liveIds, liveCandidates);
@@ -80,7 +81,7 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
 
 function canRenderLive({ node, visibleArea, screenWidth }: ProjectedNode) {
   if (node.kind !== "frame" && node.kind !== "component" && node.kind !== "tokens") return false;
-  const minimumWidth = !node.thumbHi
+  const minimumWidth = !previewCurrent(node)
     ? LIVE_WITHOUT_PREVIEW_MIN_WIDTH
     : node.kind === "component" ? LIVE_COMPONENT_MIN_WIDTH : LIVE_FRAME_MIN_WIDTH;
   return visibleArea > 0 && screenWidth >= minimumWidth;

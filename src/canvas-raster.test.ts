@@ -90,6 +90,24 @@ describe("raster previews while zoomed out", () => {
     f.cache.dispose(); f.highCache.dispose();
   });
 
+  it("keeps a node's previous preview on screen until the restyled one loads", () => {
+    const f = fixture();
+    const upgrades = { enabled: false, settled: true };
+    f.paint(0.5, [component], upgrades);
+    f.finish();
+    f.paint(0.5, [component], upgrades);
+    expect(f.drawImage.mock.lastCall?.[0]).toBe(f.images[0]);
+    const restyled = { ...component, rev: 2, thumbRev: 2, thumbLo: "/button-dark-256.webp", thumbHi: "/button-dark-1280.webp" };
+    f.drawImage.mockClear();
+    f.paint(0.5, [restyled], upgrades);
+    expect(f.drawImage.mock.lastCall?.[0]).toBe(f.images[0]);
+    f.finish();
+    f.paint(0.5, [restyled], upgrades);
+    expect(f.images.at(-1)!.src).toBe(restyled.thumbLo);
+    expect(f.drawImage.mock.lastCall?.[0]).toBe(f.images.at(-1));
+    f.cache.dispose(); f.highCache.dispose();
+  });
+
   it.each([{ enabled: false, settled: true }, { enabled: true, settled: false }])("keeps optional upgrades paused for %j", upgrades => {
     const f = fixture();
     f.paint(0.5, [component], upgrades);

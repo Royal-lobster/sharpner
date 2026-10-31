@@ -316,10 +316,9 @@ export class Room {
             this.later(() => { this.appeared.delete(n.id); this.emit(); }, 1500);
           }
           const previous = this.nodes.get(n.id);
-          if (previous && previous.rev !== n.rev) {
-            this.forgetSource(n.id);
-            this.heights.delete(n.id);
-          }
+          // The previous source keeps live previews on screen until the new revision arrives; unmounting
+          // them would flash the outdated thumbnail underneath. reconcileSources refetches by revision.
+          if (previous && previous.rev !== n.rev) this.heights.delete(n.id);
           this.nodes.set(n.id, n);
           this.updateDesignNode(n);
           if (msg.by?.agent) this.markAgent(n.id, msg.by.name);
@@ -571,11 +570,8 @@ export class Room {
       case "node.put": {
         const cur = this.nodes.get(op.id);
         const { source: _source, ...meta } = op.node;
-        if (cur) {
-          const themeChanged = meta.theme !== undefined && meta.theme !== (cur.theme ?? null);
-          if (themeChanged) this.heights.delete(op.id);
-          this.nodes.set(op.id, { ...cur, ...meta, ...(themeChanged ? { measuredHeight: null } : {}) });
-        }
+        // A theme change keeps the current height until the restyled preview reports its own.
+        if (cur) this.nodes.set(op.id, { ...cur, ...meta });
         else if (meta.pageId) {
           this.nodes.set(op.id, {
             id: op.id, pageId: meta.pageId, parentId: meta.parentId ?? null, kind: meta.kind ?? "frame", name: meta.name ?? "Frame",
@@ -595,14 +591,8 @@ export class Room {
         this.coverNodeId = op.id;
         break;
       case "theme.set":
-        if (this.fileTheme !== op.theme) {
-          this.fileTheme = op.theme;
-          for (const [id, node] of this.nodes) {
-            if (node.kind !== "component" && !(node.kind === "frame" && !node.theme)) continue;
-            this.heights.delete(id);
-            this.nodes.set(id, { ...node, measuredHeight: null });
-          }
-        }
+        // Live previews restyle in place; heights stay until the restyled previews report theirs.
+        this.fileTheme = op.theme;
         break;
       case "node.del":
         for (const id of [...op.ids, ...descendantsOf([...this.nodes.values()], op.ids)]) this.forgetNode(id);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { effectiveTheme, themeNames, validateTheme } from "./themes";
+import { effectiveTheme, themeNames, themeSwatches, validateTheme } from "./themes";
 import { frameDocument } from "./types";
 
 describe("theme selection", () => {
@@ -10,6 +10,24 @@ describe("theme selection", () => {
       [data-theme=UwU] {} .dark {} [data-theme="UwU"] {}
       .dark-mode {} [data-theme-mode=invalid] {} [data-theme='high contrast'] {}
     `)).toEqual(["light", "UwU", "dark", "high contrast"]);
+  });
+
+  it("previews any named theme from its own token values, layered over the defaults", () => {
+    const swatches = themeSwatches(`
+      @theme { --color-background: #fff; --color-primary: oklch(0.6 0.2 260); --font-sans: Inter; }
+      /* [data-theme="ghost"] { --color-background: red; } */
+      @layer base { .dark { --color-background: #111; } }
+      [data-theme="uwu"], [data-theme='candy'] { --color-surface: pink; --color-brand: var(--color-primary); }
+      [data-theme=mono] { --radius-card: 0; }
+    `);
+    expect([...swatches.keys()]).toEqual(["light", "dark", "uwu", "candy"]);
+    expect(swatches.get("light")).toMatchObject({ background: "var(--color-background)", accent: "var(--color-primary)" });
+    expect(swatches.get("dark")!.vars).toMatchObject({ "--color-background": "#111", "--color-primary": "oklch(0.6 0.2 260)" });
+    // A theme's own tokens win over inherited ones, even under other names; references still resolve.
+    expect(swatches.get("uwu")).toMatchObject({ background: "var(--color-surface)", accent: "var(--color-brand)" });
+    expect(swatches.get("uwu")!.vars).toMatchObject({ "--color-surface": "pink", "--color-primary": "oklch(0.6 0.2 260)" });
+    expect(swatches.get("dark")).toMatchObject({ background: "var(--color-background)", accent: "var(--color-primary)" });
+    expect(themeSwatches("").get("light")).toEqual({ vars: {}, background: undefined, accent: undefined });
   });
 
   it("inherits file themes while retaining screen overrides and foundation comparisons", () => {
