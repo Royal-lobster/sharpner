@@ -1,5 +1,5 @@
 import { runInNewContext } from "node:vm";
-import type { HtmlTagDescriptor, IndexHtmlTransformContext, IndexHtmlTransformHook, ResolvedConfig } from "vite";
+import { build, type HtmlTagDescriptor, type IndexHtmlTransformContext, type IndexHtmlTransformHook, type Plugin, type ResolvedConfig } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import { editorPreload } from "../vite.editor-preload";
 
@@ -22,16 +22,16 @@ async function transform(base = "/", bundle: Bundle | null = graph(), html = `<s
   const hook = plugin.transformIndexHtml as { order: string; handler: IndexHtmlTransformHook };
   expect(plugin.apply).toBe("build");
   expect(hook.order).toBe("post");
-  return await hook.handler.call({} as never, html, { path: "/index.html", filename: "/app/index.html", bundle: bundle ?? undefined }) as HtmlTagDescriptor[];
+  return await hook.handler.call({} as never, html, { path: "/index.html", filename: "/app/index.html", bundle: bundle ?? undefined }) as string | HtmlTagDescriptor[];
 }
 
-function run(tags: HtmlTagDescriptor[], pathname: string) {
+function run(output: string | HtmlTagDescriptor[], pathname: string) {
   const append = vi.fn();
-  for (const tag of tags) {
-    expect(tag.tag).toBe("script");
-    expect(tag.injectTo).toBe("head");
-    expect(typeof tag.children).toBe("string");
-    runInNewContext(tag.children as string, {
+  const scripts = typeof output === "string"
+    ? [...output.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]!)
+    : output.map((tag) => tag.children as string);
+  for (const script of scripts) {
+    runInNewContext(script, {
       location: { pathname },
       document: { createElement: () => ({}), head: { append } },
     });
@@ -40,6 +40,44 @@ function run(tags: HtmlTagDescriptor[], pathname: string) {
 }
 
 describe("early direct-file editor module preloads", () => {
+  it("emits the preload script after auth bootstrap and before the build's blocking stylesheet", async () => {
+    const root = "/sharpner-editor-preload-fixture";
+    const files: Record<string, string> = {
+      [`${root}/index.html`]: `<!doctype html><html><head>
+        <script>window.__sharpnerAuthConfig = fetch("/auth/config");</script>
+        <script type="module" src="/src/main.ts"></script>
+        </head><body><div id="root"></div></body></html>`,
+      [`${root}/src/main.ts`]: `import "./style.css"; import("./Editor.tsx").then((module) => { window.editor = module.Editor; });`,
+      [`${root}/src/Editor.tsx`]: `export const Editor = "editor";`,
+      [`${root}/src/style.css`]: `.canvas { color: white; }`,
+    };
+    const fixture: Plugin = {
+      name: "editor-preload-virtual-build-fixture",
+      resolveId(source, importer) {
+        const id = source.startsWith("/src/") ? `${root}${source}`
+          : source.startsWith("./") && importer ? `${importer.slice(0, importer.lastIndexOf("/"))}/${source.slice(2)}` : source;
+        return id in files ? id : undefined;
+      },
+      load(id) { return files[id]; },
+    };
+    const result = await build({
+      configFile: false, root, publicDir: false, logLevel: "silent", plugins: [fixture, editorPreload()],
+      build: { write: false, minify: false, rolldownOptions: { input: `${root}/index.html` } },
+    });
+    const output = Array.isArray(result) ? result[0]! : result;
+    if (!("output" in output)) throw new Error("Expected an in-memory production build");
+    const asset = output.output.find((item) => item.type === "asset" && item.fileName === "index.html");
+    if (!asset || asset.type !== "asset") throw new Error("Production build did not emit index.html");
+    const html = String(asset.source);
+    const authEnd = html.indexOf("</script>", html.indexOf("window.__sharpnerAuthConfig")) + "</script>".length;
+    const preloadStart = html.lastIndexOf("<script", html.indexOf('document.createElement("link")'));
+    const stylesheetStart = html.search(/<link\b[^>]*\brel="stylesheet"/i);
+    expect(authEnd).toBeGreaterThan("</script>".length);
+    expect(stylesheetStart).toBeGreaterThan(authEnd);
+    expect(preloadStart).toBeGreaterThan(authEnd);
+    expect(preloadStart).toBeLessThan(stylesheetStart);
+  });
+
   it.each(["/f/file_a", "/f/file-a-1/", `/s/${"A".repeat(43)}`, `/s/${"a_-".repeat(14)}x/`])("starts the emitted editor and all static dependencies for %s", async (path) => {
     const links = run(await transform(), path);
     expect(links.map((link) => link.href)).toEqual([
@@ -75,6 +113,27 @@ describe("early direct-file editor module preloads", () => {
     expect(run(await transform("/", graph(), html), "/f/file_a").map((link) => link.href)).toEqual([
       "/assets/Editor-hashed.js", "/assets/math-hashed.js", "/assets/drawer-hashed.js",
     ]);
+  });
+
+  it("ignores stylesheet-looking text and inserts before a real stylesheet with reordered attributes", async () => {
+    const html = `<html><head>
+      <script>window.example = '<link rel="stylesheet" href="example.css">';</script>
+      <!-- <link rel="stylesheet" href="comment.css"> -->
+      <link href='/assets/app.css' crossorigin rel='stylesheet'>
+      </head><body></body></html>`;
+    const output = await transform("/", graph(), html);
+    expect(typeof output).toBe("string");
+    const result = output as string;
+    expect(result.indexOf('document.createElement("link")')).toBeGreaterThan(result.indexOf("comment.css"));
+    expect(result.indexOf('document.createElement("link")')).toBeLessThan(result.indexOf("<link href='/assets/app.css'"));
+  });
+
+  it("keeps the preload in the head after bootstrap when no stylesheet is emitted", async () => {
+    const html = `<html><head><script>window.__sharpnerAuthConfig = Promise.resolve({});</script></head><body></body></html>`;
+    const output = await transform("/", graph(), html);
+    const result = output as string;
+    expect(result.indexOf('document.createElement("link")')).toBeGreaterThan(result.indexOf("window.__sharpnerAuthConfig"));
+    expect(result.indexOf('document.createElement("link")')).toBeLessThan(result.indexOf("</head>"));
   });
 
   it("leaves dev HTML and builds without a separate editor chunk unchanged", async () => {

@@ -1,0 +1,3 @@
+# Vite gives these build assets content hashes; HTML and API responses keep their own policies.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

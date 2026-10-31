@@ -6,11 +6,11 @@ import { AccountError, handleAccountWebhook, syncAccount } from "./accounts";
 
 /** D1's small async surface over real SQLite, including atomic batches. */
 class Statement {
-  constructor(private db: DatabaseSync, private sql: string, private values: SQLInputValue[] = []) {}
-  bind(...values: SQLInputValue[]) { return new Statement(this.db, this.sql, values); }
-  async first<T>() { return (this.db.prepare(this.sql).get(...this.values) ?? null) as T | null; }
-  async all<T>() { return { results: this.db.prepare(this.sql).all(...this.values) as T[] }; }
-  async run() { this.execute(); return { success: true }; }
+  constructor(private db: DatabaseSync, private sql: string, private values: SQLInputValue[] = [], private roundTrip = () => {}) {}
+  bind(...values: SQLInputValue[]) { return new Statement(this.db, this.sql, values, this.roundTrip); }
+  async first<T>() { this.roundTrip(); return (this.db.prepare(this.sql).get(...this.values) ?? null) as T | null; }
+  async all<T>() { this.roundTrip(); return { results: this.db.prepare(this.sql).all(...this.values) as T[] }; }
+  async run() { this.roundTrip(); this.execute(); return { success: true }; }
   execute() {
     const statement = this.db.prepare(this.sql);
     if (statement.columns().length) return { success: true, results: statement.all(...this.values) };
@@ -29,10 +29,12 @@ function fixture() {
   for (const name of ["0001_init.sql", "0002_clerk_accounts.sql"]) db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   const revoked: { fileId: string; userId: string | undefined }[] = [];
   const revokeAccess = vi.fn(async (fileId: string, userId?: string, _reconnect = false) => { revoked.push({ fileId, userId }); });
+  const roundTrips = { count: 0 };
   const env = {
     DB: {
-      prepare: (sql: string) => new Statement(db, sql),
+      prepare: (sql: string) => new Statement(db, sql, [], () => roundTrips.count++),
       batch: async (statements: Statement[]) => {
+        roundTrips.count++;
         db.exec("BEGIN");
         try {
           const results = statements.map((statement) => statement.execute());
@@ -62,7 +64,7 @@ function fixture() {
     `INSERT INTO files (id, workspace_id, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, 1, 1)`,
   ).run(id, workspaceId, `File ${id}`, userId);
   const rows = (table: string) => db.prepare(`SELECT * FROM ${table}`).all();
-  return { db, env, client, state, getUser, getMemberships, getOrganization, revoked, revokeAccess, addFile, rows };
+  return { db, env, client, state, getUser, getMemberships, getOrganization, revoked, revokeAccess, addFile, rows, roundTrips };
 }
 
 function membership(id: string, role: string = "org:member") {
@@ -71,6 +73,29 @@ function membership(id: string, role: string = "org:member") {
 const event = (type: string, data: object) => ({ type, data }) as unknown as WebhookEvent;
 
 describe("Clerk account projections", () => {
+  it.each(["new", "previously linked"])("reconciles a %s account in at most two database round trips while fetching current Clerk data", async (kind) => {
+    const f = fixture();
+    if (kind === "previously linked") f.db.exec(`
+      INSERT INTO users (id, login, name, created_at, clerk_user_id) VALUES ('local-author', 'old-login', 'Old Name', 1, 'user_alice');
+      INSERT INTO workspaces (id, name, created_at, clerk_organization_id) VALUES ('local-workspace', 'Old Workspace', 1, 'org_design');
+      INSERT INTO members VALUES ('local-workspace', 'local-author', 'owner', 1);`);
+    const expectedUser = kind === "previously linked" ? "local-author" : "user_alice";
+    const expectedWorkspace = kind === "previously linked" ? "local-workspace" : "org_design";
+    const first = await syncAccount(f.env, f.client, "user_alice");
+    expect(first.user).toMatchObject({ id: expectedUser, name: "Alice Designer" });
+    expect(first.workspaces).toEqual([{ id: expectedWorkspace, name: "Design Team", role: "owner", clerkOrganizationId: "org_design" }]);
+    expect(f.roundTrips.count).toBeLessThanOrEqual(2);
+    f.roundTrips.count = 0;
+    f.state.user.firstName = "Updated";
+    f.state.memberships[0]!.role = "org:member";
+    const next = await syncAccount(f.env, f.client, "user_alice");
+    expect(next.user).toMatchObject({ id: expectedUser, name: "Updated Designer" });
+    expect(next.workspaces[0]).toMatchObject({ id: expectedWorkspace, role: "member" });
+    expect(f.roundTrips.count).toBeLessThanOrEqual(2);
+    expect(f.getUser).toHaveBeenCalledTimes(2);
+    expect(f.getMemberships).toHaveBeenCalledTimes(2);
+  });
+
   it("starts independent Clerk user and membership reads together without projecting partial results", async () => {
     const f = fixture();
     let releaseUser!: () => void;
@@ -142,6 +167,26 @@ describe("Clerk account projections", () => {
     expect(account.workspaces.map((w) => w.id)).toEqual(["org_design"]);
     expect(f.rows("members")).toHaveLength(1);
     expect(f.revoked).toEqual([{ fileId: "revoked", userId: "user_alice" }]);
+  });
+
+  it("revokes a linked local author's sockets before projecting a removed membership", async () => {
+    const f = fixture();
+    f.db.exec(`INSERT INTO users (id, login, name, created_at, clerk_user_id) VALUES ('local-author', 'old-login', 'Old Name', 1, 'user_alice');
+      INSERT INTO workspaces (id, name, created_at, clerk_organization_id) VALUES ('local-workspace', 'Old Workspace', 1, 'org_design');
+      INSERT INTO members VALUES ('local-workspace', 'local-author', 'owner', 1);`);
+    f.addFile("must-revoke", "local-workspace", "local-author");
+    f.state.memberships = [];
+    f.state.user.firstName = "Updated";
+    f.revokeAccess.mockImplementationOnce(async (fileId, userId) => {
+      expect(f.rows("users")[0]).toMatchObject({ id: "local-author", name: "Old Name" });
+      expect(f.rows("members")).toHaveLength(1);
+      f.revoked.push({ fileId, userId });
+    });
+    const account = await syncAccount(f.env, f.client, "user_alice");
+    expect(account).toMatchObject({ user: { id: "local-author", name: "Updated Designer" }, workspaces: [] });
+    expect(f.revoked).toEqual([{ fileId: "must-revoke", userId: "local-author" }]);
+    expect(f.rows("members")).toEqual([]);
+    expect(f.roundTrips.count).toBeLessThanOrEqual(3); // One extra call discovers files whose sockets must close.
   });
 
   it("does not prune or partially project when a later Clerk page fails", async () => {

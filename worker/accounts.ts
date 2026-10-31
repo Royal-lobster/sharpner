@@ -95,11 +95,17 @@ export async function syncAccount(env: Env, client: ClerkClient, clerkUserId: st
   const primaryEmail = clerkUser.emailAddresses.find((e) => e.id === clerkUser.primaryEmailAddressId)?.emailAddress;
   const login = clerkUser.username?.trim() || primaryEmail || clerkUser.id;
   const name = [clerkUser.firstName, clerkUser.lastName].map((part) => part?.trim()).filter(Boolean).join(" ") || clerkUser.username?.trim() || primaryEmail?.split("@")[0] || "Member";
-  const oldUser = await env.DB.prepare(`SELECT id FROM users WHERE clerk_user_id = ?`).bind(clerkUserId).first<{ id: string }>();
-  const removed = oldUser ? await env.DB.prepare(
-    `SELECT workspace_id FROM members WHERE user_id = ? AND workspace_id NOT IN (
-       SELECT id FROM workspaces WHERE clerk_organization_id IN (SELECT value FROM json_each(?)))`,
-  ).bind(oldUser.id, organizationIds).all<{ workspace_id: string }>() : { results: [] };
+  // D1 calls can cross regions. Read both parts of the revocation plan in one trip;
+  // the scalar lookup retains previously linked local author IDs.
+  const previous = await env.DB.batch([
+    env.DB.prepare(`SELECT id FROM users WHERE clerk_user_id = ?`).bind(clerkUserId),
+    env.DB.prepare(
+      `SELECT workspace_id FROM members WHERE user_id = (SELECT id FROM users WHERE clerk_user_id = ?) AND workspace_id NOT IN (
+         SELECT id FROM workspaces WHERE clerk_organization_id IN (SELECT value FROM json_each(?)))`,
+    ).bind(clerkUserId, organizationIds),
+  ]);
+  const oldUser = previous[0]!.results[0] as { id: string } | undefined;
+  const removed = previous[1]!.results as { workspace_id: string }[];
   const now = Date.now();
   const statements = [
     env.DB.prepare(
@@ -125,19 +131,23 @@ export async function syncAccount(env: Env, client: ClerkClient, clerkUserId: st
     `DELETE FROM members WHERE user_id = (SELECT id FROM users WHERE clerk_user_id = ?) AND workspace_id NOT IN (
        SELECT id FROM workspaces WHERE clerk_organization_id IN (SELECT value FROM json_each(?)))`,
   ).bind(clerkUserId, organizationIds));
-  if (oldUser) await revokeSockets(env, removed.results.map((m) => m.workspace_id), oldUser.id);
-  await env.DB.batch(statements);
-  const user = await env.DB.prepare(`SELECT id, login, name, avatar_url FROM users WHERE clerk_user_id = ?`)
-    .bind(clerkUserId).first<AccountUser>();
+  // Read the reconciled account in the same atomic batch as its writes, avoiding
+  // two more network waits before a file request can authorize access.
+  statements.push(
+    env.DB.prepare(`SELECT id, login, name, avatar_url FROM users WHERE clerk_user_id = ?`).bind(clerkUserId),
+    env.DB.prepare(
+      `SELECT w.id, w.name, m.role, w.clerk_organization_id AS clerkOrganizationId
+       FROM workspaces w JOIN members m ON m.workspace_id = w.id
+       WHERE m.user_id = (SELECT id FROM users WHERE clerk_user_id = ?) AND w.clerk_organization_id IS NOT NULL ORDER BY w.created_at, w.id`,
+    ).bind(clerkUserId),
+  );
+  if (oldUser) await revokeSockets(env, removed.map((m) => m.workspace_id), oldUser.id);
+  const reconciled = await env.DB.batch(statements);
+  const user = (reconciled.at(-2)!.results as AccountUser[])[0];
   if (!user) throw new AccountError(503, "The Clerk account could not be synchronized");
   // A custom role must not retain a previous local owner's access, including an open socket.
   if (allowed.length !== memberships.length) throw new AccountError(403, "Unsupported Clerk organization role");
-  const workspaces = await env.DB.prepare(
-    `SELECT w.id, w.name, m.role, w.clerk_organization_id AS clerkOrganizationId
-     FROM workspaces w JOIN members m ON m.workspace_id = w.id
-     WHERE m.user_id = ? AND w.clerk_organization_id IS NOT NULL ORDER BY w.created_at, w.id`,
-  ).bind(user.id).all<AccountWorkspace>();
-  return { user, workspaces: workspaces.results };
+  return { user, workspaces: reconciled.at(-1)!.results as AccountWorkspace[] };
 }
 
 /** Webhook payloads identify what to refresh; current Clerk state decides the resulting access. */
