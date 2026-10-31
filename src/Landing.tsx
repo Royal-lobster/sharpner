@@ -90,50 +90,53 @@ function Step({ n, title, children }: { n: string; title: string; children: Reac
   );
 }
 
-/** One flow on a page: feedback waits on one screen, an agent draws the next, and a person looks over the last. */
+/** One flow on a page: feedback waits on one screen, an agent draws the next, and a person looks the flow over
+    while the view drifts the way a live canvas does. */
 function CanvasCue() {
   return (
     <div className="landing-cue" aria-hidden>
-      <div className="cue-section"><span>Checkout · proposed</span></div>
-      <figure className="cue-frame cue-frame-a">
-        <figcaption>Cart</figcaption>
-        <div className="cue-body">
-          <i className="cue-line cue-title" />
-          <i className="cue-item" /><i className="cue-item" /><i className="cue-item" />
-          <i className="cue-line cue-total" />
-          <i className="cue-button" />
-        </div>
-      </figure>
-      <figure className="cue-frame cue-frame-b">
-        <figcaption>Payment</figcaption>
-        <div className="cue-work">
-          <div className="cue-body cue-building">
+      <div className="cue-world">
+        <div className="cue-section"><span>Checkout · proposed</span></div>
+        <figure className="cue-frame cue-frame-a">
+          <figcaption>Cart</figcaption>
+          <div className="cue-body">
             <i className="cue-line cue-title" />
-            <i className="cue-field" /><i className="cue-field" />
-            <i className="cue-line" />
-            <i className="cue-button cue-accent" />
-            <span className="cue-sheen" />
+            <i className="cue-item" /><i className="cue-item" /><i className="cue-item" />
+            <i className="cue-line cue-total" />
+            <i className="cue-button" />
           </div>
-          <svg className="cue-trace"><rect className="cue-trace-rail" pathLength={100} /><rect className="cue-trace-lead" pathLength={100} /></svg>
-        </div>
-        <span className="cue-agent"><span className="aperture" />Agent</span>
-      </figure>
-      <figure className="cue-frame cue-frame-c">
-        <figcaption>Confirmed</figcaption>
-        <div className="cue-body">
-          <i className="cue-check" />
-          <i className="cue-line cue-title cue-center" />
-          <i className="cue-line cue-center" />
-          <i className="cue-button" />
+        </figure>
+        <figure className="cue-frame cue-frame-b">
+          <figcaption>Payment</figcaption>
+          <div className="cue-work">
+            <div className="cue-body cue-building">
+              <i className="cue-line cue-title" />
+              <i className="cue-field" /><i className="cue-field" />
+              <i className="cue-line" />
+              <i className="cue-button cue-accent" />
+              <span className="cue-sheen" />
+            </div>
+            <svg className="cue-trace"><rect className="cue-trace-rail" pathLength={100} /><rect className="cue-trace-lead" pathLength={100} /></svg>
+          </div>
+          <span className="cue-agent"><span className="aperture" />Agent</span>
+        </figure>
+        <figure className="cue-frame cue-frame-c">
+          <figcaption>Confirmed</figcaption>
+          <div className="cue-body">
+            <i className="cue-check" />
+            <i className="cue-line cue-title cue-center" />
+            <i className="cue-line cue-center" />
+            <i className="cue-button" />
+          </div>
+        </figure>
+        <div className="cue-comment">
+          <span className="cue-pin">M</span>
+          <span className="cue-bubble">Can the total stay pinned while scrolling?</span>
         </div>
         <span className="cue-cursor">
           <svg viewBox="0 0 16 16" width="16" height="16"><path d="M2 1.5 14 7l-5.2 1.6L6.5 14Z" /></svg>
           <span>You</span>
         </span>
-      </figure>
-      <div className="cue-comment">
-        <span className="cue-pin">M</span>
-        <span className="cue-bubble">Can the total stay pinned while scrolling?</span>
       </div>
     </div>
   );
