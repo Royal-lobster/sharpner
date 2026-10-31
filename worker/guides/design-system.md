@@ -91,7 +91,9 @@ Name tokens by **role**, never by value (`primary`, not `blue-600`). Start from 
 }
 ```
 
-Themes can change fonts, radii, and shadows as well as colors. Use the same token names across themes. A frame selects one with a root such as `<main data-theme="dark" class="bg-background text-foreground">…</main>`; omit the attribute for the default light presentation. Existing `.dark` overrides and `class="dark"` roots also work.
+Themes can change fonts, radii, and shadows as well as colors. Use the same token names across themes. `get_design_system` reports available names. Choose the file default with `set_theme({ fileId, theme: "dark" })`; frames inherit it unless their `theme` field selects an override. `update_nodes` with `theme: null` restores inheritance. Members can use File theme in the toolbar or Screen theme on a selected frame. The same choice applies to live previews, thumbnails, and screenshots. Token sheets keep comparing every theme.
+
+Leave frame roots unthemed when authoring new screens, such as `<main class="bg-background text-foreground">…</main>`. A null file theme (As authored) preserves existing `data-theme` or `.dark` roots. A selected theme replaces outer authored theme contexts, leaving nested theme markup intact. Use separate frames with explicit theme overrides for comparisons; an embedded light context inside a dark screen needs explicit light token overrides in CSS. Components should inherit their screen's theme.
 
 Load web fonts with an `@import url("https://fonts.googleapis.com/css2?family=…")` line at the very top of the token sheet.
 
@@ -117,7 +119,7 @@ Token sheets display as foundations catalogs, including per-theme swatches and r
 Instances in frames:
 
 ```html
-<main data-theme="uwu" class="bg-background text-foreground">
+<main class="bg-background text-foreground">
   <x-trade-orderform></x-trade-orderform>
   <x-button-primary label="Place order"></x-button-primary>
 </main>
@@ -130,7 +132,7 @@ Instances in frames:
 3. Create or open the feature page, then build its screens (see `read_guide("screens")`). Extract repeated feature markup into components on that page as needed; do not prebuild a catalog of application components.
 4. Screenshot each section of work and fix problems before moving on.
 
-For richer themes, keep value changes in the token sheet and feature-specific decoration in the feature component's CSS, scoped with a selector such as `[data-theme="uwu"] .trade-chart`. Use token variables for its colors. An uwu chart can add stars, clouds, or artwork without changing its data or layout. Compare themes in ordinary neighboring frames; they can reuse a screen component when useful, but extracting an entire screen is optional. If a presentation changes the structure substantially, use an alternate frame instead of forcing it through tokens.
+For richer themes, keep value changes in the token sheet and feature-specific decoration in the feature component's CSS, scoped with a selector such as `[data-theme="uwu"] .trade-chart`. Use token variables for its colors. An uwu chart can add stars, clouds, or artwork without changing its data or layout. Compare themes in ordinary neighboring frames with explicit `theme` fields (light, dark, uwu), so the file default does not replace comparison choices. They can reuse a screen component when useful, but extracting an entire screen is optional. If a presentation changes the structure substantially, use an alternate frame instead of forcing it through tokens.
 
 ## 6. Maintaining it
 

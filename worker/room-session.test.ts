@@ -52,7 +52,7 @@ function fixture(...sockets: ReturnType<typeof socket>[]) {
     viewerAccess: new ViewerAccess(),
     apply, node,
     libraryInfo: vi.fn(async () => null),
-    pages: () => [], nodes: () => [], comments: () => [], setMeta: vi.fn(),
+    pages: () => [], nodes: () => [], comments: () => [], meta: () => null, setMeta: vi.fn(),
   });
   const broadcast = (msg: ServerMsg) => (room as unknown as { broadcast(msg: ServerMsg): void }).broadcast(msg);
   return { room, lookup, apply, node, acceptWebSocket, broadcast };

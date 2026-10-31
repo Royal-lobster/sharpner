@@ -30,6 +30,8 @@ export class Room {
   peers = new Map<string, Peer>();
   comments = new Map<string, CommentThread>();
   library: LibraryInfo | null = null;
+  /** Default theme for screens without an override; null preserves their authored theme. */
+  fileTheme: string | null = null;
   status: Status = "connecting";
   /** Verified by the server on this connection's init; never inferred from a local author ID. */
   principal: SessionPrincipal | null = null;
@@ -281,6 +283,7 @@ export class Room {
         this.comments = comments;
         this.commentsRevision++;
         this.library = msg.library;
+        this.fileTheme = msg.fileTheme ?? null;
         this.designNodes = new Map(msg.nodes.filter(isDesignNode).map((node) => [node.id, node]));
         this.designRevision++;
         this.changedData();
@@ -298,6 +301,7 @@ export class Room {
         break;
       }
       case "sync": {
+        if (msg.fileTheme !== undefined) this.fileTheme = msg.fileTheme;
         if (msg.pages) for (const p of msg.pages) this.upsertPage(p);
         if (msg.pageDels) for (const pageId of msg.pageDels) this.forgetPage(pageId);
         if (msg.nodeDels) for (const id of msg.nodeDels) this.forgetNode(id);
@@ -562,13 +566,18 @@ export class Room {
       case "node.put": {
         const cur = this.nodes.get(op.id);
         const { source: _source, ...meta } = op.node;
-        if (cur) this.nodes.set(op.id, { ...cur, ...meta });
+        if (cur) {
+          const themeChanged = meta.theme !== undefined && meta.theme !== (cur.theme ?? null);
+          if (themeChanged) this.heights.delete(op.id);
+          this.nodes.set(op.id, { ...cur, ...meta, ...(themeChanged ? { measuredHeight: null } : {}) });
+        }
         else if (meta.pageId) {
           this.nodes.set(op.id, {
             id: op.id, pageId: meta.pageId, parentId: meta.parentId ?? null, kind: meta.kind ?? "frame", name: meta.name ?? "Frame",
             x: meta.x ?? 0, y: meta.y ?? 0, width: meta.width ?? 400, height: meta.height ?? null,
             layout: meta.layout ?? (meta.kind === "section" ? "auto" : "free"),
             order: meta.order ?? Math.max(0, ...[...this.nodes.values()].map((n) => n.order ?? 0)) + 1,
+            theme: meta.theme ?? null,
             measuredHeight: null, src: meta.src ?? null, thumbLo: meta.thumbLo ?? meta.src ?? null, thumbHi: meta.src ?? null, rev: 0,
           });
         }
@@ -576,6 +585,16 @@ export class Room {
         if (node) this.updateDesignNode(node);
         break;
       }
+      case "theme.set":
+        if (this.fileTheme !== op.theme) {
+          this.fileTheme = op.theme;
+          for (const [id, node] of this.nodes) {
+            if (node.kind !== "component" && !(node.kind === "frame" && !node.theme)) continue;
+            this.heights.delete(id);
+            this.nodes.set(id, { ...node, measuredHeight: null });
+          }
+        }
+        break;
       case "node.del":
         for (const id of [...op.ids, ...descendantsOf([...this.nodes.values()], op.ids)]) this.forgetNode(id);
         break;

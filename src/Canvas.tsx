@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, SECTION_PAD, union, type Rect } from "../shared/layout";
 import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
+import { effectiveTheme } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
@@ -666,6 +667,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               live={live.current.has(f.id)}
               html={src && renderedHtml(f, src.source)}
               design={design}
+              theme={effectiveTheme(f, room.fileTheme)}
               selected={selected.has(f.id)}
               peerColor={peerSelections.get(f.id)}
               agent={room.agentActivity.get(f.id)?.name ?? null}
@@ -740,6 +742,7 @@ type FrameNodeProps = {
   live: boolean;
   html: string | undefined;
   design: DesignSystem;
+  theme: string | undefined;
   selected: boolean;
   peerColor: string | undefined;
   /** Name of the agent working on this node right now, if any. */
@@ -750,7 +753,7 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
   const settling = doneAt !== undefined;
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
@@ -767,7 +770,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {lo && <img src={lo} alt="" draggable={false} decoding="async" />}
         {tier === "hi" && hi && hi !== lo && <img src={hi} alt="" draggable={false} decoding="async" />}
         {!lo && !live && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {live && html !== undefined && <LiveFrame id={f.id} html={html} design={design} width={f.width} height={height} />}
+        {live && html !== undefined && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} />}
         {(agent || settling) && <AgentSheen />}
       </div>
       {(agent || settling) && <Trace doneAt={doneAt} />}
@@ -798,9 +801,9 @@ function Trace({ doneAt }: { doneAt: number | undefined }) {
   );
 }
 
-function LiveFrame({ id, html, design, width, height }: { id: string; html: string; design: DesignSystem; width: number; height: number }) {
+function LiveFrame({ id, html, design, theme, width, height }: { id: string; html: string; design: DesignSystem; theme: string | undefined; width: number; height: number }) {
   const [ready, setReady] = useState(false);
-  const doc = useMemo(() => frameDocument(html, { measure: true, base: location.origin, design }), [html, design]);
+  const doc = useMemo(() => frameDocument(html, { measure: true, base: location.origin, design, theme }), [html, design, theme]);
   useEffect(() => setReady(false), [doc]);
   return (
     <iframe

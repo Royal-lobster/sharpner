@@ -75,7 +75,7 @@ A node that defines tokens for its file.
 _Avoid_: Theme file, variables node, stylesheet
 
 **Theme**:
-A named presentation of the same design, with alternate token values and optional visual decoration, such as Light, Dark, or UwU.
+A named presentation of the same design, with alternate token values and optional visual decoration, such as Light, Dark, or UwU. A file selects a default; each frame can override it or inherit. As authored preserves existing HTML theme contexts when no file theme is selected. Token sheets always compare all declared themes.
 _Avoid_: Mode, skin, variant
 
 **Component**:

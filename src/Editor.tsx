@@ -6,6 +6,8 @@ import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
 import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
+import { themeNames } from "../shared/themes";
+import { ThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
@@ -209,6 +211,9 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const counts = new Map<string, number>();
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
+  const themeScreen = selected.length === 1 && selected[0]!.kind === "frame" ? selected[0]! : null;
+  const themes = themeNames(room.design().tokens);
+  const hasThemes = themes.length > 1 || room.fileTheme !== null || [...room.nodes.values()].some((node) => !!node.theme);
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
   const describePage = async (p: Page) => {
     const description = await askText({
@@ -237,8 +242,10 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
         {!readOnly && selected.length > 0 && (
-          <Badge variant="secondary" className="selection-pill canvas-glass" key={selected.length > 1 ? "many" : "one"}>
+          <Badge variant="secondary" className="selection-pill canvas-glass" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
             <span className="truncate">{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span><b>· visible to agents</b>
+            {hasThemes && themeScreen && <ThemeMenu scope="Screen" themes={themes} value={themeScreen.theme ?? null} fileTheme={room.fileTheme}
+              disabled={room.status !== "open"} onChange={(theme) => room.send([{ t: "node.put", id: themeScreen.id, node: { theme } }])} />}
           </Badge>
         )}
         {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
@@ -322,6 +329,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               ))}
             </ItemGroup>
           </DockPanel>
+          {!readOnly && hasThemes && <ThemeMenu scope="File" themes={themes} value={room.fileTheme} disabled={room.status !== "open"}
+            onChange={(theme) => room.send([{ t: "theme.set", theme }])} />}
         </ButtonGroup></nav>
       </div>
       {!readOnly && <div className="editor-dock editor-collaboration" onKeyDown={(e) => e.stopPropagation()}>
