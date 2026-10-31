@@ -13,6 +13,9 @@ const MAX_CACHED_FRAMES = 128;
 const MAX_CACHED_SOURCE_BYTES = 8 * 1024 * 1024;
 const SOURCE_BATCH_SIZE = 8;
 const MAX_INFLIGHT_SOURCES = 16;
+const SESSION_RENEWAL_LEAD_MS = 15_000;
+const SESSION_RENEWAL_RETRY_MS = 3_000;
+const MIN_SESSION_RENEWAL_DELAY_MS = 1_000;
 const isDesignNode = (node: CanvasNode) => node.kind === "component" || node.kind === "tokens";
 const hasSource = (node: CanvasNode) => node.kind === "frame" || isDesignNode(node);
 
@@ -143,29 +146,36 @@ export class Room {
     this.cancelRenewal();
     const ws = this.ws;
     if (this.shareToken || !ws || !Number.isFinite(expiresAt)) return;
+    const delay = retry ? SESSION_RENEWAL_RETRY_MS : Math.max(MIN_SESSION_RENEWAL_DELAY_MS, expiresAt - Date.now() - SESSION_RENEWAL_LEAD_MS);
     this.renewalTimer = this.later(() => {
       this.renewalTimer = null;
       if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
-      const controller = this.renewal = new AbortController();
-      void api<{ expiresAt: number }>(`/files/${this.fileId}/session`, {
+      void this.renewSession(ws, cid, expiresAt);
+    }, delay);
+  }
+
+  private async renewSession(ws: WebSocket, cid: string, expiresAt: number) {
+    const controller = new AbortController();
+    this.renewal = controller;
+    try {
+      const lease = await api<{ expiresAt: number }>(`/files/${this.fileId}/session`, {
         method: "POST", json: { cid }, freshToken: true, signal: controller.signal,
-      }).then((lease) => {
-        if (!this.closed && this.ws === ws && !controller.signal.aborted) this.scheduleRenewal(cid, lease.expiresAt);
-      }).catch((error: unknown) => {
-        if (this.closed || this.ws !== ws || controller.signal.aborted) return;
-        if (error instanceof HttpError && [401, 403, 404].includes(error.status)) {
-          this.status = "denied";
-          this.emit();
-          ws.close(4403, "Session access changed");
-        } else if (error instanceof HttpError && error.status === 409) {
-          ws.close(4001, "Session renewal required");
-        } else {
-          this.scheduleRenewal(cid, expiresAt, true);
-        }
-      }).finally(() => {
-        if (this.renewal === controller) this.renewal = null;
       });
-    }, retry ? 3000 : Math.max(1000, expiresAt - Date.now() - 15_000));
+      if (!this.closed && this.ws === ws && !controller.signal.aborted) this.scheduleRenewal(cid, lease.expiresAt);
+    } catch (error) {
+      if (this.closed || this.ws !== ws || controller.signal.aborted) return;
+      if (error instanceof HttpError && [401, 403, 404].includes(error.status)) {
+        this.status = "denied";
+        this.emit();
+        ws.close(4403, "Session access changed");
+      } else if (error instanceof HttpError && error.status === 409) {
+        ws.close(4001, "Session renewal required");
+      } else {
+        this.scheduleRenewal(cid, expiresAt, true);
+      }
+    } finally {
+      if (this.renewal === controller) this.renewal = null;
+    }
   }
 
   /** A rejected upgrade hides its HTTP status; check access before opening another socket. */

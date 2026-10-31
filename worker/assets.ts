@@ -34,7 +34,34 @@ export async function serveAsset(
 
 const FILE_ID = /^[a-f0-9-]{36}$/i;
 const PREVIEW_NAME = /^[a-f0-9-]{36}-\d{1,12}-(?:lo|hi)\.webp$/i;
+const MAX_BATCH_PREVIEWS = 16;
+const MAX_CONCURRENT_PREVIEWS = 8;
 const MAX_BATCH_BYTES = 1024 * 1024;
+const BASE64_CHUNK_SIZE = 16_384;
+
+/** All readers in a batch consume the same budget, including incomplete previews. */
+async function readPreviewBase64(body: ReadableStream<Uint8Array>, budget: { remaining: number }) {
+  const reader = body.getReader();
+  const chunks: string[] = [];
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) return btoa(chunks.join(""));
+      const data = part.value;
+      if (data.byteLength > budget.remaining) {
+        // A tee'd cache stream may wait for its other reader before resolving cancellation.
+        void reader.cancel().catch(() => {});
+        return undefined;
+      }
+      budget.remaining -= data.byteLength;
+      for (let start = 0; start < data.length; start += BASE64_CHUNK_SIZE) {
+        chunks.push(String.fromCharCode(...data.subarray(start, start + BASE64_CHUNK_SIZE)));
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 /** An immutable bundle of existing thumbnail capabilities, with bounded R2 reads and response size. */
 export async function servePreviewBatch(
@@ -46,7 +73,7 @@ export async function servePreviewBatch(
 ) {
   const url = new URL(request.url);
   const names = [...new Set((url.searchParams.get("items") ?? "").split(","))].sort();
-  if (!FILE_ID.test(fileId) || names.length > 16 || !names.every((name) => PREVIEW_NAME.test(name))) {
+  if (!FILE_ID.test(fileId) || names.length > MAX_BATCH_PREVIEWS || !names.every((name) => PREVIEW_NAME.test(name))) {
     return new Response("Invalid preview batch", { status: 400 });
   }
   url.search = "";
@@ -60,10 +87,14 @@ export async function servePreviewBatch(
     return response;
   }
   const previews: { url: string; data?: string }[] = [];
-  let next = 0, bytes = 0, objectHits = 0, r2Reads = 0;
-  await Promise.all(Array.from({ length: Math.min(8, names.length) }, async () => {
+  const budget = { remaining: MAX_BATCH_BYTES };
+  let next = 0;
+  let objectHits = 0;
+  let r2Reads = 0;
+  await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENT_PREVIEWS, names.length) }, async () => {
     while (next < names.length) {
-      const index = next++, name = names[index]!;
+      const index = next++;
+      const name = names[index]!;
       const preview: { url: string; data?: string } = { url: `/a/${fileId}/t/${name}` };
       previews[index] = preview;
       try {
@@ -74,27 +105,15 @@ export async function servePreviewBatch(
           r2Reads++;
           const object = await bucket.get(`${fileId}/t/${name}`);
           if (!object) continue;
-          if (object.size > MAX_BATCH_BYTES - bytes) { void object.body.cancel().catch(() => {}); continue; }
+          if (object.size > budget.remaining) {
+            void object.body.cancel().catch(() => {});
+            continue;
+          }
           asset = imageResponse(object);
           ctx.waitUntil(cache.put(assetKey, asset.clone()).catch(() => {}));
         }
         if (!asset.body) continue;
-        const reader = asset.body.getReader();
-        const chunks: string[] = [];
-        let complete = true;
-        for (;;) {
-          const part = await reader.read();
-          if (part.done) break;
-          const data = part.value as Uint8Array;
-          if (data.byteLength > MAX_BATCH_BYTES - bytes) {
-            // A tee'd cache stream may wait for its other reader before resolving cancellation.
-            void reader.cancel().catch(() => {}); complete = false; break;
-          }
-          bytes += data.byteLength;
-          for (let start = 0; start < data.length; start += 16384) chunks.push(String.fromCharCode(...data.subarray(start, start + 16384)));
-        }
-        reader.releaseLock();
-        if (complete) preview.data = btoa(chunks.join(""));
+        preview.data = await readPreviewBase64(asset.body, budget);
       } catch { /* The browser can retry this one image through its normal immutable URL. */ }
     }
   }));

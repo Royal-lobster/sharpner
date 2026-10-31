@@ -68,15 +68,14 @@ export function Editor({ fileId }: { fileId: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    let active: Room | null = null;
     const controller = new AbortController();
     setMeta(null); setRoom(null); setError(null);
     // Metadata and the socket each authorize access; neither needs to wait for the other.
-    active = new Room(fileId);
+    const active = new Room(fileId);
     api<FileMeta>(`/files/${fileId}`, { signal: controller.signal }).then(async (data) => {
       if (cancelled) return;
       if (orgId !== data.workspace.clerkOrganizationId) {
-        active?.close();
+        active.close();
         await clerk.setActive({ organization: data.workspace.clerkOrganizationId });
         return;
       }
@@ -84,10 +83,10 @@ export function Editor({ fileId }: { fileId: string }) {
       setMeta(data);
       setRoom(active);
     }).catch((e: Error) => {
-      active?.close();
+      active.close();
       if (!cancelled && e.name !== "AbortError") setError(e.message);
     });
-    return () => { cancelled = true; controller.abort(); active?.close(); };
+    return () => { cancelled = true; controller.abort(); active.close(); };
   }, [fileId, orgId, clerk]);
 
   if (error) return <Notice title="This file couldn’t open" message={error} action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
