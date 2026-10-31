@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { COLLAPSED_VARIANTS, COLOR_SLOTS, foundations, livePreviewIds, patchBrand, primitiveFamilies, type FoundationToken, type Primitive } from "../shared/design-system";
+import { COLLAPSED_VARIANTS, COLOR_SLOTS, documentFoundations, livePreviewIds, patchBrand, primitiveFamilies, type FoundationToken, type Primitive } from "../shared/design-system";
 import { emptyBrand, frameDocument, type Brand, type DesignSystem } from "../shared/types";
 import { themeLabel } from "../shared/themes";
 import { uploadImage } from "./api";
@@ -36,7 +36,7 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
   const design = room.design();
   const nodes = useMemo(() => [...room.nodes.values()], [room, room.dataRevision]);
   const localCss = useMemo(() => nodes.filter((n) => n.kind === "tokens").map((n) => room.sources.get(n.id)?.source ?? "").join("\n"), [nodes, room.sourceRevision]);
-  const tokens = useMemo(() => foundations(design.tokens, localCss), [design.tokens, localCss]);
+  const tokens = useMemo(() => documentFoundations(room.library?.design.tokens ?? "", localCss), [room.library?.design.tokens, localCss]);
   const families = useMemo(() => primitiveFamilies(nodes, pageId, design, room.library), [nodes, pageId, design, room.library]);
   const [selectedTheme, setSelectedTheme] = useState<string | null>(null);
   const theme = selectedTheme && tokens.themes.includes(selectedTheme) ? selectedTheme : room.fileTheme && tokens.themes.includes(room.fileTheme) ? room.fileTheme : tokens.themes[0]!;
@@ -88,13 +88,13 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
         <SectionHeading number="2" title="Foundations" meta={`Generated from ${tokenSheets} token ${tokenSheets === 1 ? "sheet" : "sheets"}`} />
         {tokens.colors.length > 0 && <div className="ds-color-table" role="table" aria-label="Colors by theme" style={{ "--ds-themes": tokens.themes.length } as CSSProperties}>
           <div className="ds-color-row ds-color-head" role="row"><span role="columnheader">Colors</span>{tokens.themes.map((t) => <span role="columnheader" key={t}>{themeLabel(t)}</span>)}</div>
-          {(allColors ? tokens.colors : recommended).map((token) => <div className="ds-color-row" role="row" key={token.name}>
+          {(allColors ? tokens.colors : recommended).map((token) => <div className="ds-color-row" role="row" key={`${token.local ? "file" : "library"}:${token.name}`}>
             <div role="rowheader"><code>{token.name}</code><small>{token.description || token.utility}{library && <em> · {token.local ? "This file" : library.name + " · read only"}</em>}</small></div>
-            {tokens.themes.map((t) => <div role="cell" key={t} style={varsStyle(tokens.vars[t] ?? {})}>{token.values[t] && <><i style={{ background: `var(${token.name})` }} /><code>{token.values[t]}</code></>}</div>)}
+            {tokens.themes.map((t) => <div role="cell" key={t} style={varsStyle((token.local ? tokens.vars : tokens.libraryVars)[t] ?? {})}>{token.values[t] && <><i style={{ background: `var(${token.name})` }} /><code>{token.values[t]}</code></>}</div>)}
           </div>)}
         </div>}
         {otherColors.length > 0 && <button className="ds-show-colors" onClick={() => setAllColors(!allColors)}><span>{otherColors.length} {allColors ? "additional colors" : library ? "more colors in this file and its library" : "more colors in this file"}</span><strong>{allColors ? "Show fewer" : "Show all"}</strong></button>}
-        <div className="ds-foundation-grid">{([["Type", tokens.type], ["Spacing", tokens.spacing], ["Radii", tokens.radii], ["Shadows", tokens.shadows]] as const).filter(([, rows]) => rows.length).map(([title, rows]) => <FoundationGroup key={title} title={title} rows={rows} theme={theme} libraryName={library?.name} />)}</div>
+        <div className="ds-foundation-grid">{([["Type", tokens.type], ["Spacing", tokens.spacing], ["Radii", tokens.radii], ["Shadows", tokens.shadows]] as const).filter(([, rows]) => rows.length).map(([title, rows]) => <FoundationGroup key={title} title={title} rows={rows} theme={theme} libraryName={library?.name} vars={tokens.vars[theme] ?? {}} libraryVars={tokens.libraryVars[theme] ?? {}} />)}</div>
         {!tokens.colors.length && !tokens.type.length && !tokens.spacing.length && !tokens.radii.length && !tokens.shadows.length && <p className="ds-empty">Token sheets in this file and its library will appear here.</p>}
       </section>
 
@@ -136,9 +136,9 @@ function BrandForm({ brand, fileId, disabled, onSave, onCancel }: { brand: Brand
   </form>;
 }
 
-function FoundationGroup({ title, rows, theme, libraryName }: { title: string; rows: FoundationToken[]; theme: string; libraryName?: string }) {
+function FoundationGroup({ title, rows, theme, libraryName, vars, libraryVars }: { title: string; rows: FoundationToken[]; theme: string; libraryName?: string; vars: Record<string, string>; libraryVars: Record<string, string> }) {
   const [all, setAll] = useState(false);
-  return <div className="ds-foundation-group"><h3>{title}</h3>{(all ? rows : rows.slice(0, 6)).map((token) => <div className="ds-foundation-token" key={token.name}>
+  return <div className="ds-foundation-group"><h3>{title}</h3>{(all ? rows : rows.slice(0, 6)).map((token) => <div className="ds-foundation-token" key={`${token.local ? "file" : "library"}:${token.name}`} style={varsStyle(token.local ? vars : libraryVars)}>
     {title === "Type" && <div className="ds-type-sample" style={token.name.startsWith("--font-weight-") ? { fontWeight: `var(${token.name})` } : token.name.startsWith("--font-") ? { fontFamily: `var(${token.name})` } : { fontSize: `clamp(12px,var(${token.name}),40px)` }}>Aa</div>}
     {title === "Spacing" && <i className="ds-space-sample" style={{ width: `min(100%,var(${token.name}))` }} />}
     {title === "Radii" && <i className="ds-radius-sample" style={{ borderTopLeftRadius: `var(${token.name})` }} />}
