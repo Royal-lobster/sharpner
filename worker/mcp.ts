@@ -10,39 +10,20 @@ import { capture, loadFrame } from "./render";
 import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
 import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
 import { effectiveTheme, themeNames } from "../shared/themes";
-import designSystemGuide from "./guides/design-system.md?raw";
-import screensGuide from "./guides/screens.md?raw";
+import skill from "./skills/sharpner/SKILL.md?raw";
+import designSystemGuide from "./skills/sharpner/references/design-system.md?raw";
+import screensGuide from "./skills/sharpner/references/screens.md?raw";
 import { commentAnchor, commentBody } from "./comment-schema";
 import { frictionReports, listFriction, reportFriction, SEVERITIES } from "./friction";
 
-const GUIDES = { "design-system": designSystemGuide, screens: screensGuide } as const;
+const SKILL_FILES = { "SKILL.md": skill, "references/design-system.md": designSystemGuide, "references/screens.md": screensGuide } as const;
 const pageDescription = z.string().max(DESCRIPTION_MAX)
-  .describe("One or two sentences: what the page holds and when to look at it, so agents can find their way. Empty clears it.");
+  .describe("Describe the page's contents and purpose in one or two sentences. Empty clears it.");
 const sectionDescription = z.string().max(DESCRIPTION_MAX)
-  .describe("Sections only. One or two sentences: what the group holds and when to look at it. Empty clears it.");
+  .describe("Sections only. Describe the contents and purpose in one or two sentences. Empty clears it.");
 const themeChoice = z.string().trim().min(1).max(80).regex(/^[^\u0000-\u001f\u007f]+$/).nullable();
 
-const INSTRUCTIONS = `Sharpner is a shared infinite canvas where you design product UI for and with a team, who watch your edits live. Aim for production-quality design grounded in a design system.
-
-Vocabulary:
-- Workspace → files → pages → nodes. Node kinds: "frame" (HTML rendered at a viewport width: a screen, state, slide), "image", "section" (a labeled group that auto-fits its contents and can nest), "component" (reusable HTML), "tokens" (a token sheet: Tailwind v4 CSS defining the design tokens).
-- A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
-- Themes come from named [data-theme="…"] selectors in token CSS (legacy .dark also works). set_theme chooses the file default; a frame's theme field overrides it, or null inherits. Keep component variants separate from themes. Use metadata for theme comparisons so file switching preserves explicit frame choices.
-- Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
-- Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Foundations and generic primitives. Check before building any screen."), and update them when you reorganize. Members can edit them too.
-- Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column; list_pages and get_file report that as arrangement "stacked" with the reason, so set those sections to "auto" or move the loose nodes into a section to let the page tile. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
-
-Workflow:
-1. get_app_state: what the user has open and selected ("this frame" means the selection), with the open file's page descriptions.
-   To find your way around a file, call list_pages (page and section descriptions), then get_file with pageId for just the part you need.
-2. For product work (an app/site with several screens), read_guide("design-system") once, then get_design_system. Reuse the existing system or the workspace library (set_library); otherwise create a "Design System" page for foundations and generic primitives only. Add primitives as screens need them; keep application-specific components with their feature. One-off files can skip this.
-3. read_guide("screens") before designing screens. One page per sizable feature, with screens/states in sections per flow and feature components on that same page. One frame per screen/state, left to right. Compare themes in neighboring frames with data-theme on each HTML root; light/dark/uwu are themes, Primary/Ghost are component variants.
-4. Use token utilities and reuse component instances. Extract repeated feature markup into components on the feature page, with feature-prefixed names (Trade/OrderForm); tags remain file-wide. Before removing, renaming or reshaping a component, check its uses with find_instances.
-5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
-   When establishing a product file, design an editable 1600×900 cover frame on a described "Cover" page using its identity, tokens and typography. Make it legible at thumbnail size, verify it with screenshot_nodes, then pin it with set_cover. Check get_file's cover before replacing an existing choice; maintain the established cover when the product's identity changes.
-6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
-7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.
-8. If Sharpner's own tools get in your way (a confusing result, a missing capability, output too large to use, a workaround you had to invent), check list_friction and file it with report_friction, adding to an existing issue with sameAs when it is already listed. Keep it brief and carry on with the user's task.`;
+const INSTRUCTIONS = `Use Sharpner for shared UI design and canvas feedback. Call read_skill() before edits. Use get_app_state to find the member's file and selection. Preserve other members' edits.`;
 
 export const mcp = new Hono<AppEnv>();
 
@@ -82,7 +63,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const propsOf = (html: string) => [...new Set([...html.matchAll(/\{\{\s*([\w-]+)/g)].map((m) => m[1]!))];
 
   server.registerTool("get_app_state", {
-    description: "Start here. Lists your workspaces and files, plus the file, page and selection the user currently has open in the browser, and that file's pages with their descriptions.",
+    description: "List workspaces and files. Show the member's open file, page, selection, and page descriptions.",
     inputSchema: {},
   }, async () => {
     const [workspaces, files, me] = await Promise.all([
@@ -124,7 +105,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("list_comments", {
-    description: "List canvas feedback with excerpts, authors, resolution state and anchored design context. Open threads by default. Follow nextOffset until null; call get_comment_thread to read each relevant thread's full text and replies before fixing it.",
+    description: "List comment excerpts and anchors. Defaults to open threads. Follow nextOffset until null. Read relevant threads with get_comment_thread before edits.",
     inputSchema: {
       fileId: z.string(), pageId: z.string().optional(), nodeId: z.string().optional(),
       status: z.enum(["open", "resolved", "all"]).default("open"),
@@ -147,7 +128,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_comment_thread", {
-    description: "Read a single comment thread with full messages and replies, including resolved feedback.",
+    description: "Read a comment thread with full messages and replies, including resolved threads.",
     inputSchema: { fileId: z.string(), threadId: z.string() }, annotations: { readOnlyHint: true },
   }, async ({ fileId, threadId }) => {
     const { stub } = await access(fileId);
@@ -155,7 +136,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("add_comment", {
-    description: "Leave feedback pinned to a design or canvas point. With nodeId, x/y are offsets from its computed top-left; otherwise x/y are page coordinates. This does not change any designs.",
+    description: "Pin a comment to a node or page. With nodeId, x/y are offsets from its computed top-left. Otherwise, use page coordinates.",
     inputSchema: { fileId: z.string(), anchor: commentAnchor, body: commentBody },
   }, async ({ fileId, anchor, body }) => {
     requireScope(identity, "sharpner:write");
@@ -164,7 +145,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("reply_to_comment", {
-    description: "Reply to a canvas comment thread, e.g. to explain a verified design fix or ask for clarification. Replies are visibly attributed to the member's agent.",
+    description: "Reply to a comment thread as the member's agent.",
     inputSchema: { fileId: z.string(), threadId: z.string(), body: commentBody },
   }, async ({ fileId, threadId, body }) => {
     requireScope(identity, "sharpner:write");
@@ -173,7 +154,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("resolve_comment", {
-    description: "Resolve feedback after making and verifying the requested fix, or reopen it with resolved: false. The conversation is preserved. Resolving a thread does not change the design.",
+    description: "Resolve a comment after you verify the fix. Use resolved:false to reopen it. This preserves the thread and changes no designs.",
     inputSchema: { fileId: z.string(), threadId: z.string(), resolved: z.boolean() },
   }, async ({ fileId, threadId, resolved }) => {
     requireScope(identity, "sharpner:write");
@@ -182,15 +163,15 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("report_friction", {
-    description: "Complaint box for Sharpner's agent experience. Report anything in these tools that slowed you down, confused you, returned too much or too little, or forced a workaround (e.g. \"get_file overflowed my context\", \"no way to see where a component is used\"). Call list_friction first: if the issue is listed, pass its id as sameAs with your own details, so it ranks higher instead of being duplicated. Reports are visible to members of the file's workspace (only to you without a fileId) and to the Sharpner team. Don't include secrets; quote design content only as far as it explains the problem. Changes no designs.",
+    description: "Report a Sharpner tool problem. Check list_friction first; use sameAs for duplicates. Exclude secrets. File-scoped reports are shared with workspace members; others are private to you. The Sharpner team can review all reports.",
     inputSchema: {
-      summary: z.string().trim().min(1).max(200).describe("One line naming the problem, not the fix"),
-      details: z.string().max(4000).optional().describe("What you were doing, what happened, what you expected, and any workaround"),
+      summary: z.string().trim().min(1).max(200).describe("Name the problem in one line"),
+      details: z.string().max(4000).optional().describe("Task, result, expected result, and workaround"),
       severity: z.enum(SEVERITIES).describe("blocker: could not do the task; major: a costly workaround; minor: an annoyance"),
       tool: z.string().max(60).optional().describe("Tool or area, e.g. get_file, layout, components"),
-      fileId: z.string().optional().describe("File you were working on; shares the report with its workspace"),
-      agent: z.string().max(100).optional().describe("Your client and model, e.g. Claude Code / Claude Opus 5.5"),
-      sameAs: z.string().optional().describe("Id of an existing issue from list_friction that this report repeats"),
+      fileId: z.string().optional().describe("Shares the report with this file's workspace"),
+      agent: z.string().max(100).optional().describe("Your client and model"),
+      sameAs: z.string().optional().describe("Existing issue ID from list_friction"),
     },
   }, async ({ fileId, ...report }) => {
     const file = fileId ? (await access(fileId)).file : null;
@@ -198,7 +179,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("list_friction", {
-    description: "The biggest known agent-experience flaws in Sharpner, heaviest first: each issue's weight sums its reports (blocker 5, major 3, minor 1). Covers your own reports and those from your workspaces. Check it before report_friction; pass issueId to read every report of one issue.",
+    description: "List Sharpner tool problems visible to you, ranked by weighted report count. Check before report_friction; pass issueId to read its reports.",
     inputSchema: {
       issueId: z.string().optional(),
       offset: z.number().int().min(0).default(0), limit: z.number().int().min(1).max(50).default(20),
@@ -207,14 +188,14 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   }, async ({ issueId, offset, limit }) =>
     json(issueId ? { issueId, reports: await frictionReports(env, user.id, issueId) } : await listFriction(env, user.id, limit, offset)));
 
-  server.registerTool("read_guide", {
-    description: "Read a design guide. 'design-system': foundations, primitives, feature-local components, themes and libraries. 'screens': quality rules for product screens and landing pages.",
-    inputSchema: { topic: z.enum(["design-system", "screens"]) },
+  server.registerTool("read_skill", {
+    description: "Read Sharpner's design skill. Omit path for SKILL.md. Read referenced files only when the task needs them.",
+    inputSchema: { path: z.enum(["SKILL.md", "references/design-system.md", "references/screens.md"]).default("SKILL.md") },
     annotations: { readOnlyHint: true },
-  }, async ({ topic }) => ({ content: [{ type: "text" as const, text: GUIDES[topic] }] }));
+  }, async ({ path }) => ({ content: [{ type: "text" as const, text: SKILL_FILES[path] }] }));
 
   server.registerTool("create_file", {
-    description: "Create a file in one of your workspaces, optionally using another file of the workspace as its library (shared design system).",
+    description: "Create a workspace file. Optionally use another file in that workspace as its library.",
     inputSchema: { workspaceId: z.string(), name: z.string(), libraryFileId: z.string().optional() },
   }, async ({ workspaceId, name, libraryFileId }) => {
     requireScope(identity, "sharpner:write");
@@ -224,7 +205,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("set_library", {
-    description: "Make a file use another file of the same workspace as its library (its tokens and components become available), or pass null to stop.",
+    description: "Use a file in the same workspace as a library, or null to remove it. Its tokens and components become available.",
     inputSchema: { fileId: z.string(), libraryFileId: z.string().nullable() },
   }, async ({ fileId, libraryFileId }) => {
     requireScope(identity, "sharpner:write");
@@ -234,7 +215,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("set_cover", {
-    description: "Choose the frame or image shown on a file's workspace card. Design a 16:9 cover frame on a Cover page, verify it with screenshot_nodes, then pass its nodeId. The choice follows future edits and preview updates. Pass null to restore automatic selection. get_file reports the current choice; preserve an established cover unless asked to replace it.",
+    description: "Set an existing frame or image as the file cover. Use null for automatic selection. Check get_file.cover before replacing it.",
     inputSchema: { fileId: z.string(), nodeId: z.string().min(1).nullable().describe("An existing frame or image in this file, or null for automatic selection.") },
     annotations: { destructiveHint: false, idempotentHint: true },
   }, async ({ fileId, nodeId }) => {
@@ -245,7 +226,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("set_theme", {
-    description: "Set the file's theme, such as light, dark, or uwu, using the names reported by get_design_system. Frames with their own theme keep that override; other screens and component specimens inherit this choice. Pass null to preserve authored HTML themes. Token sheets keep showing every theme. To choose a single screen's theme, use update_nodes with theme (null restores file inheritance).",
+    description: "Set the file theme from get_design_system.themes. Use null to preserve HTML themes. Frame overrides remain; change them with update_nodes.",
     inputSchema: { fileId: z.string(), theme: themeChoice.describe("Named theme from the token CSS, or null for As authored.") },
     annotations: { destructiveHint: false, idempotentHint: true },
   }, async ({ fileId, theme }) => {
@@ -255,7 +236,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("list_pages", {
-    description: "A file's table of contents: each page's name and description, and its sections (name, description, parent, number of designs directly inside). Read it to choose where to look, then call get_file with that pageId. Cheaper than get_file for the whole file.",
+    description: "List page and section descriptions and design counts. Use this overview to choose a pageId for get_file.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -275,7 +256,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_file", {
-    description: "A file's cover choice, pages with their descriptions, sections and nodes (id, kind, name, sectionId, computed geometry and heightMode auto/fixed). cover.nodeId is null for automatic selection. Pass pageId to read one page; list_pages is the cheaper overview. No sources; use read_nodes for those, get_design_system for tokens and components.",
+    description: "Read file metadata, cover, and node bounds without sources. Pass pageId for one page. Use list_pages for navigation and read_nodes for sources.",
     inputSchema: { fileId: z.string(), pageId: z.string().optional().describe("Only this page. Omit for every page.") },
     annotations: { readOnlyHint: true },
   }, async ({ fileId, pageId }) => {
@@ -305,7 +286,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "The tokens and components available to a file's frames across all pages, including feature components (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, where it is defined, and `uses`: how many frames and components in this file use it directly. Call find_instances before removing or reshaping a component.",
+    description: "Read tokens, CSS, themes, and component tags, props, slots, locations, and use counts from the file and its library.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -332,12 +313,12 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       tokens: tokenNames(design.tokens),
       tokenCss: design.tokens,
       components,
-      ...(!design.tokens && !components.length ? { hint: "This file has no design system yet. For product work, read_guide('design-system') and set one up (or set_library to a workspace library)." } : {}),
+      ...(!design.tokens && !components.length ? { hint: 'No design system. For product work, read_skill({ path: "references/design-system.md" }). Create a system or link a workspace library with set_library.' } : {}),
     });
   });
 
   server.registerTool("find_instances", {
-    description: "Where a component is used: every frame or component whose HTML contains its tag, in this file and in workspace files that use this file as their library (unless they define their own component with that tag). Use before removing, renaming or reshaping a component. Lists direct uses; a component entry means it is used inside another component.",
+    description: "Find direct component uses here and in files that use this file as a library. Local definitions override library components. Check before component changes.",
     inputSchema: { fileId: z.string(), component: z.string().describe("Tag (x-button-primary) or component name (Button/Primary)") },
     annotations: { readOnlyHint: true },
   }, async ({ fileId, component }) => {
@@ -358,7 +339,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("create_page", {
-    description: "Add a page to a file (e.g. 'Design System', 'Trade', 'Portfolio'), with a description of what it will hold.",
+    description: "Add a page to a file with a description of its contents.",
     inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional() },
   }, async ({ fileId, name, description }) => {
     const { stub, apply } = await access(fileId);
@@ -380,12 +361,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     description: "Rename a page or change its description.",
     inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional() },
   }, ({ fileId, pageId, name, description }) => updatePage(fileId, pageId, name, description));
-
-  // Kept so cached tool lists and saved prompts that rename pages keep working.
-  server.registerTool("rename_page", {
-    description: "Deprecated: use update_page. Renames a page and keeps its description.",
-    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1) },
-  }, ({ fileId, pageId, name }) => updatePage(fileId, pageId, name));
 
   server.registerTool("delete_page", {
     description: "Delete a page and every node on it. Only do this when explicitly asked.",
@@ -410,14 +385,14 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested, with a description of what it holds. Defaults to automatic layout: children wrap in order (screens at the row-width limit, about four desktop or thirteen phone screens; other nodes up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a section, optionally nested. Auto layout arranges children; omit x/y and add nodes with create_nodes.sectionId. Use free layout for manual positions.",
     inputSchema: {
       fileId: z.string(),
-      name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),
+      name: z.string(),
       pageId: z.string().optional().describe("Defaults to the page the user is viewing, else the first page"),
       parentSectionId: z.string().optional(),
       description: sectionDescription.optional(),
-      layout: z.enum(["auto", "free"]).optional().describe("Default auto. Free preserves explicit child positions and lets the section be placed freely."),
+      layout: z.enum(["auto", "free"]).optional().describe("Default auto. Free uses manual positions."),
       x: z.number().optional(),
       y: z.number().optional(),
     },
@@ -432,21 +407,19 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("create_nodes", {
-    description:
-      "Create nodes. kind 'frame' (default) and 'component' take HTML `source`; 'tokens' takes CSS `source` (a token sheet); 'image' takes `imageUrl`. " +
-      "Put related screens in a section and omit x/y: automatic sections arrange them in creation order and reflow after content sizing. Coordinates apply only to loose nodes or free sections; omitted loose coordinates place nodes to the right. Returns the new ids and computed geometry.",
+    description: "Create frames and components from HTML source, token sheets from CSS source, or images from imageUrl. Default kind is frame. In auto sections, omit x/y. Return IDs and computed bounds.",
     inputSchema: {
       fileId: z.string(),
       pageId: z.string().optional().describe("Defaults to the section's page, else the page the user is viewing, else the first page"),
       sectionId: z.string().optional().describe("Section to put the nodes in"),
       nodes: z.array(z.object({
         kind: z.enum(["frame", "component", "tokens", "image"]).optional(),
-        name: z.string().describe("e.g. 'Checkout · Payment'. For components this sets the tag: 'Button/Primary' -> <x-button-primary>"),
+        name: z.string().describe("Component names set their tag: Button/Primary -> <x-button-primary>"),
         source: z.string().optional().describe("HTML for frames/components, Tailwind v4 CSS for token sheets"),
         theme: themeChoice.optional().describe("Frames only: named theme override; null or omitted inherits the file theme."),
         imageUrl: z.string().optional().describe("For images, e.g. a URL from upload_image"),
-        previewUrl: z.string().optional().describe("Optional small image preview. If omitted, one is generated in the background when Browser Rendering is available."),
-        width: z.number().positive().optional().describe("Viewport width in px, e.g. 1440 or 390. Default 400 (960 for token sheets)"),
+        previewUrl: z.string().optional().describe("Small image preview. Omit to generate one if Browser Rendering is available."),
+        width: z.number().positive().optional().describe("Viewport width in px. Default 400; token sheets default to 960."),
         height: z.number().positive().nullish().describe("Fixed height in px; omit to fit content"),
         x: z.number().optional(),
         y: z.number().optional(),
@@ -484,7 +457,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("read_nodes", {
-    description: "Read nodes including source (HTML, or CSS for token sheets), computed x/y/width/height, and heightMode auto/fixed. Computed heights may grow after rendering; heightMode auto means edits should leave height unset (or null).",
+    description: "Read node sources and computed bounds. heightMode is auto or fixed. Preserve auto sizing by leaving height unset or null.",
     inputSchema: { fileId: z.string(), nodeIds: z.array(z.string()).min(1).max(20) },
     annotations: { readOnlyHint: true },
   }, async ({ fileId, nodeIds }) => {
@@ -511,15 +484,15 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("update_nodes", {
-    description: "Update nodes or sections. height null = fit content. Auto sections derive positions from order and current measured heights: omit x/y, use order to reorder siblings. Set section layout 'auto' to arrange an existing group, or 'free' to preserve its current positions for manual placement. Free-section x/y move its visible top-left and contents. sectionId moves a node into/out of a section (null = out), pageId to another page (without x/y it lands right of that page's content).",
+    description: "Update nodes or sections. height:null fits content. In auto sections, omit x/y and use order. sectionId:null removes the parent. pageId moves to another page.",
     inputSchema: {
       fileId: z.string(),
       updates: z.array(z.object({
         nodeId: z.string(),
         pageId: z.string().optional(),
         sectionId: z.string().nullable().optional(),
-        layout: z.enum(["auto", "free"]).optional().describe("Sections only. Existing legacy sections remain free until explicitly changed."),
-        order: z.number().finite().optional().describe("Sibling order in automatic layout; smaller values come first. Creation appends by default."),
+        layout: z.enum(["auto", "free"]).optional().describe("Sections only. Legacy sections default to free."),
+        order: z.number().finite().optional().describe("Auto layout sibling order. Lower values come first. New nodes append."),
         name: z.string().optional(),
         description: sectionDescription.optional(),
         source: z.string().optional(),
@@ -566,7 +539,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("edit_node_source", {
-    description: "Find/replace edits on one node's source (frame/component HTML or token sheet CSS), applied in order. Each `find` must match exactly once unless `all` is true. Cheaper than resending the whole source.",
+    description: "Apply ordered find/replace edits to a node's HTML or CSS. Each find must match once unless all is true.",
     inputSchema: {
       fileId: z.string(),
       nodeId: z.string(),
@@ -598,7 +571,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("upload_image", {
-    description: "Store an image in the file (from a public URL or base64 data) and get back a permanent URL to use in HTML or as an image node's imageUrl.",
+    description: "Store an image from a public URL or base64 data. Return a permanent URL for HTML or imageUrl.",
     inputSchema: {
       fileId: z.string(),
       url: z.string().url().optional(),
@@ -626,7 +599,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const browserBinding = env.BROWSER;
   if (browserBinding) {
     server.registerTool("screenshot_nodes", {
-      description: "Render frames, components or token sheets in a real browser and return screenshots to check your work. Auto-height nodes are captured at full height (up to 8000px).",
+      description: "Return browser screenshots of frames, components, or token sheets. Auto height captures content up to 8000px.",
       inputSchema: { fileId: z.string(), nodeIds: z.array(z.string()).min(1).max(4) },
       annotations: { readOnlyHint: true },
     }, async ({ fileId, nodeIds }) => {

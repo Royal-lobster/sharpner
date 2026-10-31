@@ -56,10 +56,13 @@ beforeEach(() => {
 });
 
 describe("page and section descriptions for agents", () => {
-  it("advertises a table of contents and page updates, keeping rename_page for older callers", async () => {
+  it("advertises page updates without the removed rename_page alias", async () => {
     const names = (await call("tools/list", {})).tools!.map((t) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["list_pages", "update_page", "create_page", "get_file", "rename_page"]));
-    await call("rename_page", { fileId: "file", pageId: "ds", name: "Foundations" });
+    expect(names).toEqual(expect.arrayContaining(["list_pages", "update_page", "create_page", "get_file"]));
+    expect(names).not.toContain("rename_page");
+    expect((await call("rename_page", { fileId: "file", pageId: "ds", name: "Old alias" })).isError).toBe(true);
+    expect(applied()).toEqual([]);
+    await call("update_page", { fileId: "file", pageId: "ds", name: "Foundations" });
     expect(applied()).toEqual([{ t: "page.put", page: { id: "ds", name: "Foundations", sort: 0 } }]);
   });
 

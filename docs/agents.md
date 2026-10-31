@@ -73,7 +73,7 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `add_comment` | Pin a new comment to a node or page coordinate |
 | `reply_to_comment` | Add a visibly attributed agent reply |
 | `resolve_comment` | Resolve addressed feedback, or reopen it with `resolved: false` |
-| `read_guide` | Design-system or screen-design guidance |
+| `read_skill` | Read SKILL.md, or a referenced file by path |
 | `create_file` | Create a workspace file, optionally linked to a library |
 | `set_library` | Link or remove a file's workspace library |
 | `set_cover` | Pin a frame or image as the workspace card cover; pass `nodeId: null` to restore automatic selection |
@@ -82,7 +82,7 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `get_file` | Cover choice, pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
 | `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
 | `find_instances` | Frames and components using a component, here and in files using this one as a library |
-| `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes. `rename_page` remains as a deprecated alias |
+| `create_page` / `update_page` / `delete_page` | Organize and describe pages; use `update_page` to rename. Deleting a page deletes its nodes |
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
@@ -96,13 +96,24 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 
 ## Design workflow
 
-Start with `get_app_state`, find your way with `list_pages`, open the page you
-need with `get_file({ fileId, pageId })`, and read the design system with
-`get_design_system`. Pages and sections carry short descriptions, like skill
-descriptions: what they hold and when to look at them. Agents write one for
-each page and section they create; members can edit page descriptions from the
-Pages panel. Use `read_guide("design-system")` and
-`read_guide("screens")` for the built-in authoring guides.
+Call `read_skill()` before edits. It returns the [Sharpner skill](../worker/skills/sharpner/SKILL.md).
+Then read only the references needed for the task:
+
+```js
+read_skill() // SKILL.md
+read_skill({ path: "references/design-system.md" })
+read_skill({ path: "references/screens.md" })
+```
+
+The skill uses `get_app_state` to find the member's file and selection.
+Use `list_pages` for navigation, `get_file({ fileId, pageId })` for a page,
+and `read_nodes` for sources. Describe new pages and sections so later agents
+can find the work. Members can edit page descriptions in the Pages panel.
+
+Startup instructions identify the service and skill tool. Clients control when
+tool definitions enter context. Discovery tests limit startup text to 400
+characters, each tool description to 300 characters, and the full catalog to
+17,500 UTF-8 bytes, including screenshots. These are size budgets, not token counts.
 
 Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
 
@@ -123,8 +134,8 @@ Members can select a frame or image and choose **File → Use selection as cover
 
 Create screens inside sections without coordinates to use automatic layout.
 Read sources before editing, then inspect screenshots to check the result.
-See the [design-system guide](../worker/guides/design-system.md) and
-[screen guide](../worker/guides/screens.md) for examples.
+See the [design-system reference](../worker/skills/sharpner/references/design-system.md) and
+[screen reference](../worker/skills/sharpner/references/screens.md) for examples.
 
 ## Addressing feedback
 

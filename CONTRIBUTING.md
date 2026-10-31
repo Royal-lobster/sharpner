@@ -111,6 +111,21 @@ metadata response or an error page does not verify canvas loading.
 See [architecture](docs/architecture.md) for the source map, rendering model,
 known limitations, and identity invariants.
 
+## Agent instruction text
+
+Use short sentences, active voice, and direct verbs in MCP descriptions and skill files.
+Keep one action per step and use the terms in [CONTEXT.md](CONTEXT.md).
+Remove repeated rules and examples that do not clarify a decision. Keep field meanings and constraints explicit.
+
+Startup text should identify Sharpner and point to `read_skill()`.
+Keep the shared workflow in `worker/skills/sharpner/SKILL.md`.
+Put task details in its references. Load only the files needed for the task.
+
+Use [ASD-STE100](https://www.asd-ste100.org/) writing principles and
+[Anthropic's skill-creator guidance](https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md).
+Keep technical names, code, and API identifiers exact.
+Full STE dictionary compliance requires a separate vocabulary review.
+
 ## Deploy your own instance
 
 ```sh

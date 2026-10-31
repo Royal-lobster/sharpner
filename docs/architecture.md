@@ -58,7 +58,7 @@ For an app or website, agents create a **Design System** page for foundations an
 
 Components use light-DOM custom elements so Tailwind works inside them. Editing a component updates frames that use it, including through other components. Renaming it changes its tag, so its instances must also be updated. Instances support props and slots rather than arbitrary overrides of inner elements.
 
-Agents start with `get_design_system` and `read_guide("design-system")`, reuse existing definitions, then inspect screenshots before building screens. See the [design-system guide](../worker/guides/design-system.md), [screen guide](../worker/guides/screens.md), and [architecture decision](adr/0001-html-native-design-system.md).
+Agents call `read_skill()` before edits. It returns [SKILL.md](../worker/skills/sharpner/SKILL.md), which links to task references. The same tool reads those files by path. Startup instructions stay short. For product design, agents read `get_design_system`, reuse existing definitions, and inspect screenshots. See the [design-system reference](../worker/skills/sharpner/references/design-system.md), [screen reference](../worker/skills/sharpner/references/screens.md), and [architecture decision](adr/0001-html-native-design-system.md).
 
 ## Rendering and loading
 

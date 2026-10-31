@@ -64,7 +64,7 @@ A component named `Button/Primary` becomes a reusable `<x-button-primary>` tag:
 ```
 
 Agents can read the source, change it precisely, and screenshot the result through
-the same MCP connection. See the [design-system guide](worker/guides/design-system.md).
+the same MCP connection. See the [Sharpner skill](worker/skills/sharpner/SKILL.md).
 
 ## Bring your agent
 

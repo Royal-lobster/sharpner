@@ -17,7 +17,7 @@ async function call(name: string, args: unknown) {
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: list ? name : "tools/call", params: list ? {} : { name, arguments: args } }),
   }, {} as Env);
   const { result } = await response.json() as { result: { content: { text: string }[]; isError?: boolean; tools?: { name: string; description: string }[] } };
-  return { ...result, value: result.content?.[0] && !result.isError ? JSON.parse(result.content[0].text) : undefined };
+  return { ...result, value: result.content?.[0] && !result.isError && name !== "read_skill" ? JSON.parse(result.content[0].text) : undefined };
 }
 
 beforeEach(() => {
@@ -30,14 +30,12 @@ beforeEach(() => {
 });
 
 describe("agent friction tools", () => {
-  it("advertises the complaint box and points agents at it from the instructions", async () => {
+  it("advertises the complaint box and explains reporting in the skill", async () => {
     const tools = (await call("tools/list", {})).tools!;
     expect(tools.map((t) => t.name)).toEqual(expect.arrayContaining(["report_friction", "list_friction"]));
-    const initialize = await mcp.request("https://sharpner.example/", { method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } }),
-    }, {} as Env);
-    expect(JSON.stringify(await initialize.json())).toContain("report_friction");
+    const workflow = await call("read_skill", {});
+    expect(workflow.content[0]!.text).toContain("report_friction");
+    expect(workflow.content[0]!.text).toContain("sameAs");
   });
 
   it("files a report under the file's workspace, or privately without a file, for read-only agents too", async () => {
