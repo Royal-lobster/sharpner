@@ -80,9 +80,10 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `set_theme` | Set the file theme inherited by screens; null preserves authored theme contexts. Frames can override with their `theme` field |
 | `list_pages` | A file's table of contents: page and section descriptions with design counts, and whether each page tiles or stacks (and why) |
 | `get_file` | Cover choice, pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
-| `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
+| `get_design_system` | Brand, Design System page ID, merged token CSS, component tags, props, slots, primitive status, locations, overrides and use counts, including the library |
+| `set_brand` | Patch this file’s name, image logoUrl, guidelines paragraph or voice bullets; omitted fields stay unchanged |
 | `find_instances` | Frames and components using a component, here and in files using this one as a library |
-| `create_page` / `update_page` / `delete_page` | Organize and describe pages; use `update_page` to rename. Deleting a page deletes its nodes |
+| `create_page` / `update_page` / `delete_page` | Organize and describe pages; `kind: "design-system"` chooses the file’s single document page, `kind: "canvas"` restores canvas. Conversion preserves nodes; deletion removes them |
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
@@ -115,7 +116,11 @@ tool definitions enter context. Discovery tests limit startup text to 400
 characters, each tool description to 300 characters, and the full catalog to
 17,500 UTF-8 bytes, including screenshots. These are size budgets, not token counts.
 
-Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
+Choose the Design System document with `create_page` or `update_page` and `kind: "design-system"`. It always shows Brand, generated Foundations and generated Primitive components, with a preview theme switcher. `set_brand({ fileId, name, logoUrl, guidelines, voice })` patches the file’s only authored section; upload a logo image with `upload_image`. Create primitive components with `create_nodes` on that page: placement registers them. CSS comments describe token rows; undeclared tokens have no rows. Recommended shadcn/ui families and color slots lead the generated lists, including aliases such as Radio and Tab. Theme overrides appear next to defaults, and families over six variants collapse.
+
+A linked library’s Brand, Foundations and primitives appear on the same page read-only, labeled **From library: <name> · Open**; edit inherited definitions there. Local additions are marked **This file**, and local tag definitions replace the library’s definitions. The library exports its own catalog only. Conversion keeps nodes, with other designs listed compactly for moving. The document has no canvas, side panel, per-row comments or phone tabs. Existing editor comments remain available.
+
+Keep the Design System page to brand guidelines, foundations and primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
 
 Use `set_theme` for the file default and a frame's `theme` field in `create_nodes` or `update_nodes` for an override (`null` restores inheritance). `get_design_system` reports theme names from the token CSS; `get_file` and `read_nodes` report each frame's choice and effective theme. Members choose the file theme in the navigation dock and a selected screen's theme in the selection bar. With no file choice, As authored preserves existing HTML theme contexts. Compare themes in neighboring frames with explicit theme overrides so a file change keeps the comparison intact. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. When a theme needs different component structure, create a component with the same name and a `theme`: instances inside that theme use that definition, and `get_design_system` lists it under `themeOverrides`. A shared screen component is optional, and substantial structural alternatives can use separate frames.
 

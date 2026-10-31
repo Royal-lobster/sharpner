@@ -2,7 +2,7 @@ import { descendantsOf, layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
-  componentTag, mergeDesignSystems,
+  componentTag, mergeDesignSystems, emptyBrand,
   type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Op, type Page, type Peer, type Presence, type ServerMsg,
 } from "../shared/types";
 
@@ -34,6 +34,7 @@ export class Room {
   coverNodeId: string | null = null;
   /** Default theme for screens without an override; null preserves their authored theme. */
   fileTheme: string | null = null;
+  brand = emptyBrand();
   status: Status = "connecting";
   /** Verified by the server on this connection's init; never inferred from a local author ID. */
   principal: SessionPrincipal | null = null;
@@ -287,6 +288,7 @@ export class Room {
         this.library = msg.library;
         this.coverNodeId = msg.coverNodeId ?? null;
         this.fileTheme = msg.fileTheme ?? null;
+        this.brand = msg.brand ?? emptyBrand();
         this.designNodes = new Map(msg.nodes.filter(isDesignNode).map((node) => [node.id, node]));
         this.designRevision++;
         this.changedData();
@@ -306,7 +308,8 @@ export class Room {
       case "sync": {
         if (msg.coverNodeId !== undefined) this.coverNodeId = msg.coverNodeId;
         if (msg.fileTheme !== undefined) this.fileTheme = msg.fileTheme;
-        if (msg.pages) for (const p of msg.pages) this.upsertPage(p);
+        if (msg.brand !== undefined) this.brand = msg.brand;
+        if (msg.pages) for (const p of msg.pages) this.upsertPage({ ...p, kind: p.kind ?? "canvas" });
         if (msg.pageDels) for (const pageId of msg.pageDels) this.forgetPage(pageId);
         if (msg.nodeDels) for (const id of msg.nodeDels) this.forgetNode(id);
         for (const n of msg.nodes ?? []) {
@@ -562,7 +565,11 @@ export class Room {
   private applyLocal(op: Op) {
     switch (op.t) {
       case "page.put":
+        if (op.page.kind === "design-system") this.pages = this.pages.map((p) => p.id !== op.page.id && p.kind === "design-system" ? { ...p, kind: "canvas" } : p);
         this.upsertPage(op.page);
+        break;
+      case "brand.set":
+        this.brand = { ...this.brand, ...op.brand };
         break;
       case "page.del":
         this.forgetPage(op.id);

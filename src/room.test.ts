@@ -618,3 +618,20 @@ describe("canvas source working set", () => {
     expect(room.design().components.map((item) => item.tag)).toEqual(["x-button-secondary"]);
   });
 });
+
+
+describe("document page and Brand synchronization", () => {
+  it("keeps partial Brand edits and restores the previous page to canvas when selecting another document", () => {
+    const socket = start([]);
+    const page = room.pages[0]!;
+    room.send([{ t: "brand.set", brand: { name: "FraxNet", voice: ["Direct"] } }]);
+    room.send([{ t: "brand.set", brand: { guidelines: "Paper and ink" } }]);
+    expect(room.brand).toMatchObject({ name: "FraxNet", voice: ["Direct"], guidelines: "Paper and ink" });
+    room.send([{ t: "page.put", page: { ...page, kind: "design-system" } }]);
+    room.send([{ t: "page.put", page: { id: "second", name: "System", sort: 1, kind: "design-system" } }]);
+    expect(room.pages.filter((p) => p.kind === "design-system").map((p) => p.id)).toEqual(["second"]);
+    socket.receive({ type: "sync", pages: [{ ...page, kind: "design-system" }, { id: "second", name: "System", sort: 1 }], brand: { name: "Updated", logoUrl: "", voice: [], guidelines: "Shared" }, by: null });
+    expect(room.pages.filter((p) => p.kind === "design-system").map((p) => p.id)).toEqual([page.id]);
+    expect(room.brand.name).toBe("Updated");
+  });
+});

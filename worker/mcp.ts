@@ -61,6 +61,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const abs = (url: string | null) => (url?.startsWith("/") ? origin + url : url);
   const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 1) }] });
   const propsOf = (html: string) => [...new Set([...html.matchAll(/\{\{\s*([\w-]+)/g)].map((m) => m[1]!))];
+  const pageKind = z.enum(["canvas", "design-system"]);
 
   server.registerTool("get_app_state", {
     description: "List workspaces and files. Show the member's open file, page, selection, and page descriptions.",
@@ -87,7 +88,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         cover: { ...cover, url: abs(cover.url) },
         openInBrowser: Boolean(mine),
         currentPage: page ? { id: page.id, name: page.name } : null,
-        pages: outline.map(({ id, name, description }) => ({ id, name, description })),
+        pages: outline.map(({ id, name, description, kind }) => ({ id, name, description, kind: kind ?? "canvas" })),
         selection: (mine?.selection ?? []).map((id) => nodes.find((n) => n.id === id)).filter(Boolean).map((n) => ({ id: n!.id, kind: n!.kind, name: n!.name })),
         othersOnline: [...new Set(peers.filter((p) => p.id !== user.id).map((p) => p.name))],
         openCommentCount: comments.filter((t) => t.resolvedAt === null).length,
@@ -243,7 +244,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const { file, stub } = await access(fileId);
     const outline = await stub.outline();
     const pages = outline.map((p) => ({
-      id: p.id, name: p.name, description: p.description ?? "", ...arrangementOf(p.nodes),
+      id: p.id, name: p.name, description: p.description ?? "", ...(p.kind && { kind: p.kind }), ...(p.kind === "design-system" ? { arrangement: "document" } : arrangementOf(p.nodes)),
       designs: p.nodes.filter((n) => n.kind !== "section").length,
       sections: p.nodes.filter((n) => n.kind === "section").map((s) => ({
         id: s.id, name: s.name, description: s.description ?? "", parentId: s.parentId,
@@ -270,7 +271,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         id: p.id,
         name: p.name,
         description: p.description ?? "",
-        ...arrangementOf(p.nodes),
+        ...(p.kind && { kind: p.kind }),
+        ...(p.kind === "design-system" ? { arrangement: "document" } : arrangementOf(p.nodes)),
         sections: p.nodes.filter((n) => n.kind === "section").map((n) => ({ id: n.id, name: n.name, description: n.description ?? "", parentId: n.parentId, layout: n.layout ?? "free", order: n.order, ...rects.get(n.id) })),
         nodes: p.nodes.filter((n) => n.kind !== "section").map((n) => ({
           id: n.id, kind: n.kind, name: n.name, sectionId: n.parentId, order: n.order,
@@ -287,7 +289,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "Read tokens, CSS, themes, and component tags, props, slots, theme overrides, locations, and use counts from the file and its library.",
+    description: "Read Brand, document page, tokens, themes, component interfaces, overrides, primitive status and uses, including the library.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -296,7 +298,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const describe = async (id: string, source: "file" | "library") => {
       const s = room(env, id);
       const [outline, own] = await Promise.all([s.outline(), s.ownDesignSystem()]);
-      const nodes = outline.flatMap((p) => p.nodes.map((n) => ({ ...n, page: p.name })));
+      const nodes = outline.flatMap((p) => p.nodes.map((n) => ({ ...n, page: p.name, primitive: p.kind === "design-system" })));
       const node = (tag: string, theme: string | null) => nodes.find((x) => x.kind === "component" && componentTag(x.name) === tag && (x.theme ?? null) === theme);
       // One entry per tag. Theme overrides are listed with it: the same component, restructured for one theme.
       const tags = [...new Set(own.components.map((c) => c.tag))];
@@ -306,7 +308,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         const n = node(tag, c.theme ?? null);
         const overrides = defs.filter((d) => d.theme).map((d) => ({ theme: d.theme!, nodeId: node(tag, d.theme!)?.id, props: propsOf(d.html) }));
         return {
-          tag, name: n?.name, nodeId: n?.id, page: n?.page, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html),
+          tag, name: n?.name, nodeId: n?.id, page: n?.page, pageId: n?.pageId, primitive: n?.primitive ?? false, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html),
           ...(c.theme ? { missingDefault: true } : {}), ...(overrides.length ? { themeOverrides: overrides } : {}),
           source, ...(source === "library" ? { libraryFileId: id } : {}),
         };
@@ -317,8 +319,12 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const uses = new Map<string, number>();
     for (const { tag } of await stub.instances()) uses.set(tag, (uses.get(tag) ?? 0) + 1);
     const components = [...lib, ...own].map((c) => ({ ...c, uses: uses.get(c.tag) ?? 0 }));
+    const inherited = design.library ? await room(env, design.library.fileId).catalog() : null;
     return json({
       library: design.library,
+      brand: await stub.brand(),
+      designSystemPageId: (await stub.pages()).find((p) => p.kind === "design-system")?.id ?? null,
+      libraryCatalog: inherited ? { brand: inherited.brand, designSystemPageId: inherited.pageId } : null,
       fileTheme: design.fileTheme,
       themes: themeNames(design.tokens),
       tokens: tokenNames(design.tokens),
@@ -326,6 +332,16 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       components,
       ...(!design.tokens && !components.length ? { hint: 'No design system. For product work, read_skill({ path: "references/design-system.md" }). Create a system or link a workspace library with set_library.' } : {}),
     });
+  });
+
+  server.registerTool("set_brand", {
+    description: "Patch this file's Brand. Omitted fields stay. Edit inherited Brand in its library.",
+    inputSchema: { fileId: z.string(), name: z.string().optional(), logoUrl: z.string().optional(), guidelines: z.string().optional(), voice: z.array(z.string()).optional() },
+    annotations: { destructiveHint: false, idempotentHint: true },
+  }, async ({ fileId, ...brand }) => {
+    const { stub, apply } = await access(fileId);
+    await apply([{ t: "brand.set", brand }]);
+    return json({ brand: await stub.brand() });
   });
 
   server.registerTool("find_instances", {
@@ -350,28 +366,28 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("create_page", {
-    description: "Add a page to a file with a description of its contents.",
-    inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional() },
-  }, async ({ fileId, name, description }) => {
+    description: "Add a described page. kind: design-system chooses the document; components there are primitives.",
+    inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional(), kind: pageKind.optional() },
+  }, async ({ fileId, name, description, kind }) => {
     const { stub, apply } = await access(fileId);
     const pages = await stub.pages();
-    const page: Page = { id: crypto.randomUUID(), name, sort: Math.max(0, ...pages.map((p) => p.sort)) + 1, description: description ?? "" };
+    const page: Page = { id: crypto.randomUUID(), name, sort: Math.max(0, ...pages.map((p) => p.sort)) + 1, description: description ?? "", ...(kind && { kind }) };
     await apply([{ t: "page.put", page }]);
     return json(page);
   });
 
-  const updatePage = async (fileId: string, pageId: string, name?: string, description?: string) => {
+  const updatePage = async (fileId: string, pageId: string, name?: string, description?: string, kind?: Page["kind"]) => {
     const { stub, apply } = await access(fileId);
     const page = (await stub.pages()).find((p) => p.id === pageId);
     if (!page) throw new Error(`Page ${pageId} not found`);
-    await apply([{ t: "page.put", page: { id: page.id, sort: page.sort, name: name ?? page.name, ...description !== undefined && { description } } }]);
+    await apply([{ t: "page.put", page: { id: page.id, sort: page.sort, name: name ?? page.name, ...description !== undefined && { description }, ...(kind && { kind }) } }]);
     return json({ ok: true });
   };
 
   server.registerTool("update_page", {
-    description: "Rename a page or change its description.",
-    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional() },
-  }, ({ fileId, pageId, name, description }) => updatePage(fileId, pageId, name, description));
+    description: "Rename, describe, or set kind: design-system (one per file) or canvas. Conversion keeps nodes.",
+    inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional(), kind: pageKind.optional() },
+  }, ({ fileId, pageId, name, description, kind }) => updatePage(fileId, pageId, name, description, kind));
 
   server.registerTool("delete_page", {
     description: "Delete a page and every node on it. Only do this when explicitly asked.",

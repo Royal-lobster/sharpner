@@ -8,7 +8,11 @@ export { tokenNames } from "./specimens";
  * `description` says what a page holds and when to look at it, like a skill's description, so agents can pick
  * the right page without loading every node. A put without it keeps the current text.
  */
-export type Page = { id: string; name: string; sort: number; description?: string };
+export type Page = { id: string; name: string; sort: number; description?: string; kind?: "canvas" | "design-system" };
+/** The only authored content in the Design System document. Owned by the file, not the page. */
+export type Brand = { name: string; logoUrl: string; guidelines: string; voice: string[] };
+export const emptyBrand = (): Brand => ({ name: "", logoUrl: "", guidelines: "", voice: [] });
+export type DesignCatalog = { brand: Brand; pageId: string | null; primitives: CanvasNode[]; tokenSheets: number };
 /** Longest page or section description, in characters. */
 export const DESCRIPTION_MAX = 500;
 
@@ -68,6 +72,7 @@ export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" 
 };
 
 export type Op =
+  | { t: "brand.set"; brand: Partial<Brand> }
   | { t: "page.put"; page: Page }
   | { t: "page.del"; id: string }
   /** Creates the node if `id` is new, otherwise merges the given fields. */
@@ -105,7 +110,7 @@ export type Peer = Actor & Presence & { cid: string };
 export type ComponentDef = { tag: string; html: string; theme?: string | null };
 /** Everything a frame needs to render consistently: token CSS and component definitions. */
 export type DesignSystem = { tokens: string; components: ComponentDef[] };
-export type LibraryInfo = { fileId: string; name: string; design: DesignSystem };
+export type LibraryInfo = { fileId: string; name: string; design: DesignSystem; catalog?: DesignCatalog };
 
 export type ClientMsg =
   | { type: "ops"; ops: Op[] }
@@ -113,9 +118,9 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null; fileTheme?: string | null }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; brand?: Brand; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null; fileTheme?: string | null }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
-  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; coverNodeId?: string | null; fileTheme?: string | null; by: Actor | null }
+  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; brand?: Brand; coverNodeId?: string | null; fileTheme?: string | null; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
   /** An agent is looking at or working on these nodes without changing them (reading, screenshotting). */
   | { type: "activity"; by: Actor; ids: string[] }

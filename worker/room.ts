@@ -12,8 +12,9 @@ import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
 import { effectiveTheme, validateTheme } from "../shared/themes";
+import { patchBrand } from "../shared/design-system";
 import {
-  componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml,
+  componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml, emptyBrand, type Brand,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
   type Op, type Page, type Peer, type Presence, type ServerMsg, type CommentAnchor, type CommentDetail, type CommentThread,
 } from "../shared/types";
@@ -84,6 +85,8 @@ const MIGRATIONS = [
       sql.exec(`ALTER TABLE nodes ADD COLUMN theme TEXT`);
     }
   },
+  // Separate metadata preserves compatibility with older page writers and repeatable migrations.
+  `CREATE TABLE IF NOT EXISTS page_kinds (id TEXT PRIMARY KEY, kind TEXT NOT NULL);`,
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -128,7 +131,7 @@ export class FileRoom extends DurableObject<Env> {
   // ---- reads -------------------------------------------------------------
 
   pages(): Page[] {
-    return this.sql.exec<Page>(`SELECT p.id, p.name, p.sort, coalesce(d.text, '') AS description FROM pages p LEFT JOIN descriptions d ON d.id = p.id ORDER BY p.sort, p.rowid`).toArray();
+    return this.sql.exec<Page>(`SELECT p.id, p.name, p.sort, coalesce(d.text, '') AS description, k.kind FROM pages p LEFT JOIN descriptions d ON d.id = p.id LEFT JOIN page_kinds k ON k.id = p.id ORDER BY p.sort, p.rowid`).toArray().map(({ kind, ...page }) => kind ? { ...page, kind } : page);
   }
 
   nodes(ids?: string[]): CanvasNode[] {
@@ -150,6 +153,15 @@ export class FileRoom extends DurableObject<Env> {
 
   /** null preserves each screen's authored theme; otherwise screens inherit this default. */
   theme(): string | null { return this.meta("fileTheme") || null; }
+
+  brand(): Brand { return JSON.parse(this.meta("brand") || JSON.stringify(emptyBrand())) as Brand; }
+
+  /** Only this file's catalog is exported: libraries never re-export another library. */
+  catalog() {
+    const pageId = this.pages().find((p) => p.kind === "design-system")?.id ?? null;
+    const nodes = this.nodes();
+    return { brand: this.brand(), pageId, primitives: nodes.filter((n) => n.kind === "component" && n.pageId === pageId), tokenSheets: nodes.filter((n) => n.kind === "tokens").length };
+  }
 
   /** The explicit choice and its current preview. A pending first preview uses the automatic fallback. */
   cover(): { nodeId: string | null; url: string | null } {
@@ -247,8 +259,9 @@ export class FileRoom extends DurableObject<Env> {
     if (!libraryId) return (this.library = null);
     const row = await this.env.DB.prepare(`SELECT name FROM files WHERE id = ?`).bind(libraryId).first<{ name: string }>();
     if (!row) return (this.library = null);
-    const design = await room(this.env, libraryId).ownDesignSystem();
-    return (this.library = { fileId: libraryId, name: row.name, design });
+    const stub = room(this.env, libraryId);
+    const [design, catalog] = await Promise.all([stub.ownDesignSystem(), stub.catalog()]);
+    return (this.library = { fileId: libraryId, name: row.name, design, catalog });
   }
 
   // ---- writes ------------------------------------------------------------
@@ -268,11 +281,20 @@ export class FileRoom extends DurableObject<Env> {
     let commentChanges: { threads: CommentThread[]; deleted: string[] } | undefined;
     const previousCoverNodeId = this.meta("coverNodeId") || null;
     const previousFileTheme = this.theme();
+    const previousBrand = JSON.stringify(this.brand());
+    const catalogChanged = ops.some((op) => op.t === "brand.set" || op.t === "page.put" || op.t === "page.del" || op.t === "node.del" || op.t === "node.put" && op.node.pageId !== undefined);
 
     this.ctx.storage.transactionSync(() => {
       for (const op of ops) {
         switch (op.t) {
           case "page.put": {
+            if (op.page.kind === "design-system") {
+              // Choosing another page restores the previous one to canvas without touching nodes.
+              for (const p of this.pages()) if (p.kind === "design-system" && p.id !== op.page.id) {
+                this.sql.exec(`DELETE FROM page_kinds WHERE id = ?`, p.id);
+                touched.pages.add(p.id);
+              }
+            }
             this.putPage(op.page);
             touched.pages.add(op.page.id);
             break;
@@ -282,6 +304,7 @@ export class FileRoom extends DurableObject<Env> {
             const ids = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE page_id = ?`, op.id).toArray().map((r) => r.id);
             for (const id of ids) this.deleteNode(id, staleThumbs, design, touched.nodeDels);
             this.sql.exec(`DELETE FROM pages WHERE id = ?`, op.id);
+            this.sql.exec(`DELETE FROM page_kinds WHERE id = ?`, op.id);
             this.describe(op.id, "");
             touched.pageDels.add(op.id);
             break;
@@ -308,6 +331,10 @@ export class FileRoom extends DurableObject<Env> {
           }
           case "theme.set": {
             this.setMeta("fileTheme", validateTheme(op.theme) ?? "");
+            break;
+          }
+          case "brand.set": {
+            this.setMeta("brand", JSON.stringify(patchBrand(this.brand(), op.brand)));
             break;
           }
           default:
@@ -344,23 +371,27 @@ export class FileRoom extends DurableObject<Env> {
       nodeDels: touched.nodeDels.size ? [...touched.nodeDels] : undefined,
       coverNodeId: previousCoverNodeId !== coverNodeId ? coverNodeId : undefined,
       fileTheme: previousFileTheme !== fileTheme ? fileTheme : undefined,
+      brand: previousBrand !== JSON.stringify(this.brand()) ? this.brand() : undefined,
       by,
     });
     if (commentChanges && (commentChanges.threads.length || commentChanges.deleted.length)) this.broadcast({ type: "comments", ...commentChanges });
     if (staleThumbs.length) this.ctx.waitUntil(this.env.FILES.delete(staleThumbs));
     if (renderChanged) await this.scheduleThumbs();
-    if (design.tokens || design.tags.size) this.ctx.waitUntil(this.notifyDependents(fileId, design.tokens, [...design.tags]));
+    if (design.tokens || design.tags.size || catalogChanged) this.ctx.waitUntil(this.notifyDependents(fileId, design.tokens, [...design.tags]));
     this.updateCover(fileId);
     this.touch(fileId);
   }
 
   /** Upserts a page. A put without a description keeps the stored one, so a rename from a stale copy can't clobber it. */
-  private putPage({ id, name, sort, description }: Page) {
+  private putPage({ id, name, sort, description, kind }: Page) {
+    if (kind !== undefined && kind !== "canvas" && kind !== "design-system") throw new Error("Page kind must be canvas or design-system");
     this.sql.exec(
       `INSERT INTO pages (id, name, sort) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, sort = excluded.sort`,
       str(id), str(name).slice(0, 200) || "Untitled", Number(sort) || 0,
     );
     if (description !== undefined) this.describe(str(id), description);
+    if (kind === "design-system") this.sql.exec(`INSERT OR REPLACE INTO page_kinds (id, kind) VALUES (?, ?)`, str(id), kind);
+    else if (kind === "canvas") this.sql.exec(`DELETE FROM page_kinds WHERE id = ?`, str(id));
   }
 
   /** Sets a page's or section's description; empty removes it. */
@@ -825,6 +856,7 @@ export class FileRoom extends DurableObject<Env> {
     this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
       coverNodeId: this.meta("coverNodeId") || null,
       fileTheme: this.theme(),
+      brand: this.brand(),
       comments: att.shareToken ? [] : this.comments(),
       ...(!att.shareToken && att.principal ? { principal: att.principal } : {}),
       ...(!att.shareToken && att.sessionId ? { sessionExpiresAt: att.sessionExpiresAt } : {}) });
