@@ -89,7 +89,7 @@ function SignedApp() {
   }, [attempt]);
 
   if (error) return <AuthMessage message={error} onRetry={() => setAttempt(attempt + 1)} />;
-  if (!config) return <Loading label="Opening Sharpner…" />;
+  if (!config) return <OpeningLoading />;
   if (!config.configured || !config.publishableKey) return <AuthMessage message="Sign-in is not configured for this app yet." />;
   return (
     <ClerkProvider publishableKey={config.publishableKey} appearance={appearance}
@@ -108,7 +108,7 @@ function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
     return () => setApiTokenGetter(null);
   }, [getToken, isSignedIn, userId, orgId]);
 
-  if (!isLoaded) return <Loading label="Connecting…" />;
+  if (!isLoaded) return <OpeningLoading />;
   if (!isSignedIn) {
     const returnTo = loc.startsWith("/") && !loc.startsWith("//") ? loc : "/";
     return (
@@ -172,8 +172,14 @@ function WorkspaceHome({ agentConfig }: { agentConfig: AgentConnectionConfig }) 
     if (expired) void clerk.signOut({ redirectUrl: location.href }).catch((e: Error) => setError(e.message));
     else location.reload();
   }} />;
-  if (!me) return <Loading label="Loading your workspace…" />;
+  if (!me) return <OpeningLoading />;
   return <Home me={me} agentConfig={agentConfig} />;
+}
+
+/** Every step before the destination renders keeps its label; a file opens straight onto its canvas. */
+function OpeningLoading() {
+  const file = /^\/f\/[\w-]+\/?$/.test(new URL(useLocation(), location.origin).pathname);
+  return file ? <Loading label="Opening file…" canvas /> : <Loading label="Opening Sharpner…" />;
 }
 
 function AuthMessage({ message, onRetry, action = "Try again" }: { message: string; onRetry?: () => void; action?: string }) {

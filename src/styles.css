@@ -154,7 +154,28 @@ button { -webkit-tap-highlight-color: transparent; }
 ::selection { background: color-mix(in oklch, var(--primary), transparent 70%); }
 .muted { color: var(--muted-foreground); }
 .state { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; }
-.state[role=status] { animation: fade 0.3s 0.15s var(--ease) both; }
+/* ---- loading ----
+   A warm glint sweeps across the mark, the same light that crosses a frame an agent is working on.
+   Waiting for a file happens on the canvas itself, so the editor arrives without a background change.
+   --loading-offset (≤ 0) carries one session's timing across remounts. */
+.loading { gap: 16px; animation: fade 0.3s var(--ease) both; animation-delay: calc(150ms + var(--loading-offset, 0ms)); }
+.loading-canvas { position: absolute; inset: 0; background: var(--canvas); }
+.loading-canvas::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(circle, rgb(255 255 255 / 0.07) 1px, transparent 1px) 50% 50% / 24px 24px;
+  -webkit-mask-image: radial-gradient(circle 320px, #000, transparent); mask-image: radial-gradient(circle 320px, #000, transparent);
+}
+.loading-mark { position: relative; width: 40px; height: 40px; }
+.loading-mark img { display: block; }
+.loading-glint {
+  position: absolute; inset: 0; -webkit-mask: url(/mark.svg) center / contain no-repeat; mask: url(/mark.svg) center / contain no-repeat;
+  background: linear-gradient(100deg, transparent 38%, rgb(255 246 220 / 0.95) 50%, transparent 62%) 0 0 / 260% 100%;
+  animation: sheen 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite; animation-delay: var(--loading-offset, 0ms);
+}
+.loading-label { position: relative; font-size: 12px; line-height: 1.6; color: var(--muted-text); }
+/* The first fitted view of a page sharpens out of the same blur. */
+@keyframes focus-in { from { opacity: 0; filter: blur(10px); } }
+.canvas[data-ready] > :is(.raster, .world) { animation: focus-in 0.5s var(--ease) both; }
 .login, .home-header-inner, .home-main { width: 100%; max-width: var(--page-width); margin-inline: auto; }
 
 /* ---- sign-in ----
@@ -454,47 +475,45 @@ body:has(.editor) { --toast-offset: 84px; }
 .marquee { position: absolute; border: 1px solid var(--select); background: rgb(124 156 255 / 0.08); pointer-events: none; }
 .canvas-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px 24px 96px; text-align: center; color: var(--muted-text); pointer-events: none; }
 
-/* ---- agent at work: "focus pull" ------------------------------------------
-   The frame goes softly out of focus except a thin band that sweeps through it with a amber blade,
-   framed by breathing camera brackets. When the agent finishes, the brackets snap in and focus locks.
-   New frames from an agent rack-focus into existence. Sizes are divided by zoom (--inv) to stay crisp. */
-@property --focus { syntax: "<percentage>"; inherits: true; initial-value: 0%; }
-@keyframes focus-sweep { from { --focus: -12%; } to { --focus: 112%; } }
-@keyframes brackets-breathe { 50% { inset: calc(-4px * var(--inv)); } }
-@keyframes brackets-lock {
-  0% { inset: calc(-8px * var(--inv)); opacity: 1; }
-  45% { inset: calc(-1px * var(--inv)); opacity: 1; }
-  100% { inset: 0; opacity: 0; }
-}
-@keyframes lock-flash {
-  0% { box-shadow: 0 0 0 calc(2px * var(--inv)) var(--brand), 0 0 calc(48px * var(--inv)) rgb(255 185 0 / 0.45); }
-}
+/* ---- agent at work: "graphite trace" ---------------------------------------
+   A pencil-lead highlight laps the frame's edge while a warm sheen glides across it. When the agent
+   finishes, the line runs on until it closes the outline, then fades. Both run on a shared clock
+   (negative delays set at mount) so the raster layer draws the same phase. Strokes are divided by zoom (--inv). */
+/* Each dash laps the 100-unit path from its own start, so all three end at the head (COMET in Canvas.tsx). */
+@keyframes trace-head { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+@keyframes trace-body { from { stroke-dashoffset: 6; } to { stroke-dashoffset: -94; } }
+@keyframes trace-tail { from { stroke-dashoffset: 17; } to { stroke-dashoffset: -83; } }
+/* Overshoot the length so the closed line has no seam. */
+@keyframes trace-close { from { stroke-dasharray: 20 80; opacity: 0.4; } to { stroke-dasharray: 101 0; opacity: 1; } }
+@keyframes trace-fade { to { opacity: 0; } }
+@keyframes sheen { from { background-position: 120% 0; } to { background-position: -20% 0; } }
 @keyframes materialize { from { opacity: 0; filter: blur(calc(14px * var(--inv))); transform: scale(0.985); } }
 @keyframes chip-in { from { opacity: 0; transform: scale(var(--inv)) translateY(4px); } }
 
-.focus-pull {
-  position: absolute; inset: 0; pointer-events: none;
-  background: rgb(12 12 15 / 0.22);
-  backdrop-filter: blur(calc(2.5px * var(--inv))) saturate(0.7);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--focus) - 9%), transparent calc(var(--focus) - 3%), transparent calc(var(--focus) + 3%), #000 calc(var(--focus) + 9%));
-  mask-image: linear-gradient(to bottom, #000 calc(var(--focus) - 9%), transparent calc(var(--focus) - 3%), transparent calc(var(--focus) + 3%), #000 calc(var(--focus) + 9%));
-  animation: focus-sweep 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+.trace {
+  position: absolute; left: calc(-4px * var(--inv)); top: calc(-4px * var(--inv)); overflow: visible; pointer-events: none;
+  width: calc(100% + 8px * var(--inv)); height: calc(100% + 8px * var(--inv));
 }
-/* The blade sits outside the masked layer so it stays fully visible. */
-.frame.working .frame-body::after {
-  content: ""; position: absolute; left: 0; right: 0; top: var(--focus); height: calc(1.5px * var(--inv)); pointer-events: none;
-  background: linear-gradient(90deg, transparent, var(--brand) 30%, #ffda80 50%, var(--brand) 70%, transparent);
-  box-shadow: 0 0 calc(12px * var(--inv)) rgb(255 185 0 / 0.8);
-  animation: focus-sweep 2.6s cubic-bezier(0.45, 0, 0.55, 1) infinite alternate;
+.trace rect { width: 100%; height: 100%; rx: calc(5px * var(--inv)); fill: none; stroke-linecap: round; }
+.trace-rail { stroke: rgb(255 185 0 / 0.22); stroke-width: calc(1px * var(--inv)); transition: opacity 0.2s; }
+.trace-lead {
+  stroke: rgb(255 185 0); stroke-width: calc(1.5px * var(--inv)); filter: drop-shadow(0 0 calc(3px * var(--inv)) rgb(255 185 0 / 0.7));
+  /* Longhands: the CSS minifier collapses a nameless `animation` shorthand to `none`. Each dash sets its own name. */
+  animation-duration: 2.8s; animation-timing-function: linear; animation-iteration-count: infinite; animation-delay: var(--trace-delay);
+  transition: opacity 0.2s;
 }
-.brackets { position: absolute; inset: calc(-8px * var(--inv)); pointer-events: none; --L: calc(18px * var(--inv)); --t: calc(2px * var(--inv)); animation: brackets-breathe 1.8s ease-in-out infinite; }
-.brackets i { position: absolute; width: var(--L); height: var(--L); border: var(--t) solid var(--brand); filter: drop-shadow(0 0 calc(6px * var(--inv)) rgb(255 185 0 / 0.6)); }
-.brackets i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: calc(4px * var(--inv)); }
-.brackets i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; border-top-right-radius: calc(4px * var(--inv)); }
-.brackets i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; border-bottom-left-radius: calc(4px * var(--inv)); }
-.brackets i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: calc(4px * var(--inv)); }
-.frame.settle .brackets { animation: brackets-lock 0.7s var(--ease) forwards; }
-.frame.settle .frame-body { animation: lock-flash 0.7s ease-out; }
+/* Three dashes ending at the same point make a comet: a bright head over a fading tail. */
+.trace-head { stroke-dasharray: 3 97; animation-name: trace-head; }
+.trace-body { stroke-dasharray: 9 91; animation-name: trace-body; opacity: 0.55; }
+.trace-tail { stroke-dasharray: 20 80; animation-name: trace-tail; opacity: 0.22; }
+.frame.settle :is(.trace-rail, .trace-head, .trace-body) { opacity: 0; }
+.frame.settle .trace-tail { animation: trace-close 0.5s var(--ease) forwards, trace-fade 0.4s 0.5s ease-out forwards; }
+.agent-sheen {
+  position: absolute; inset: 0; pointer-events: none; mix-blend-mode: plus-lighter; transition: opacity 0.4s var(--ease);
+  background: linear-gradient(100deg, transparent 40%, rgb(255 214 120 / 0.14) 48%, rgb(255 236 190 / 0.22) 50%, rgb(255 214 120 / 0.14) 52%, transparent 60%) 0 0 / 300% 100%;
+  animation: sheen 3.2s cubic-bezier(0.45, 0, 0.55, 1) infinite; animation-delay: var(--sheen-delay);
+}
+.frame.settle .agent-sheen { opacity: 0; }
 .frame.fresh .frame-body { animation: materialize 0.7s var(--ease); }
 .frame.working .frame-label, .frame.settle .frame-label { color: var(--text); }
 
@@ -514,6 +533,7 @@ body:has(.editor) { --toast-offset: 84px; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
-  .focus-pull, .frame.working .frame-body::after { display: none; }
-  .frame.settle .brackets { display: none; }
+  /* A still outline marks the agent's frame; the sheen and comet need motion to read. */
+  .agent-sheen, .trace-lead { display: none; }
+  .trace-rail { stroke: rgb(255 185 0 / 0.6); }
 }
