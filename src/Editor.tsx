@@ -1,3 +1,4 @@
+import { CanvasRenderPrototype } from "./Canvas-render.prototype";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
 import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
@@ -242,11 +243,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     });
     if (ok) room.send([{ t: "page.del", id: p.id }]);
   };
+  const CanvasSurface = (import.meta.env.DEV || import.meta.env.VITE_RENDER_EXPERIMENT === "1") && new URLSearchParams(location.search).get("prototype") === "render" ? CanvasRenderPrototype : Canvas;
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
+          <CanvasSurface key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { renderPrototype } from "./render.prototype";
 import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
@@ -11,6 +12,7 @@ export { ThumbnailQueue } from "./thumbnail-queue";
 
 const app = new Hono<AppEnv>();
 
+if (import.meta.env.DEV || import.meta.env.VITE_RENDER_EXPERIMENT === "1") app.route("/api/render-prototype", renderPrototype);
 app.route("/auth", auth);
 app.route("/mcp", mcp);
 app.route("/.well-known", oauth);
