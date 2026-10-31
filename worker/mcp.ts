@@ -397,7 +397,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("create_section", {
-    description: "Create a labeled section, optionally nested, with a description of what it holds. Defaults to automatic layout: children wrap in order (up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
+    description: "Create a labeled section, optionally nested, with a description of what it holds. Defaults to automatic layout: children wrap in order (screens at the row-width limit, about four desktop or thirteen phone screens; other nodes up to four per row); sections that contain screens each take a row, other sibling sections tile into about √n columns filled top to bottom; measured heights move sections down their column without reshuffling them. A section holding only components packs them as a catalog: tight spacing, one row per family (the part before the last slash), the family named once in a gutter. Add children with create_nodes' sectionId and omit coordinates. Use layout 'free' for manual positioning.",
     inputSchema: {
       fileId: z.string(),
       name: z.string().describe("e.g. 'Onboarding', 'Components', 'Buttons'"),

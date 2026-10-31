@@ -14,7 +14,9 @@ const component: CanvasNode = {
 function fixture(options: ConstructorParameters<typeof ThumbnailCache>[1] = {}) {
   vi.stubGlobal("devicePixelRatio", 2);
   const drawImage = vi.fn();
-  const ctx = { setTransform: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(), fillText: vi.fn(), drawImage };
+  const ctx = { setTransform: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), strokeRect: vi.fn(), fillText: vi.fn(), drawImage,
+    beginPath: vi.fn(), roundRect: vi.fn(), fill: vi.fn(), stroke: vi.fn(),
+    measureText: (text: string) => ({ width: text.length * 7, fontBoundingBoxAscent: 12, fontBoundingBoxDescent: 3 }) };
   const canvas = { width: 0, height: 0, getContext: () => ctx } as unknown as HTMLCanvasElement;
   const images: { src: string; onload: (() => void) | null }[] = [];
   const cache = new ThumbnailCache(vi.fn(), {
@@ -45,7 +47,7 @@ function fixture(options: ConstructorParameters<typeof ThumbnailCache>[1] = {}) 
     }, cache, { cache: highCache, ...upgrades });
     return plan;
   };
-  return { paint, cache, images, highCache, highImages, drawImage,
+  return { paint, cache, images, highCache, highImages, drawImage, fillText: ctx.fillText,
     finish: () => images.forEach(image => image.onload?.()),
     finishHigh: () => highImages.forEach(image => image.onload?.()),
   };
@@ -144,5 +146,36 @@ describe("raster previews while zoomed out", () => {
     expect(f.drawImage).toHaveBeenCalledTimes(1);
     expect(f.cache.stats.loading).toBe(0);
     f.cache.dispose();
+  });
+});
+
+describe("raster labels", () => {
+  const flow: CanvasNode = { ...component, id: "flow", kind: "section", name: "Checkout", layout: "auto", width: 0, height: null, thumbLo: null, thumbHi: null };
+  const screens = Array.from({ length: 6 }, (_, i): CanvasNode => ({
+    ...component, id: `s${i}`, kind: "frame", name: `Screen ${i}`, parentId: "flow", order: i, width: 400, height: 800, thumbLo: null, thumbHi: null,
+  }));
+  const labels = (f: ReturnType<typeof fixture>) => f.fillText.mock.calls.map(([text]) => text as string);
+
+  it("hides nested labels together once the row gap can't hold them, even where the section padding still could", () => {
+    const f = fixture();
+    // Ten 700px screens wrap into two rows. At 17.5% the 128px padding fits a label but the 120px row gap does not.
+    const wide = Array.from({ length: 10 }, (_, i) => ({ ...screens[0]!, id: `w${i}`, name: `Wide ${i}`, order: i, width: 700, height: 600 }));
+    f.paint(0.175, [flow, ...wide]);
+    expect(labels(f)).toEqual(["Checkout"]);
+    f.fillText.mockClear();
+    f.paint(0.19, [flow, ...wide]);
+    expect(labels(f)).toEqual([...wide.map(s => s.name), "Checkout"]);
+    f.cache.dispose(); f.highCache.dispose();
+  });
+
+  it("cuts long names to the node's on-screen width", () => {
+    const f = fixture();
+    f.paint(0.3, [flow, ...screens.map(s => ({ ...s, name: `${s.name} with a long descriptive name` }))]);
+    // 400px at 30% leaves 120px, about 17 characters at the mock's 7px per character.
+    for (const text of labels(f).slice(0, -1)) {
+      expect(text.endsWith("…")).toBe(true);
+      expect(text.length * 7).toBeLessThanOrEqual(120);
+    }
+    f.cache.dispose(); f.highCache.dispose();
   });
 });

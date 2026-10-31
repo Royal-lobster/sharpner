@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, pageArrangement, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
+import { AUTO_GAP, AUTO_ROW_GAP, AUTO_ROW_WIDTH, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, pageArrangement, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
 import type { CanvasNode } from "./types";
 
 const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
@@ -60,19 +60,27 @@ describe("automatic sections", () => {
     let rects = rectsOf(nodes);
     expect(rects.get("screen-3")!.y).toBe(SECTION_PAD);
     expect(rects.get("screen-4")!.x).toBe(SECTION_PAD);
-    expect(rects.get("screen-4")!.y).toBe(SECTION_PAD + 2000 + AUTO_GAP);
+    expect(rects.get("screen-4")!.y).toBe(SECTION_PAD + 2000 + AUTO_ROW_GAP);
     nodes[3]!.measuredHeight = 3000;
     rects = rectsOf(nodes);
-    expect(rects.get("screen-4")!.y).toBe(SECTION_PAD + 3000 + AUTO_GAP);
-    expect(rects.get("flow")!.h).toBe(SECTION_PAD * 2 + 3000 + AUTO_GAP + 800);
+    expect(rects.get("screen-4")!.y).toBe(SECTION_PAD + 3000 + AUTO_ROW_GAP);
+    expect(rects.get("flow")!.h).toBe(SECTION_PAD * 2 + 3000 + AUTO_ROW_GAP + 800);
   });
 
-  it("wraps wide screens before the width budget and small screens at four columns", () => {
+  it("wraps a flow only at the width budget, so a phone flow keeps reading left to right", () => {
     const wide = [section("flow"), ...Array.from({ length: 3 }, (_, i) => node(`${i}`, { parentId: "flow", width: 3000, order: i }))];
-    expect(rectsOf(wide).get("2")!.y).toBe(SECTION_PAD + 600 + AUTO_GAP);
-    const mobile = wide.map((n) => n.kind === "section" ? n : { ...n, width: 390 });
-    mobile.push(node("3", { parentId: "flow", width: 390, order: 3 }), node("4", { parentId: "flow", width: 390, order: 4 }));
-    expect(rectsOf(mobile).get("4")!.y).toBe(SECTION_PAD + 600 + AUTO_GAP);
+    expect(rectsOf(wide).get("2")!.y).toBe(SECTION_PAD + 600 + AUTO_ROW_GAP);
+    const mobile = [section("flow"), ...Array.from({ length: 14 }, (_, i) => node(`${i}`, { parentId: "flow", width: 390, order: i }))];
+    const rects = rectsOf(mobile);
+    // Thirteen 390px screens fit in the row width; the fourteenth starts the next row.
+    expect(13 * 390 + 12 * AUTO_GAP).toBeLessThanOrEqual(AUTO_ROW_WIDTH);
+    expect(rects.get("12")).toMatchObject({ x: SECTION_PAD + 12 * (390 + AUTO_GAP), y: SECTION_PAD });
+    expect(rects.get("13")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_ROW_GAP });
+  });
+
+  it("keeps other automatic sections at four per row", () => {
+    const board = [section("board"), ...Array.from({ length: 5 }, (_, i) => node(`${i}`, { parentId: "board", kind: "image", width: 390, order: i }))];
+    expect(rectsOf(board).get("4")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_ROW_GAP });
   });
 
   it("tiles nested groups and root sections, keeps a flow on its own row, and moves it after live measurements", () => {
@@ -102,9 +110,9 @@ describe("automatic sections", () => {
     const { w, h } = catalogSize(1000);
     const slots = [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [3, 0], [3, 1]];
     slots.forEach(([column, row], i) => {
-      expect(rects.get(`g${i}`)).toMatchObject({ x: SECTION_PAD + column! * (w + AUTO_GAP), y: SECTION_PAD + row! * (h + AUTO_GAP), w, h });
+      expect(rects.get(`g${i}`)).toMatchObject({ x: SECTION_PAD + column! * (w + AUTO_GAP), y: SECTION_PAD + row! * (h + AUTO_ROW_GAP), w, h });
     });
-    expect(rects.get("components")).toMatchObject({ w: 4 * w + 3 * AUTO_GAP + SECTION_PAD * 2, h: 3 * h + 2 * AUTO_GAP + SECTION_PAD * 2 });
+    expect(rects.get("components")).toMatchObject({ w: 4 * w + 3 * AUTO_GAP + SECTION_PAD * 2, h: 3 * h + 2 * AUTO_ROW_GAP + SECTION_PAD * 2 });
   });
 
   it("uses fewer columns past the tile width, but lets a narrow section sit beside a wide one", () => {
@@ -118,10 +126,10 @@ describe("automatic sections", () => {
       ...group("checkout", "page", 3, [{ kind: "frame", width: 390 }])];
     const rects = rectsOf(nodes);
     const onboarding = rects.get("onboarding")!, chips = rects.get("chips")!, tabs = rects.get("tabs")!, checkout = rects.get("checkout")!;
-    expect(chips).toMatchObject({ x: onboarding.x, y: onboarding.y + onboarding.h + AUTO_GAP });
+    expect(chips).toMatchObject({ x: onboarding.x, y: onboarding.y + onboarding.h + AUTO_ROW_GAP });
     expect(tabs).toMatchObject({ x: chips.x + chips.w + AUTO_GAP, y: chips.y });
     // Even a narrow flow that would fit beside the catalogs starts its own row.
-    expect(checkout).toMatchObject({ x: onboarding.x, y: chips.y + chips.h + AUTO_GAP });
+    expect(checkout).toMatchObject({ x: onboarding.x, y: chips.y + chips.h + AUTO_ROW_GAP });
   });
 
   it("starts frames and nested groups on separate rows", () => {
@@ -130,9 +138,9 @@ describe("automatic sections", () => {
     const rects = rectsOf(nodes);
     const { w, h } = catalogSize(400);
     expect(rects.get("b")).toMatchObject({ x: SECTION_PAD + 400 + AUTO_GAP, y: SECTION_PAD });
-    expect(rects.get("g1")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_GAP });
-    expect(rects.get("g2")).toMatchObject({ x: SECTION_PAD + w + AUTO_GAP, y: SECTION_PAD + 600 + AUTO_GAP });
-    expect(rects.get("c")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_GAP + h + AUTO_GAP });
+    expect(rects.get("g1")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_ROW_GAP });
+    expect(rects.get("g2")).toMatchObject({ x: SECTION_PAD + w + AUTO_GAP, y: SECTION_PAD + 600 + AUTO_ROW_GAP });
+    expect(rects.get("c")).toMatchObject({ x: SECTION_PAD, y: SECTION_PAD + 600 + AUTO_ROW_GAP + h + AUTO_ROW_GAP });
   });
 
   it("keeps every section in its column and place when measured heights change", () => {
@@ -227,11 +235,18 @@ describe("automatic sections", () => {
         if (current.y === before.y) expect(current.x).toBe(before.x + before.w + SECTION_GAP);
         else expect(current.y).toBe(Math.max(...flows.filter((r) => r.y === before.y).map((r) => r.y + r.h)) + SECTION_GAP);
       }
-      for (let i = 4; i < 50; i += 4) {
-        const rowBottom = Math.max(...Array.from({ length: 4 }, (_, j) => {
-          const r = rects.get(`${group}-${i - 4 + j}`)!; return r.y + r.h;
-        }));
-        expect(rects.get(`${group}-${i}`)!.y).toBe(rowBottom + AUTO_GAP);
+      // Screens fill a row left to right until the width budget, then the next row starts below the tallest one.
+      let row: Rect[] = [];
+      for (let i = 0; i < 50; i++) {
+        const r = rects.get(`${group}-${i}`)!, left = flows[group]!.x + SECTION_PAD;
+        if (i && r.x === left) {
+          expect(r.y).toBe(Math.max(...row.map((p) => p.y + p.h)) + AUTO_ROW_GAP);
+          row = [];
+        } else if (i) {
+          expect(r).toMatchObject({ x: row.at(-1)!.x + row.at(-1)!.w + AUTO_GAP, y: row[0]!.y });
+        }
+        row.push(r);
+        expect(r.x + r.w - left).toBeLessThanOrEqual(AUTO_ROW_WIDTH);
       }
     }
   });
