@@ -1,14 +1,18 @@
-import { ClerkProvider, SignIn, useAuth, useClerk } from "@clerk/react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps } from "react";
-import { api, HttpError, setApiTokenGetter, type User, type Workspace } from "./api";
-import { Editor, SharedEditor } from "./Editor";
+import { ClerkProvider, useAuth, useClerk } from "@clerk/react";
+import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { api, HttpError, setApiTokenGetter, type FileSummary, type User, type Workspace } from "./api";
 import { Home } from "./Home";
 import { useLocation } from "./router";
 import { Loading, Notice } from "./states";
 import { Button } from "@/components/ui/button";
-import { LoginShowcase } from "./LoginShowcase";
 
-export type Me = { user: User; workspaces: Workspace[]; activeWorkspaceId: string | null };
+const loadEditor = () => import("./Editor");
+const Editor = lazy(() => loadEditor().then((module) => ({ default: module.Editor })));
+const SharedEditor = lazy(() => loadEditor().then((module) => ({ default: module.SharedEditor })));
+// Signed-in startup never downloads the introduction.
+const Landing = lazy(() => import("./Landing").then((module) => ({ default: module.Landing })));
+
+export type Me = { user: User; workspaces: Workspace[]; activeWorkspaceId: string | null; files: FileSummary[] };
 export type AgentConnectionConfig = { mcpClientId: string | null; mcpCallbackPort: number | null; agentKeysEnabled: boolean };
 type AuthConfig = { publishableKey: string; configured: boolean; appOrigin?: string } & AgentConnectionConfig;
 
@@ -33,36 +37,31 @@ const appearance = {
   },
 } satisfies Appearance;
 
-/** Embed Clerk's form directly in the page; verification and recovery keep their own headings. */
-const signInAppearance = {
-  options: { logoPlacement: "none", socialButtonsVariant: "blockButton" },
-  elements: {
-    rootBox: { width: "100%", maxWidth: "100%", minWidth: 0 },
-    cardBox: { width: "100%", maxWidth: "100%", minWidth: 0, borderRadius: 0, border: 0, boxShadow: "none", background: "transparent" },
-    card: { width: "100%", minWidth: 0, maxWidth: "100%", margin: 0, padding: 0, gap: "1.5rem", boxShadow: "none", border: 0, borderRadius: 0, background: "transparent" },
-    footer: { padding: "1rem 0 0", background: "transparent", backgroundImage: "none", border: 0, borderRadius: 0, boxShadow: "none" },
-    headerTitle: { fontSize: "0.9375rem", fontWeight: 600, letterSpacing: "-0.01em" },
-    headerSubtitle: { fontSize: "0.875rem" },
-    identityPreview: { width: "100%", minWidth: 0 },
-    identityPreviewText: { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
-    socialButtonsBlockButton: { minHeight: "2.75rem", fontSize: "0.75rem", backgroundColor: "var(--secondary)", border: "1px solid var(--input)", boxShadow: "none" },
-    formFieldInput: { minHeight: "2.75rem", fontSize: "1rem", border: "1px solid var(--input)", backgroundColor: "var(--background)", boxShadow: "none" },
-    formFieldLabel: { fontSize: "0.8125rem" },
-    otpCodeFieldInputs: { width: "100%", gap: "0.375rem", justifyContent: "center" },
-    otpCodeFieldInput: { width: "2rem", height: "2.75rem", minWidth: 0, fontSize: "1rem" },
-    formButtonPrimary: { minHeight: "2.75rem", fontSize: "0.8125rem", fontWeight: 500 },
-    formResendCodeLink: { minHeight: "2.75rem", fontSize: "0.875rem" },
-    identityPreviewEditButton: { minWidth: "2.75rem", minHeight: "2.75rem", flexShrink: 0 },
-    footerActionLink: { fontSize: "0.875rem", padding: "0.5rem 0.25rem" },
-    footerActionText: { fontSize: "0.875rem" },
-  },
-} satisfies Appearance;
-
 export function App() {
+  const loc = useLocation();
+  // File links download the editor while sign-in initializes, rather than after it.
+  useEffect(() => {
+    if (/^\/f\/[\w-]+\/?(?:\?|$)/.test(loc)) void loadEditor().catch(() => {});
+  }, [loc]);
   // View links need no account, so they never wait on sign-in.
-  const shared = useLocation().match(/^\/s\/([A-Za-z0-9_-]{43})\/?(?:\?|$)/);
-  if (shared) return <SharedEditor token={shared[1]!} />;
-  return <SignedApp />;
+  const shared = loc.match(/^\/s\/([A-Za-z0-9_-]{43})\/?(?:\?|$)/);
+  return (
+    <DestinationBoundary key={shared ? shared[1] : "signed"}>
+      <Suspense fallback={<OpeningLoading />}>
+        {shared ? <SharedEditor token={shared[1]!} /> : <SignedApp />}
+      </Suspense>
+    </DestinationBoundary>
+  );
+}
+
+class DestinationBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed
+      ? <AuthMessage message="Sharpner could not finish loading. Check your connection and try again." onRetry={() => location.reload()} />
+      : this.props.children;
+  }
 }
 
 function SignedApp() {
@@ -100,6 +99,7 @@ function SignedApp() {
 }
 
 function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
+  const clerk = useClerk();
   const { isLoaded, isSignedIn, userId, orgId, getToken } = useAuth();
   const loc = useLocation();
   // Initialize before child effects; replacing the getter cancels requests waiting for an old token.
@@ -110,23 +110,9 @@ function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
 
   if (!isLoaded) return <OpeningLoading />;
   if (!isSignedIn) {
-    const returnTo = loc.startsWith("/") && !loc.startsWith("//") ? loc : "/";
-    return (
-      <main className="login">
-        <section className="login-stage" aria-hidden>
-          <LoginShowcase />
-        </section>
-        <div className="login-panel">
-          <div className="login-intro rise">
-            <h1 className="login-brand"><img src="/mark.svg" width={32} height={32} alt="" />Sharpner</h1>
-            <p>Design with your team and your agents on one canvas.</p>
-          </div>
-          <div className="login-card rise" style={{ animationDelay: "60ms" }}>
-            <SignIn routing="hash" withSignUp forceRedirectUrl={returnTo} signUpForceRedirectUrl={returnTo} appearance={signInAppearance} />
-          </div>
-        </div>
-      </main>
-    );
+    // Clerk's hosted sign-in returns to the exact file, page and selection that was opened.
+    const returnTo = new URL(loc.startsWith("/") && !loc.startsWith("//") ? loc : "/", location.origin).href;
+    return <Landing onSignIn={() => clerk.redirectToSignIn({ signInForceRedirectUrl: returnTo, signUpForceRedirectUrl: returnTo })} />;
   }
   // An identity or workspace change must never retain a previous editor's socket or data.
   return <AuthenticatedApp key={`${userId}:${orgId ?? "none"}`} agentConfig={agentConfig} />;
@@ -173,13 +159,14 @@ function WorkspaceHome({ agentConfig }: { agentConfig: AgentConnectionConfig }) 
     else location.reload();
   }} />;
   if (!me) return <OpeningLoading />;
-  return <Home me={me} agentConfig={agentConfig} />;
+  return <Home key={me.activeWorkspaceId ?? "none"} me={me} agentConfig={agentConfig} />;
 }
 
 /** Every step before the destination renders keeps its label; a file opens straight onto its canvas. */
 function OpeningLoading() {
-  const file = /^\/f\/[\w-]+\/?$/.test(new URL(useLocation(), location.origin).pathname);
-  return file ? <Loading label="Opening file…" canvas /> : <Loading label="Opening Sharpner…" />;
+  const path = new URL(useLocation(), location.origin).pathname;
+  if (/^\/s\//.test(path)) return <Loading label="Opening shared file…" canvas />;
+  return /^\/f\/[\w-]+\/?$/.test(path) ? <Loading label="Opening file…" canvas /> : <Loading label="Opening Sharpner…" />;
 }
 
 function AuthMessage({ message, onRetry, action = "Try again" }: { message: string; onRetry?: () => void; action?: string }) {

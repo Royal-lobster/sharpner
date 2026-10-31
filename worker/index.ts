@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { auth, authenticate, authErrorStatus, clerkClient, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
-import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFor } from "./data";
+import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
 import { mcp } from "./mcp";
 import { oauth } from "./oauth";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
@@ -68,7 +68,8 @@ api.onError((err, c) => c.json({ error: err.message }, authErrorStatus(err) ?? 4
 api.get("/me", async (c) => {
   const { user, workspaces, organizationId } = c.get("identity");
   const active = workspaces.find((w) => w.clerkOrganizationId === organizationId);
-  return c.json({ user, workspaces, activeWorkspaceId: active?.id ?? null });
+  const files = active ? await workspaceFiles(c.env, active.id) : [];
+  return c.json({ user, workspaces, activeWorkspaceId: active?.id ?? null, files });
 });
 
 // Workspaces are Clerk Organizations; creation, invitations and membership live in Clerk.
@@ -76,12 +77,8 @@ api.get("/me", async (c) => {
 api.get("/workspaces/:id", async (c) => {
   const workspace = await workspaceFor(c.env, c.get("user").id, c.req.param("id"));
   if (!workspace) return c.json({ error: "not found" }, 404);
-  const files = await c.env.DB.prepare(
-    `SELECT f.id, f.name, f.cover, f.library_id, f.created_at, f.updated_at,
-       (SELECT count(*) FROM files d WHERE d.library_id = f.id) AS used_by
-     FROM files f WHERE f.workspace_id = ? ORDER BY f.updated_at DESC`,
-  ).bind(workspace.id).all();
-  return c.json({ workspace, files: files.results });
+  const files = await workspaceFiles(c.env, workspace.id);
+  return c.json({ workspace, files });
 });
 
 // Files
