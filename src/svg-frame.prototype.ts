@@ -158,6 +158,53 @@ function captureRuntime(config: { token: string; width: number; maxNodes: number
       ]);
       document.body.getBoundingClientRect();
       send({ stage: "serialize" });
+      const serializeStarted = performance.now();
+      // Google Fonts publishes one face per Unicode subset. Only faces actually
+      // requested by this document need to travel into the self-contained image.
+      // Match all selection descriptors; a missing/ambiguous match stays intact.
+      const family = (value: string) => value.trim().replace(/^(["'])(.*)\1$/, "$2").toLowerCase();
+      const descriptor = (value: string, fallback: string) => (value.trim() || fallback).toLowerCase().replace(/\s+/g, " ");
+      const weight = (value: string) => descriptor(value, "normal").replace(/\bnormal\b/g, "400").replace(/\bbold\b/g, "700");
+      const stretch = (value: string) => descriptor(value, "normal").replace(/\bnormal\b/g, "100%");
+      const range = (value: string) => (value || "U+0-10FFFF").toUpperCase().replace(/\s+/g, "");
+      const faceKey = (value: { family: string; weight: string; style: string; stretch: string; unicodeRange: string }) => JSON.stringify([
+        family(value.family), weight(value.weight), descriptor(value.style, "normal"), stretch(value.stretch), range(value.unicodeRange),
+      ]);
+      const fontStates = new Map<string, string[]>();
+      for (const face of document.fonts) {
+        const key = faceKey(face), states = fontStates.get(key) ?? [];
+        states.push(face.status); fontStates.set(key, states);
+      }
+      let prunedFontBytes = 0, prunedFontFaces = 0;
+      const pruneFonts = (original: HTMLStyleElement, clone: Element) => {
+        // Do not rewrite an inaccessible sheet, a nested conditional font rule,
+        // or any face whose load state cannot be proven unused. CSSOM also keeps
+        // quoted URLs/escaped CSS valid while removing top-level font-face rules.
+        if (!original.sheet) return;
+        try {
+          let removedBytes = 0, removedFaces = 0;
+          const rules: string[] = [];
+          for (const rule of original.sheet.cssRules) {
+            if (rule.type === CSSRule.FONT_FACE_RULE) {
+              const style = (rule as CSSFontFaceRule).style;
+              const states = fontStates.get(faceKey({
+                family: style.getPropertyValue("font-family"), weight: style.getPropertyValue("font-weight"),
+                style: style.getPropertyValue("font-style"), stretch: style.getPropertyValue("font-stretch"),
+                unicodeRange: style.getPropertyValue("unicode-range"),
+              }));
+              if (states?.length && states.every((state) => state === "unloaded")) {
+                removedFaces++; removedBytes += rule.cssText.length;
+                continue;
+              }
+            }
+            rules.push(rule.cssText);
+          }
+          if (removedFaces) {
+            clone.textContent = rules.join("\n");
+            prunedFontFaces += removedFaces; prunedFontBytes += removedBytes;
+          }
+        } catch { /* An unreadable sheet is retained, never silently omitted. */ }
+      };
       const elements = [document.documentElement, ...document.documentElement.querySelectorAll("*")];
       if (elements.length > config.maxNodes) throw new Error("Frame exceeds capture DOM-node limit");
       if (document.querySelector("canvas,video,audio,iframe,object,embed")) throw new Error("Canvas, video, audio and embedded documents require a real browser surface");
@@ -179,6 +226,7 @@ function captureRuntime(config: { token: string; width: number; maxNodes: number
       for (let i = 0; i < elements.length; i++) {
         const original = elements[i]!, clone = clones[i]!;
         if (original.localName === "script" || original.localName === "base" || original.localName === "link" || original.localName === "meta") { clone.remove(); continue; }
+        if (original instanceof HTMLStyleElement) pruneFonts(original, clone);
         if (original.getAttributeNames().some((name) => /^on/i.test(name))) throw new Error("Author event handlers are unsupported by this capture prototype");
         if (original.shadowRoot) throw new Error("Nested shadow roots are not serialized by this capture prototype");
         const style = getComputedStyle(original); check(style);
@@ -220,7 +268,8 @@ function captureRuntime(config: { token: string; width: number; maxNodes: number
       const root = getComputedStyle(document.documentElement);
       for (const property of ["font-family", "font-size", "color", "color-scheme", "line-height"]) copy.style.setProperty(property, root.getPropertyValue(property), "important");
       const measuredHeight = Math.ceil(document.body.getBoundingClientRect().height);
-      send({ html: new XMLSerializer().serializeToString(copy), urls: [...urls], measuredHeight });
+      const html = new XMLSerializer().serializeToString(copy);
+      send({ html, urls: [...urls], measuredHeight, rootFontSize: root.fontSize, prunedFontBytes, prunedFontFaces, serializeMs: performance.now() - serializeStarted });
     } catch (error) { send({ error: error instanceof Error ? error.message : String(error) }); }
   };
   send({ stage: "runtime" });
@@ -285,7 +334,8 @@ export function mountSvgFrame(host: HTMLElement): PrototypeSurface {
         iframe.tabIndex = -1; iframe.setAttribute("aria-hidden", "true");
         // It must participate in layout. display:none prevents reliable web-font/height measurement.
         iframe.style.cssText = `position:fixed;left:-20000px;top:0;width:${width}px;height:${Math.max(1, Math.round(frame.height ?? 800))}px;border:0;pointer-events:none;opacity:0`;
-        const snapshot = await new Promise<{ html: string; urls: string[]; measuredHeight: number }>((resolve, reject) => {
+        const documentStarted = performance.now();
+        const snapshot = await new Promise<{ html: string; urls: string[]; measuredHeight: number; rootFontSize: string; prunedFontBytes: number; prunedFontFaces: number; serializeMs: number }>((resolve, reject) => {
           let timer: ReturnType<typeof setTimeout>;
           const cleanup = () => { clearTimeout(timer); removeEventListener("message", receive); iframe.remove(); if (cancelCapture === cancel) cancelCapture = null; };
           const cancel = () => { cleanup(); reject(new Error("Capture superseded")); };
@@ -305,6 +355,10 @@ export function mountSvgFrame(host: HTMLElement): PrototypeSurface {
           iframe.srcdoc = documentHtml.replace(/<\/body>/i, `${probe}</body>`);
           document.body.appendChild(iframe);
         });
+        canvas.dataset.svgPrototypeDocumentMs = String(performance.now() - documentStarted);
+        canvas.dataset.svgPrototypeSerializeMs = String(snapshot.serializeMs);
+        canvas.dataset.svgPrototypePrunedFontBytes = String(snapshot.prunedFontBytes);
+        canvas.dataset.svgPrototypePrunedFontFaces = String(snapshot.prunedFontFaces);
         checkDeadline();
         measuredHeight = snapshot.measuredHeight;
         if (!fresh()) return { measuredHeight, supported: false, reason: "Capture superseded" };
@@ -321,14 +375,18 @@ export function mountSvgFrame(host: HTMLElement): PrototypeSurface {
         checkDeadline();
         canvas.dataset.svgPrototypeStage = "image-decode";
         const height = Math.max(1, Math.min(8000, Math.round(frame.height ?? measuredHeight)));
-        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><foreignObject width="${width}" height="${height}">${serialized}</foreignObject></svg>`;
+        // rem units in foreignObject use the SVG document's root, rather than the
+        // nested HTML root. Match the source root for authored html font sizes.
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" style="font-size:${escapeXml(snapshot.rootFontSize)}"><foreignObject width="${width}" height="${height}">${serialized}</foreignObject></svg>`;
         const image = new Image();
+        const decodeStarted = performance.now();
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(() => { image.src = ""; reject(new Error("SVG image decode timed out")); }, remaining(DECODE_TIMEOUT_MS));
           image.onload = () => { clearTimeout(timer); resolve(); };
           image.onerror = () => { clearTimeout(timer); reject(new Error("Browser rejected SVG foreignObject image")); };
           image.src = `data:image/svg+xml;base64,${base64(new TextEncoder().encode(svg))}`;
         });
+        canvas.dataset.svgPrototypeDecodeMs = String(performance.now() - decodeStarted);
         if (!fresh()) return { measuredHeight, supported: false, reason: "Capture superseded" };
         checkDeadline();
         canvas.dataset.svgPrototypeStage = "paint";
