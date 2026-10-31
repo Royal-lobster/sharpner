@@ -26,8 +26,13 @@ type Tier = "lo" | "hi";
 const NESTED_LABEL_GAP = 24;
 /** How long a newly appeared node takes to rack-focus in. */
 const MATERIALIZE_MS = 700;
-/** How long the focus-lock plays when an agent finishes with a node. */
-const LOCK_MS = 700;
+/** When an agent finishes, the trace closes the outline, then fades. Together they match Room's agentDone lifetime. */
+const CLOSE_MS = 500;
+const SETTLE_MS = 900;
+/** One lap of the graphite trace, and one pass of the sheen; both layers read the same clock. */
+const TRACE_MS = 2800;
+const SHEEN_MS = 3200;
+const tracePhase = (t: number) => (t % TRACE_MS) / TRACE_MS;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 const camKey = (pageId: string) => `sharpner:cam:${pageId}`;
@@ -239,7 +244,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
   // DOM frames animate in CSS. Only visible raster effects need a continuous redraw.
   const animating = !reducedMotion && rasterFrames.some(({ node: f, visibleArea }) => visibleArea > 0 && (
     room.agentActivity.has(f.id) ||
-    now - (room.agentDone.get(f.id) ?? -Infinity) < LOCK_MS ||
+    now - (room.agentDone.get(f.id) ?? -Infinity) < SETTLE_MS ||
     now - (room.appeared.get(f.id) ?? -Infinity) < MATERIALIZE_MS
   ));
   useEffect(() => {
@@ -613,6 +618,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     <div
       ref={rootRef}
       className={`canvas${spaceDown || gesture.current?.kind === "pan" ? " panning" : ""}${commentMode ? " commenting" : ""}`}
+      data-ready={cameraReady || undefined}
       style={{
         backgroundSize: grid < 8 ? "0 0" : `${grid}px ${grid}px`,
         backgroundPosition: `${cam.x}px ${cam.y}px`,
@@ -650,7 +656,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
               selected={selected.has(f.id)}
               peerColor={peerSelections.get(f.id)}
               agent={room.agentActivity.get(f.id)?.name ?? null}
-              settling={room.agentDone.has(f.id)}
+              doneAt={room.agentDone.get(f.id)}
               fresh={now - (room.appeared.get(f.id) ?? -Infinity) < MATERIALIZE_MS}
             />
           );
@@ -725,13 +731,14 @@ type FrameNodeProps = {
   peerColor: string | undefined;
   /** Name of the agent working on this node right now, if any. */
   agent: string | null;
-  /** The agent just finished: play the focus-lock. */
-  settling: boolean;
+  /** When the agent finished, while the trace closes. */
+  doneAt: number | undefined;
   /** Just appeared: rack-focus in. */
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, selected, peerColor, agent, settling, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+  const settling = doneAt !== undefined;
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
   const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh"].filter(Boolean).join(" ");
@@ -748,13 +755,35 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {tier === "hi" && hi && hi !== lo && <img src={hi} alt="" draggable={false} decoding="async" />}
         {!lo && !live && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
         {live && html !== undefined && <LiveFrame id={f.id} html={html} design={design} width={f.width} height={height} />}
-        {agent && <div className="focus-pull" />}
+        {(agent || settling) && <AgentSheen />}
       </div>
-      {(agent || settling) && <div className="brackets"><i /><i /><i /><i /></div>}
+      {(agent || settling) && <Trace doneAt={doneAt} />}
       {peerColor && <div className="peer-ring" />}
     </div>
   );
 });
+
+/** A negative delay fixed at mount puts a CSS loop on the shared clock: its phase at time t is (t % period) / period. */
+const useClockDelay = (period: number) => useState(() => `${-(performance.now() % period)}ms`)[0];
+
+function AgentSheen() {
+  return <div className="agent-sheen" style={{ ["--sheen-delay" as string]: useClockDelay(SHEEN_MS) }} />;
+}
+
+/** The comet's dashes end at the same point; finishing stops the tail where it was and grows it into the full outline. */
+function Trace({ doneAt }: { doneAt: number | undefined }) {
+  const delay = useClockDelay(TRACE_MS);
+  // The path is 100 units long, and a dash starts at -dashoffset.
+  const closeFrom = doneAt === undefined ? undefined : -100 * tailStart(doneAt);
+  return (
+    <svg className="trace" style={{ ["--trace-delay" as string]: delay }} aria-hidden>
+      <rect className="trace-rail" pathLength={100} />
+      <rect className="trace-lead trace-tail" pathLength={100} style={closeFrom === undefined ? undefined : { strokeDashoffset: closeFrom }} />
+      <rect className="trace-lead trace-body" pathLength={100} />
+      <rect className="trace-lead trace-head" pathLength={100} />
+    </svg>
+  );
+}
 
 function LiveFrame({ id, html, design, width, height }: { id: string; html: string; design: DesignSystem; width: number; height: number }) {
   const [ready, setReady] = useState(false);
@@ -876,11 +905,11 @@ export function paintRaster(
       ctx.strokeRect(x - 0.5, y - 0.5, sw + 1, sh + 1);
     }
     if (fx.agent.has(f.id)) {
-      if (fx.reducedMotion) brackets(ctx, x, y, sw, sh, 4, 1);
-      else focusPull(ctx, x, y, sw, sh, fx.now);
+      if (fx.reducedMotion) traceRail(ctx, x, y, sw, sh, 0.6);
+      else { sheen(ctx, x, y, sw, sh, fx.now, 1); trace(ctx, x, y, sw, sh, fx.now); }
     }
     const doneAt = fx.done.get(f.id);
-    if (!fx.reducedMotion && doneAt !== undefined) focusLock(ctx, x, y, sw, sh, Math.min(1, (fx.now - doneAt) / LOCK_MS));
+    if (!fx.reducedMotion && doneAt !== undefined) traceClose(ctx, x, y, sw, sh, fx.now, doneAt);
     const labelRoom = catalogs.has(f.parentId ?? "") ? CATALOG_ROW_GAP : SECTION_PAD;
     if (sw >= 60 && (!f.parentId || labelRoom * cam.z >= NESTED_LABEL_GAP)) {
       const name = nodeLabel(f, catalogs);
@@ -915,61 +944,96 @@ export function paintRaster(
   }
 }
 
-// ---- agent "focus pull" (canvas layer) -------------------------------------------
-// While an agent works, the node is softly out of focus except a thin band that sweeps through it,
-// bracketed like a camera's focus box. When it finishes, the brackets snap in and the focus "locks".
+// ---- agent "graphite trace" (canvas layer) ----------------------------------------
+// The raster twin of .trace and .agent-sheen: a comet laps the edge while a sheen glides across the node,
+// and finishing grows the tail into the full outline. Phases come from the shared clock, so a node keeps
+// its place when it moves between layers.
 
 const BLADE = "255,185,0";
+const TRACE_GAP = 4;
+/** Comet dashes as [length, alpha], all ending at the head (fractions of the perimeter). Mirrors .trace-tail/-body/-head. */
+const COMET_TAIL = 0.2;
+const COMET_HEAD = 0.03;
+const COMET = [[COMET_TAIL, 0.22], [0.09, 0.55], [COMET_HEAD, 1]] as const;
+/** Where the comet's tail starts at time t, as a fraction of the perimeter. */
+const tailStart = (t: number) => tracePhase(t) + COMET_HEAD - COMET_TAIL;
 
-function focusPull(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, now: number) {
-  const t = now / 1000;
-  const p = (Math.sin(t * 1.3 - Math.PI / 2) + 1) / 2;
-  const band = Math.max(6, h * 0.12);
-  const cy = y + p * h;
-  ctx.save();
+/** Strokes the stretch of a rectangle's perimeter from `from` to `to`, clockwise from the top-left corner. */
+function perimeter(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, from: number, to: number) {
+  const total = 2 * (w + h);
+  const at = (s: number): [number, number] => {
+    let d = (s - Math.floor(s)) * total;
+    if (d < w) return [x + d, y];
+    if ((d -= w) < h) return [x + w, y + d];
+    if ((d -= h) < w) return [x + w - d, y + h];
+    return [x, y + h - (d - w)];
+  };
+  const corners = [0, w / total, (w + h) / total, (2 * w + h) / total];
   ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.fillStyle = "rgba(12,12,15,0.45)";
-  ctx.fillRect(x, y, w, Math.max(0, cy - band / 2 - y));
-  ctx.fillRect(x, cy + band / 2, w, Math.max(0, y + h - cy - band / 2));
-  const g = ctx.createLinearGradient(x, 0, x + w, 0);
-  g.addColorStop(0, `rgba(${BLADE},0)`);
-  g.addColorStop(0.5, `rgba(${BLADE},0.95)`);
-  g.addColorStop(1, `rgba(${BLADE},0)`);
-  ctx.fillStyle = g;
-  ctx.shadowColor = `rgba(${BLADE},0.8)`;
-  ctx.shadowBlur = 8;
-  ctx.fillRect(x, cy - 0.75, w, 1.5);
-  ctx.restore();
-  brackets(ctx, x, y, w, h, 7 + Math.sin(t * 3.2) * 2, 1);
+  ctx.moveTo(...at(from));
+  for (let lap = Math.floor(from); lap <= Math.floor(to); lap++) {
+    for (const c of corners) if (lap + c > from && lap + c < to) ctx.lineTo(...at(lap + c));
+  }
+  ctx.lineTo(...at(to));
+  ctx.stroke();
 }
 
-function focusLock(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, k: number) {
-  const e = 1 - (1 - k) ** 3;
-  brackets(ctx, x, y, w, h, 7 * (1 - e), 1 - k);
-  ctx.strokeStyle = `rgba(${BLADE},${0.8 * (1 - k)})`;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+function traceRail(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, alpha: number) {
+  ctx.strokeStyle = `rgba(${BLADE},${alpha})`;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x - TRACE_GAP, y - TRACE_GAP, w + TRACE_GAP * 2, h + TRACE_GAP * 2);
 }
 
-function brackets(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, gap: number, alpha: number) {
-  const L = Math.max(5, Math.min(18, Math.min(w, h) * 0.14));
-  const x0 = x - gap, y0 = y - gap, x1 = x + w + gap, y1 = y + h + gap;
+function comet(ctx: CanvasRenderingContext2D, draw: () => void) {
   ctx.save();
-  ctx.globalAlpha = Math.max(0, alpha);
-  ctx.strokeStyle = `rgb(${BLADE})`;
-  ctx.shadowColor = `rgba(${BLADE},0.6)`;
-  ctx.shadowBlur = 6;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 1.5;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
-  ctx.beginPath();
-  for (const [cx, cy, dx, dy] of [[x0, y0, 1, 1], [x1, y0, -1, 1], [x0, y1, 1, -1], [x1, y1, -1, -1]] as const) {
-    ctx.moveTo(cx, cy + dy * L);
-    ctx.lineTo(cx, cy);
-    ctx.lineTo(cx + dx * L, cy);
-  }
-  ctx.stroke();
+  ctx.shadowColor = `rgba(${BLADE},0.7)`;
+  ctx.shadowBlur = 3;
+  draw();
+  ctx.restore();
+}
+
+function trace(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, now: number) {
+  traceRail(ctx, x, y, w, h, 0.22);
+  const head = tracePhase(now) + COMET_HEAD, g = TRACE_GAP;
+  comet(ctx, () => {
+    for (const [len, alpha] of COMET) {
+      ctx.strokeStyle = `rgba(${BLADE},${alpha})`;
+      perimeter(ctx, x - g, y - g, w + g * 2, h + g * 2, head - len, head);
+    }
+  });
+}
+
+function traceClose(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, now: number, doneAt: number) {
+  const t = now - doneAt, e = 1 - (1 - Math.min(1, t / CLOSE_MS)) ** 3;
+  const alpha = t < CLOSE_MS ? 0.4 + 0.6 * e : Math.max(0, 1 - (t - CLOSE_MS) / (SETTLE_MS - CLOSE_MS));
+  const start = tailStart(doneAt), g = TRACE_GAP;
+  sheen(ctx, x, y, w, h, now, Math.max(0, 1 - t / (SETTLE_MS - CLOSE_MS)));
+  comet(ctx, () => {
+    ctx.strokeStyle = `rgba(${BLADE},${alpha})`;
+    perimeter(ctx, x - g, y - g, w + g * 2, h + g * 2, start, start + COMET_TAIL + (1 - COMET_TAIL) * e);
+  });
+}
+
+/** Mirrors .agent-sheen: a 100° band over a 300%-wide background, eased from position 120% to -20%. */
+function sheen(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, now: number, alpha: number) {
+  if (alpha <= 0) return;
+  const q = (now % SHEEN_MS) / SHEEN_MS;
+  const position = 1.2 - 1.4 * (0.5 - 0.5 * Math.cos(Math.PI * q));
+  const cx = x + w * (1.5 - 2 * position), cy = y + h / 2;
+  const dx = Math.sin((100 * Math.PI) / 180) * w * 0.3, dy = -Math.cos((100 * Math.PI) / 180) * w * 0.3;
+  const band = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
+  band.addColorStop(0, "rgba(255,214,120,0)");
+  band.addColorStop(0.4, "rgba(255,214,120,0.14)");
+  band.addColorStop(0.5, "rgba(255,236,190,0.22)");
+  band.addColorStop(0.6, "rgba(255,214,120,0.14)");
+  band.addColorStop(1, "rgba(255,214,120,0)");
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = band;
+  ctx.fillRect(x, y, w, h);
   ctx.restore();
 }

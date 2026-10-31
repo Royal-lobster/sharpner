@@ -55,7 +55,7 @@ export function SharedEditor({ token }: { token: string }) {
     return () => { controller.abort(); active?.close(); };
   }, [token]);
   if (error) return <Notice title="This link isn’t shared anymore" message="Ask someone in the workspace for a new link." action={<Button asChild size="lg"><a href="/">Open Sharpner</a></Button>} />;
-  if (!room || !meta) return <Loading label="Opening shared file…" />;
+  if (!room || !meta) return <Loading label="Opening shared file…" canvas />;
   return <EditorInner room={room} meta={meta} user={meta.user} readOnly onChange={() => {}} />;
 }
 
@@ -90,7 +90,7 @@ export function Editor({ fileId }: { fileId: string }) {
   }, [fileId, orgId, clerk]);
 
   if (error) return <Notice title="This file couldn’t open" message={error} action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
-  if (!room || !meta) return <Loading label="Opening file…" />;
+  if (!room || !meta) return <Loading label="Opening file…" canvas />;
   return <EditorInner room={room} meta={meta} user={meta.user}
     onChange={(file) => setMeta({ ...meta, file: { ...meta.file, ...file } })}
     onShare={(shareToken) => setMeta({ ...meta, shareToken })} />;
@@ -204,7 +204,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
-          <Loading label="Connecting…" />
+          <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
         {selected.length > 0 && (
           <Badge variant="secondary" className="selection-pill canvas-glass" key={selected.length > 1 ? "many" : "one"}>
