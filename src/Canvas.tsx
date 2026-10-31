@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, SECTION_PAD, union, type Rect } from "../shared/layout";
+import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
 import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
 import { effectiveTheme } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
@@ -20,11 +20,12 @@ import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-rea
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { CanvasLayout } from "./canvas-layout";
+import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
 
 type Tier = "lo" | "hi";
 
-/** Below this on-screen section padding, labels of nested nodes would collide with the section title. */
-const NESTED_LABEL_GAP = 24;
+/** Nested labels sit in the gap above their node: a row gap, or a section's padding. They hide once it can't hold them. */
+const labelsFit = (gap: number, z: number) => gap * z >= LABEL_ROOM;
 /** How long a newly appeared node takes to rack-focus in. */
 const MATERIALIZE_MS = 700;
 /** When an agent finishes, the trace closes the outline, then fades. Together they match Room's agentDone lifetime. */
@@ -649,7 +650,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     >
       <canvas ref={rasterRef} className="raster" style={{ width: size.w, height: size.h }} />
       <div
-        className={`world${SECTION_PAD * cam.z < NESTED_LABEL_GAP ? " crowded" : ""}${CATALOG_ROW_GAP * cam.z < NESTED_LABEL_GAP ? " catalog-crowded" : ""}`}
+        className={`world${labelsFit(AUTO_ROW_GAP, cam.z) ? "" : " crowded"}${labelsFit(CATALOG_ROW_GAP, cam.z) ? "" : " catalog-crowded"}`}
         style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.z})`, ["--inv" as string]: 1 / cam.z }}
       >
         {domFrames.map(({ node: f, rect: r, screenWidth }) => {
@@ -855,7 +856,7 @@ export function paintRaster(
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, size.w, size.h);
-  ctx.textBaseline = "bottom";
+  ctx.textBaseline = "alphabetic";
 
   thumbnails?.setViewport(items.flatMap(({ node: f, rect: r, screenWidth: screenW }) => {
     const url = thumbnailSource(f);
@@ -895,7 +896,8 @@ export function paintRaster(
     ctx.stroke();
   }
 
-  ctx.font = '500 14px "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif';
+  ctx.font = LABEL_FONT.node;
+  const nodeBaseline = labelBaseline(ctx);
   for (const { node: f, rect: r, screenWidth: screenW } of items) {
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y, sw = screenW, sh = r.h * cam.z;
     const url = thumbnailSource(f);
@@ -926,37 +928,32 @@ export function paintRaster(
     }
     const doneAt = fx.done.get(f.id);
     if (!fx.reducedMotion && doneAt !== undefined) traceClose(ctx, x, y, sw, sh, fx.now, doneAt);
-    const labelRoom = catalogs.has(f.parentId ?? "") ? CATALOG_ROW_GAP : SECTION_PAD;
-    if (sw >= 60 && (!f.parentId || labelRoom * cam.z >= NESTED_LABEL_GAP)) {
-      const name = nodeLabel(f, catalogs);
-      const max = Math.floor(sw / 7.5);
+    if (sw >= 60 && (!f.parentId || labelsFit(catalogs.has(f.parentId) ? CATALOG_ROW_GAP : AUTO_ROW_GAP, cam.z))) {
       ctx.fillStyle = selected.has(f.id) ? COLORS.select : f.kind === "component" ? COLORS.component : f.kind === "tokens" ? COLORS.tokens : COLORS.muted;
-      ctx.fillText(name.length > max ? name.slice(0, max - 1) + "…" : name, x, y - 4);
+      ctx.fillText(fitLabel(ctx, nodeLabel(f, catalogs), sw), x, y - nodeBaseline);
     }
   }
 
-  // Family names in catalog gutters, top-aligned with their row.
+  // Family names head their catalog row in the gutter, on the same line as the variant labels beside them.
   const gutter = (CATALOG_GUTTER - 24) * cam.z;
-  if (gutter >= 48 && CATALOG_ROW_GAP * cam.z >= NESTED_LABEL_GAP) {
-    ctx.font = '600 13px "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif';
-    ctx.textBaseline = "top";
+  if (gutter >= 48 && labelsFit(CATALOG_ROW_GAP, cam.z)) {
+    ctx.font = LABEL_FONT.family;
+    const baseline = labelBaseline(ctx);
     ctx.fillStyle = COLORS.sectionText;
-    const max = Math.floor(gutter / 7.5);
     for (const { family, x, y } of families) {
       const sx = x * cam.z + cam.x, sy = y * cam.z + cam.y;
-      if (sy < -20 || sy > size.h || sx > size.w || sx + gutter < 0) continue;
-      ctx.fillText(family.length > max ? family.slice(0, max - 1) + "…" : family, sx, sy + 2);
+      if (sy < 0 || sy - LABEL_ROOM > size.h || sx > size.w || sx + gutter < 0) continue;
+      ctx.fillText(fitLabel(ctx, family, gutter), sx, sy - baseline);
     }
-    ctx.textBaseline = "bottom";
   }
 
   // Section titles last, so neighbouring sections' contents never cover them.
-  ctx.font = '700 16px "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif';
+  ctx.font = LABEL_FONT.section;
+  const sectionBaseline = labelBaseline(ctx);
   for (const { node: f, rect: r, screenWidth: sw } of sections) {
-    if (sw < 80 || f.parentId && SECTION_PAD * cam.z < NESTED_LABEL_GAP) continue;
-    const max = Math.floor(sw / 9);
+    if (sw < 80 || f.parentId && !labelsFit(AUTO_ROW_GAP, cam.z)) continue;
     ctx.fillStyle = selected.has(f.id) ? COLORS.select : peers.get(f.id) ?? COLORS.sectionText;
-    ctx.fillText(f.name.length > max ? f.name.slice(0, max - 1) + "…" : f.name, r.x * cam.z + cam.x + 2, r.y * cam.z + cam.y - 6);
+    ctx.fillText(fitLabel(ctx, f.name, sw), r.x * cam.z + cam.x, r.y * cam.z + cam.y - sectionBaseline);
   }
 }
 

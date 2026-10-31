@@ -5,10 +5,14 @@ export type Rect = { x: number; y: number; w: number; h: number };
 
 /** Space between a section's edge and its contents. */
 export const SECTION_PAD = 128;
+/** Space between neighbours in a row. */
 export const AUTO_GAP = 80;
+/** Space between rows. Each node's label sits in the gap above it, so rows sit further apart than columns. */
+export const AUTO_ROW_GAP = 120;
 export const SECTION_GAP = 160;
-/** Four desktop screens fit in a row; small screens stop at four too. */
+/** Four desktop screens fit in a row. Flows of smaller screens keep reading left to right until the width runs out. */
 export const AUTO_ROW_WIDTH = 6400;
+/** Other automatic sections (images, token sheets, mixed previews) stop at four per row. */
 export const AUTO_COLUMNS = 4;
 /** Sibling sections tile in about √n columns, so a page grows roughly as wide as it is tall. */
 export const sectionColumns = (count: number) => Math.max(1, Math.ceil(Math.sqrt(count)));
@@ -23,7 +27,7 @@ export const tileWidth = (widths: number[]) => Math.max(TILE_WIDTH, ...widths.ma
  * Columns come from order, count and widths only: measured heights move sections down within their column but
  * never into another one. Fewer columns are used when they would exceed the tile width.
  */
-export function tileSections(sizes: readonly { w: number; h: number }[], gap: number) {
+export function tileSections(sizes: readonly { w: number; h: number }[], gap: number, rowGap = gap) {
   const n = sizes.length, budget = tileWidth(sizes.map((s) => s.w));
   for (let columns = Math.min(n, sectionColumns(n)); ; columns--) {
     const offsets: { x: number; y: number }[] = [];
@@ -32,8 +36,8 @@ export function tileSections(sizes: readonly { w: number; h: number }[], gap: nu
       // Earlier columns take the remainder, so ten sections in four columns stack 3, 3, 2, 2.
       const column = sizes.slice(start, start += Math.floor(n / columns) + (c < n % columns ? 1 : 0));
       let y = 0;
-      for (const s of column) { offsets.push({ x, y }); y += s.h + gap; }
-      h = Math.max(h, y - gap);
+      for (const s of column) { offsets.push({ x, y }); y += s.h + rowGap; }
+      h = Math.max(h, y - rowGap);
       x += Math.max(...column.map((s) => s.w)) + gap;
     }
     if (x - gap <= budget || columns === 1) return { offsets, w: x - gap, h };
@@ -100,7 +104,9 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
       const inner = children.map((k) => rectOf(k, new Set(seen)));
       if (f.layout === "auto" && inner.length) {
         const catalog = isCatalog(children);
-        const pad = catalog ? CATALOG_PAD : SECTION_PAD, gap = catalog ? CATALOG_GAP : AUTO_GAP, rowGap = catalog ? CATALOG_ROW_GAP : AUTO_GAP;
+        const pad = catalog ? CATALOG_PAD : SECTION_PAD, gap = catalog ? CATALOG_GAP : AUTO_GAP, rowGap = catalog ? CATALOG_ROW_GAP : AUTO_ROW_GAP;
+        // Screens directly in a section make it a flow, which wraps only when it runs out of width.
+        const flow = children.some((k) => k.kind === "frame");
         const gutter = catalog && children.some((k) => familyOf(k.name)) ? CATALOG_GUTTER : 0;
         // Keep the original slot while a child floats. This prevents the drop target collapsing
         // under the pointer and the rest of the canvas jumping before the drop is committed.
@@ -113,7 +119,7 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
           const child = children[i]!, cr = inner[i]!;
           if (child.kind === "section") {
             // Nested groups start a new row as one tiled block; the next frame starts another.
-            const end = runEnd(children, i), block = tileSections(inner.slice(i, end), rowGap);
+            const end = runEnd(children, i), block = tileSections(inner.slice(i, end), gap, rowGap);
             if (columns) { y += rowHeight + rowGap; x = 0; }
             block.offsets.forEach((o, j) => place(i + j, o.x, y + o.y));
             width = Math.max(width, block.w); rowHeight = block.h; columns = 1;
@@ -123,7 +129,7 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
           // Catalogs wrap per family instead of after a fixed column count.
           const wraps = catalog
             ? familyOf(child.name) !== familyOf(children[i - 1]?.name ?? "") || x + cr.w > CATALOG_ROW_WIDTH
-            : children[i - 1]?.kind === "section" || columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
+            : children[i - 1]?.kind === "section" || !flow && columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
           if (columns && wraps) {
             y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
           }

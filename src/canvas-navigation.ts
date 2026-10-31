@@ -1,5 +1,6 @@
 import { union, type Rect } from "../shared/layout";
 import type { Camera } from "./canvas-render-plan";
+import { LABEL_ROOM } from "./canvas-labels";
 
 export const MAX_CANVAS_ZOOM = 8;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -10,7 +11,8 @@ export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) 
   const width = Math.max(1, size.w), height = Math.max(1, size.h);
   const compact = width < 560;
   const left = Math.min(compact ? 20 : 64, (width - 1) / 2);
-  const top = Math.min(compact ? 68 : 64, (height - 1) / 3);
+  // The file controls float over the top edge; the topmost node's label or section title must clear them too.
+  const top = Math.min((compact ? 68 : 64) + LABEL_ROOM, (height - 1) / 3);
   const bottom = Math.min(compact ? 92 : 64, (height - 1) / 3);
   const viewport = { x: left, y: top, w: width - left * 2, h: height - top - bottom };
 

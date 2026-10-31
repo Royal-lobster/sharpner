@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canvasNavigation, MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { applyTouch } from "./touch-gestures";
+import { LABEL_ROOM } from "./canvas-labels";
 import type { Camera } from "./canvas-render-plan";
 
 const desktop = { w: 1600, h: 950 };
@@ -20,9 +21,17 @@ describe("bounded preview navigation", () => {
     expect(panned.x).toBeGreaterThanOrEqual(120);
   });
 
+  it("fits a page so the topmost label clears the floating file controls", () => {
+    for (const rect of [cluster, { x: 0, y: 0, w: 9000, h: 400 }]) {
+      const nav = canvasNavigation([rect], desktop);
+      // The file controls end 54px from the top; the label sits LABEL_ROOM above its node.
+      expect(rect.y * nav.overview.z + nav.overview.y - LABEL_ROOM).toBeGreaterThanOrEqual(54 + 8);
+    }
+  });
+
   it("makes the fitted overview the furthest zoom out and locks panning at that overview", () => {
     const nav = canvasNavigation([cluster], desktop);
-    expect(nav.minZoom).toBeCloseTo((desktop.h - 128) / cluster.h);
+    expect(nav.minZoom).toBeCloseTo((desktop.h - 128 - LABEL_ROOM) / cluster.h);
     expectCamera(nav.fit([]), nav.overview);
     for (const x of [-1e10, 0, 1e10]) for (const y of [-1e10, 0, 1e10]) {
       expectCamera(nav.constrain({ x, y, z: 0.00001 }), nav.overview);
@@ -89,14 +98,15 @@ describe("bounded preview navigation", () => {
     const requested = { x: 190, y: 300, z: 1 };
     expectCamera(nav.constrain(requested), requested);
     expectCamera(nav.constrain({ ...requested, z: nav.minZoom }), nav.overview);
-    expect(cluster.y * nav.overview.z + nav.overview.y).toBeGreaterThanOrEqual(68);
+    expect(cluster.y * nav.overview.z + nav.overview.y).toBeGreaterThanOrEqual(68 + LABEL_ROOM);
   });
 
   it("centers invalid saved offsets at the requested zoom without losing valid offsets", () => {
     const nav = canvasNavigation([cluster], desktop);
     const next = nav.constrain({ x: NaN, y: Infinity, z: 2 });
     expect((cluster.x + cluster.w / 2) * next.z + next.x).toBeCloseTo(desktop.w / 2);
-    expect((cluster.y + cluster.h / 2) * next.z + next.y).toBeCloseTo(desktop.h / 2);
+    // Vertically, the centre of the area below the floating file controls and their label room.
+    expect((cluster.y + cluster.h / 2) * next.z + next.y).toBeCloseTo(desktop.h / 2 + LABEL_ROOM / 2);
     expect(nav.constrain({ x: 180, y: NaN, z: 2 }).x).toBe(180);
   });
 
