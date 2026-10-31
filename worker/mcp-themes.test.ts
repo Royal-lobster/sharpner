@@ -9,7 +9,7 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
     node: async (id: string) => (await mocks.nodes()).find((node: CanvasNode) => node.id === id),
     outline: async () => [{ id: "page", name: "Feature", sort: 0, nodes: await mocks.nodes() }],
     pages: async () => [{ id: "page", name: "Feature", sort: 0 }], peers: async () => [],
-    agentActivity: async () => {}, instances: async () => [],
+    cover: async () => ({ nodeId: null, url: null }), agentActivity: async () => {}, instances: async () => [],
     designSystem: async () => ({ tokens: '@theme { --color-primary: blue; } .dark {} [data-theme="UwU"] {}', components: [], library: null, fileTheme: await mocks.theme() }),
     ownDesignSystem: async () => ({ tokens: "", components: [] }),
   }),

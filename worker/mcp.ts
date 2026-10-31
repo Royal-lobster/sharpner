@@ -39,6 +39,7 @@ Workflow:
 3. read_guide("screens") before designing screens. One page per sizable feature, with screens/states in sections per flow and feature components on that same page. One frame per screen/state, left to right. Compare themes in neighboring frames with data-theme on each HTML root; light/dark/uwu are themes, Primary/Ghost are component variants.
 4. Use token utilities and reuse component instances. Extract repeated feature markup into components on the feature page, with feature-prefixed names (Trade/OrderForm); tags remain file-wide. Before removing, renaming or reshaping a component, check its uses with find_instances.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
+   When establishing a product file, design an editable 1600×900 cover frame on a described "Cover" page using its identity, tokens and typography. Make it legible at thumbnail size, verify it with screenshot_nodes, then pin it with set_cover. Check get_file's cover before replacing an existing choice; maintain the established cover when the product's identity changes.
 6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
 7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.
 8. If Sharpner's own tools get in your way (a confusing result, a missing capability, output too large to use, a workaround you had to invent), check list_friction and file it with report_friction, adding to an existing issue with sameAs when it is already listed. Keep it brief and carry on with the user's task.`;
@@ -93,7 +94,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const open = files.find((f) => f.id === me?.last_file_id);
     if (open) {
       const stub = room(env, open.id);
-      const [peers, outline, comments, fileTheme] = await Promise.all([stub.peers(), stub.outline(), stub.comments(), stub.theme()]);
+      const [peers, outline, comments, cover, fileTheme] = await Promise.all([stub.peers(), stub.outline(), stub.comments(), stub.cover(), stub.theme()]);
       const mine = peers.find((p) => p.id === user.id && !p.agent);
       const page = outline.find((p) => p.id === mine?.pageId);
       const nodes = outline.flatMap((p) => p.nodes);
@@ -102,6 +103,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         fileName: open.name,
         libraryFileId: open.library_id,
         fileTheme,
+        cover: { ...cover, url: abs(cover.url) },
         openInBrowser: Boolean(mine),
         currentPage: page ? { id: page.id, name: page.name } : null,
         pages: outline.map(({ id, name, description }) => ({ id, name, description })),
@@ -231,6 +233,17 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json({ ok: true });
   });
 
+  server.registerTool("set_cover", {
+    description: "Choose the frame or image shown on a file's workspace card. Design a 16:9 cover frame on a Cover page, verify it with screenshot_nodes, then pass its nodeId. The choice follows future edits and preview updates. Pass null to restore automatic selection. get_file reports the current choice; preserve an established cover unless asked to replace it.",
+    inputSchema: { fileId: z.string(), nodeId: z.string().min(1).nullable().describe("An existing frame or image in this file, or null for automatic selection.") },
+    annotations: { destructiveHint: false, idempotentHint: true },
+  }, async ({ fileId, nodeId }) => {
+    const { stub, apply } = await access(fileId);
+    await apply([{ t: "cover.set", id: nodeId }]);
+    const cover = await stub.cover();
+    return json({ ok: true, cover: { ...cover, url: abs(cover.url) } });
+  });
+
   server.registerTool("set_theme", {
     description: "Set the file's theme, such as light, dark, or uwu, using the names reported by get_design_system. Frames with their own theme keep that override; other screens and component specimens inherit this choice. Pass null to preserve authored HTML themes. Token sheets keep showing every theme. To choose a single screen's theme, use update_nodes with theme (null restores file inheritance).",
     inputSchema: { fileId: z.string(), theme: themeChoice.describe("Named theme from the token CSS, or null for As authored.") },
@@ -262,12 +275,12 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_file", {
-    description: "A file's pages with their descriptions, sections and nodes (id, kind, name, sectionId, computed geometry and heightMode auto/fixed). Pass pageId to read one page; list_pages is the cheaper overview. No sources; use read_nodes for those, get_design_system for tokens and components.",
+    description: "A file's cover choice, pages with their descriptions, sections and nodes (id, kind, name, sectionId, computed geometry and heightMode auto/fixed). cover.nodeId is null for automatic selection. Pass pageId to read one page; list_pages is the cheaper overview. No sources; use read_nodes for those, get_design_system for tokens and components.",
     inputSchema: { fileId: z.string(), pageId: z.string().optional().describe("Only this page. Omit for every page.") },
     annotations: { readOnlyHint: true },
   }, async ({ fileId, pageId }) => {
     const { file, stub } = await access(fileId);
-    const [all, fileTheme] = await Promise.all([stub.outline(), stub.theme()]);
+    const [all, cover, fileTheme] = await Promise.all([stub.outline(), stub.cover(), stub.theme()]);
     const outline = all.filter((p) => !pageId || p.id === pageId);
     if (pageId && !outline.length) throw new Error(`Page ${pageId} not found`);
     const pages = outline.map((p) => {
@@ -288,7 +301,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         })),
       };
     });
-    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, fileTheme, pages });
+    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, fileTheme, cover: { ...cover, url: abs(cover.url) }, pages });
   });
 
   server.registerTool("get_design_system", {

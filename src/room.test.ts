@@ -220,6 +220,34 @@ describe("file and screen themes", () => {
   });
 });
 
+describe("file cover selection", () => {
+  it("syncs cover choices across members and reconnects without invalidating layout", () => {
+    const socket = start([node("cover"), node("other")]);
+    const revision = room.dataRevision;
+    room.send([{ t: "cover.set", id: "cover" }]);
+    expect(room.coverNodeId).toBe("cover");
+    expect(socket.sent.at(-1)).toEqual({ type: "ops", ops: [{ t: "cover.set", id: "cover" }] });
+    expect(room.dataRevision).toBe(revision);
+    socket.receive({ type: "sync", coverNodeId: "other", by: null });
+    expect(room.coverNodeId).toBe("other");
+    expect(room.dataRevision).toBe(revision);
+    socket.receive({ type: "sync", coverNodeId: null, by: null });
+    expect(room.coverNodeId).toBeNull();
+    socket.receive({ type: "init", pages: room.pages, nodes: [...room.nodes.values()], cid: "viewer", peers: [], library: null, coverNodeId: "cover" });
+    expect(room.coverNodeId).toBe("cover");
+  });
+
+  it("clears a local cover when deleting its containing section or page", () => {
+    start([node("section", { kind: "section" }), node("cover", { parentId: "section" })]);
+    room.send([{ t: "cover.set", id: "cover" }]);
+    room.send([{ t: "node.del", ids: ["section"] }]);
+    expect(room.coverNodeId).toBeNull();
+    room.send([{ t: "node.put", id: "replacement", node: { pageId: "page_two" } }, { t: "cover.set", id: "replacement" }]);
+    room.send([{ t: "page.del", id: "page_two" }]);
+    expect(room.coverNodeId).toBeNull();
+  });
+});
+
 describe("cached canvas layout", () => {
   const viewport = { w: 1440, h: 960 };
   const feedback: CommentThread = { id: "pin", number: 1, anchor: { pageId: "page_one", nodeId: null, x: 5000, y: -200 },

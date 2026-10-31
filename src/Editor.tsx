@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
@@ -211,6 +211,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const counts = new Map<string, number>();
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
+  const coverCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "image") ? selected[0]! : null;
   const themeScreen = selected.length === 1 && selected[0]!.kind === "frame" ? selected[0]! : null;
   const themes = themeNames(room.design().tokens);
   const hasThemes = themes.length > 1 || room.fileTheme !== null || [...room.nodes.values()].some((node) => !!node.theme);
@@ -281,6 +282,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               {readOnly ? <DropdownMenuLabel>View only</DropdownMenuLabel> : <>
                 <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => void renameFile(); }}><Pencil aria-hidden />Rename file…</DropdownMenuItem>
                 {(meta.files.length > 0 || file.library_id) && <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("library"); }}><IconLibrary aria-hidden />Design system…</DropdownMenuItem>}
+                <DropdownMenuItem disabled={!coverCandidate || room.status !== "open" || room.coverNodeId === coverCandidate.id}
+                  onSelect={() => { if (coverCandidate) room.send([{ t: "cover.set", id: coverCandidate.id }]); }}>
+                  <IconPhoto aria-hidden />{coverCandidate && room.coverNodeId === coverCandidate.id ? "Current file cover" : "Use selection as cover"}
+                </DropdownMenuItem>
+                {room.coverNodeId && <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => room.send([{ t: "cover.set", id: null }])}><IconPhoto aria-hidden />Use automatic cover</DropdownMenuItem>}
                 <DropdownMenuSeparator />
               </>}
               <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("help"); }}><IconKeyboard aria-hidden />Canvas controls</DropdownMenuItem>

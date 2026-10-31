@@ -30,6 +30,8 @@ export class Room {
   peers = new Map<string, Peer>();
   comments = new Map<string, CommentThread>();
   library: LibraryInfo | null = null;
+  /** Explicit workspace-card cover; null lets the server choose automatically. */
+  coverNodeId: string | null = null;
   /** Default theme for screens without an override; null preserves their authored theme. */
   fileTheme: string | null = null;
   status: Status = "connecting";
@@ -283,6 +285,7 @@ export class Room {
         this.comments = comments;
         this.commentsRevision++;
         this.library = msg.library;
+        this.coverNodeId = msg.coverNodeId ?? null;
         this.fileTheme = msg.fileTheme ?? null;
         this.designNodes = new Map(msg.nodes.filter(isDesignNode).map((node) => [node.id, node]));
         this.designRevision++;
@@ -301,6 +304,7 @@ export class Room {
         break;
       }
       case "sync": {
+        if (msg.coverNodeId !== undefined) this.coverNodeId = msg.coverNodeId;
         if (msg.fileTheme !== undefined) this.fileTheme = msg.fileTheme;
         if (msg.pages) for (const p of msg.pages) this.upsertPage(p);
         if (msg.pageDels) for (const pageId of msg.pageDels) this.forgetPage(pageId);
@@ -466,6 +470,7 @@ export class Room {
   }
 
   private forgetNode(id: string) {
+    if (this.coverNodeId === id) this.coverNodeId = null;
     this.nodes.delete(id);
     this.forgetSource(id);
     this.heights.delete(id);
@@ -539,7 +544,7 @@ export class Room {
 
   send(ops: Op[]) {
     for (const op of ops) this.applyLocal(op);
-    if (ops.length) this.changedData();
+    if (ops.some((op) => op.t !== "cover.set")) this.changedData();
     this.reconcileSources();
     this.emit();
     this.sendRaw({ type: "ops", ops });
@@ -583,8 +588,12 @@ export class Room {
         }
         const node = this.nodes.get(op.id);
         if (node) this.updateDesignNode(node);
+        if (this.coverNodeId === op.id && node?.kind !== "frame" && node?.kind !== "image") this.coverNodeId = null;
         break;
       }
+      case "cover.set":
+        this.coverNodeId = op.id;
+        break;
       case "theme.set":
         if (this.fileTheme !== op.theme) {
           this.fileTheme = op.theme;

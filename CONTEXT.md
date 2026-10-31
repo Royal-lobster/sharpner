@@ -52,6 +52,10 @@ _Avoid_: Artboard, screen (a screen is what a frame usually shows)
 A node showing an uploaded picture.
 _Avoid_: Asset, photo
 
+**Cover**:
+The preview that represents a file in the workspace. A member or agent can choose a frame or image explicitly; otherwise Sharpner selects a preview automatically. A designed cover is usually a 16:9 frame on a Cover page, and stays an ordinary editable node.
+_Avoid_: Thumbnail (when referring to the chosen design rather than its rendered image), cover node kind
+
 **Section**:
 A labeled group that wraps the nodes inside it and can contain other sections. Like a page, it can carry a description for agent navigation. New sections arrange their contents automatically in ordered rows; sections of screens (flows) take a row each, and other sibling sections tile into columns. A section can use free layout for explicit positioning. Existing manual sections retain free layout.
 _Avoid_: Group, area, container, folder
@@ -110,6 +114,7 @@ _Avoid_: Components page, styles page
 
 - A **Workspace** has **Members** and **Files**.
 - A **File** has **Pages**; a **Page** has **Nodes**; a **Section** contains **Nodes**, including other **Sections**.
+- A **File** may choose one **Frame** or **Image** as its **Cover**. Deleting it restores automatic selection.
 - A **File** may use one **Library**, which must be a **File** in the same **Workspace**.
 - A **File**'s **Design system** is its **Library**'s **Tokens** and **Components** plus its own; its own win when names collide.
 - A **Frame** uses **Components** through **Instances** and styles itself with **Tokens**.

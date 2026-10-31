@@ -8,6 +8,7 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
     const outline = async () => (await mocks.outline(id)) as (Page & { nodes: CanvasNode[] })[];
     return {
       apply: mocks.apply, outline, peers: async () => [], instances: () => mocks.instances(id),
+      cover: async () => ({ nodeId: null, url: null }),
       theme: async () => null,
       pages: async () => (await outline()).map(({ nodes: _nodes, ...page }) => page),
       nodes: async () => (await outline()).flatMap((p) => p.nodes),
