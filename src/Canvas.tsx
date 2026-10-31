@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
 import { frameDocument, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
-import { effectiveTheme } from "../shared/themes";
+import { effectiveTheme, themeLabel } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
@@ -867,7 +867,9 @@ const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", 
 
 /** Catalog rows already name the family in their gutter, so specimens show only their variant. */
 function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
-  return KIND_PREFIX[f.kind] + (catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name);
+  const name = catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name;
+  // A component theme override shares its default's name; the theme tells them apart.
+  return KIND_PREFIX[f.kind] + name + (f.kind === "component" && f.theme ? ` · ${themeLabel(f.theme)}` : "");
 }
 
 /** Per canvas, the preview last painted for each node: it stays up while a replacement loads. */

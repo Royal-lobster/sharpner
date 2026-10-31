@@ -1,7 +1,7 @@
 // Shapes shared by the browser, the worker, and the FileRoom Durable Object. Vocabulary: see CONTEXT.md.
 import { componentSpecimen, tokenSpecimen } from "./specimens";
 import type { SessionPrincipal } from "./session-principal";
-import { documentThemeScript } from "./themes";
+import { componentTheme, documentThemeScript } from "./themes";
 export { tokenNames } from "./specimens";
 
 /**
@@ -29,7 +29,10 @@ export type CanvasNode = {
   parentId: string | null;
   kind: NodeKind;
   name: string;
-  /** Frames: named theme override. null or missing inherits the file's theme. */
+  /**
+   * Frames: named theme override; null or missing inherits the file's theme.
+   * Components: the theme this definition serves; null or missing is the default definition.
+   */
   theme?: string | null;
   x: number;
   y: number;
@@ -95,7 +98,11 @@ export type Presence = {
 
 export type Peer = Actor & Presence & { cid: string };
 
-export type ComponentDef = { tag: string; html: string };
+/**
+ * A component's HTML. A definition with a `theme` overrides the default inside that theme only, for
+ * themes whose components need different structure (decoration, slots, layout), not just token values.
+ */
+export type ComponentDef = { tag: string; html: string; theme?: string | null };
 /** Everything a frame needs to render consistently: token CSS and component definitions. */
 export type DesignSystem = { tokens: string; components: ComponentDef[] };
 export type LibraryInfo = { fileId: string; name: string; design: DesignSystem };
@@ -123,7 +130,10 @@ export function componentTag(name: string) {
   return "x-" + (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "component");
 }
 
-/** A file's design system: its library's, overridden by its own (components by tag; own tokens come last in CSS). */
+/**
+ * A file's design system: its library's, overridden by its own (own tokens come last in CSS). Components
+ * are replaced per tag: a file defining a tag in any theme owns every definition of that tag.
+ */
 export function mergeDesignSystems(library: DesignSystem | null | undefined, own: DesignSystem): DesignSystem {
   if (!library) return own;
   const ownTags = new Set(own.components.map((c) => c.tag));
@@ -137,16 +147,26 @@ export function mergeDesignSystems(library: DesignSystem | null | undefined, own
  * Defines every component as a light-DOM custom element. `{{prop|default}}` placeholders take the element's
  * attributes and `<slot></slot>` takes its children. Expansion waits until the document is parsed, so an
  * instance's children are always there to slot (elements can upgrade mid-parse if a tag is already defined).
+ *
+ * Each instance uses the definition for the theme it renders in (see componentTheme), else the default.
+ * Specimens pin their own definition with `data-sharpner-definition`, so a default stays visible in any theme.
+ * Expansion runs before the document theme is applied, so the theme script announces it as `__sharpnerTheme`.
  */
-const componentScript = (defs: ComponentDef[]) => String.raw`<script>(()=>{
-const C=${JSON.stringify(Object.fromEntries(defs.map((d) => [d.tag, d.html]))).replace(/</g, "\\u003c")};
+const componentScript = (defs: ComponentDef[]) => {
+  const byTag: Record<string, Record<string, string>> = {};
+  for (const d of defs) (byTag[d.tag] ??= {})[d.theme ?? ""] = d.html;
+  return String.raw`<script>(()=>{
+const C=${JSON.stringify(byTag).replace(/</g, "\\u003c")};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
-for(const[t,h]of Object.entries(C))if(!customElements.get(t))customElements.define(t,class extends HTMLElement{
+const T=${componentTheme.toString()};
+for(const[t,d]of Object.entries(C))if(!customElements.get(t))customElements.define(t,class extends HTMLElement{
 connectedCallback(){document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>this.x(),{once:true}):this.x()}
 x(){if(this._x)return;this._x=1;if(this.parentElement&&this.parentElement.closest(t))return;
+const p=this.getAttribute("data-sharpner-definition"),h=d[p??T(this,window.__sharpnerTheme)]??d[""];if(h==null)return;
 const kids=this.innerHTML;this.style.display="contents";
-this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,d)=>esc(this.hasAttribute(k)?this.getAttribute(k):(d||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
+this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
 }});})()</script>`;
+};
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
 export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null } = {}): string {
@@ -181,8 +201,8 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
 }
 
 /** Screens retain their source; design-system nodes get a consistent specimen presentation. */
-export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "height">>, source: string) {
-  if (n.kind === "component") return componentSpecimen(n.name, componentTag(n.name), source, n.height);
+export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "height" | "theme">>, source: string) {
+  if (n.kind === "component") return componentSpecimen(n.name, componentTag(n.name), source, n.height, n.theme);
   if (n.kind === "tokens") return tokenSpecimen(source, n.name);
   return source;
 }

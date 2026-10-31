@@ -218,12 +218,12 @@ export class FileRoom extends DurableObject<Env> {
 
   /** This file's own token sheets and components (what it offers when used as a library). */
   ownDesignSystem(): DesignSystem {
-    const rows = this.sql.exec<{ kind: NodeKind; name: string; source: string }>(
-      `SELECT kind, name, source FROM nodes WHERE kind IN ('tokens', 'component') ORDER BY rowid`,
+    const rows = this.sql.exec<{ kind: NodeKind; name: string; source: string; theme: string | null }>(
+      `SELECT kind, name, source, theme FROM nodes WHERE kind IN ('tokens', 'component') ORDER BY rowid`,
     ).toArray();
     return {
       tokens: rows.filter((r) => r.kind === "tokens").map((r) => r.source).join("\n"),
-      components: rows.filter((r) => r.kind === "component").map((r) => ({ tag: componentTag(r.name), html: r.source })),
+      components: rows.filter((r) => r.kind === "component").map((r) => ({ tag: componentTag(r.name), html: r.source, theme: r.theme })),
     };
   }
 
@@ -319,8 +319,9 @@ export class FileRoom extends DurableObject<Env> {
       if (this.theme() !== previousFileTheme) {
         // Explicit screen overrides and token comparison sheets keep their current appearance.
         // The previous measurement stays as the layout height until the new rendering replaces it.
-        const inherited = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`).toArray();
-        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`);
+        // Component theme overrides always render in their own theme.
+        const inherited = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind IN ('component', 'frame') AND theme IS NULL`).toArray();
+        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('component', 'frame') AND theme IS NULL`);
         for (const { id } of inherited) touched.nodes.add(id);
         if (inherited.length) renderChanged = true;
       }
@@ -383,7 +384,7 @@ export class FileRoom extends DurableObject<Env> {
     if (input.order !== undefined && !Number.isFinite(input.order)) throw new Error("Order must be a finite number");
     if (input.description && kind !== "section") throw new Error("Only sections and pages have descriptions");
     const theme = input.theme !== undefined ? validateTheme(input.theme) : cur?.theme ?? null;
-    if (theme !== null && kind !== "frame") throw new Error("Only screens have a theme override");
+    if (theme !== null && kind !== "frame" && kind !== "component") throw new Error("Only screens and components have a theme");
     // When a node leaves a managed group, its stored placeholder coordinates must become its actual
     // visible position. The same applies when changing a section's layout mode.
     if (cur) {
@@ -414,10 +415,15 @@ export class FileRoom extends DurableObject<Env> {
     if (kind === "image" && !next.src) throw new Error("Images need a src");
 
     if (kind === "component") {
+      // One definition per tag and theme: the default, plus at most one override for each theme.
       const tag = componentTag(next.name);
-      const clash = this.sql.exec<{ name: string }>(`SELECT name FROM nodes WHERE kind = 'component' AND id != ?`, id)
-        .toArray().find((c) => componentTag(c.name) === tag);
-      if (clash) throw new Error(`Component "${clash.name}" already uses the tag <${tag}>; pick another name`);
+      const clash = this.sql.exec<{ name: string; theme: string | null }>(`SELECT name, theme FROM nodes WHERE kind = 'component' AND id != ?`, id)
+        .toArray().find((c) => componentTag(c.name) === tag && (c.theme ?? null) === next.theme);
+      if (clash) {
+        throw new Error(next.theme
+          ? `Component "${clash.name}" already overrides <${tag}> for the ${next.theme} theme; update that node instead`
+          : `Component "${clash.name}" already uses the tag <${tag}>; pick another name, or set a theme to override it in one theme`);
+      }
     }
 
     if (kind === "section" && cur) {

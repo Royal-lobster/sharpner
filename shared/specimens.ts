@@ -40,7 +40,7 @@ const componentStyles = `<style>
 .sp-component--compact .sp-component-stage{padding:8px 10px}
 </style>`;
 
-export function componentSpecimen(name: string, tag: string, source: string, height?: number | null) {
+export function componentSpecimen(name: string, tag: string, source: string, height?: number | null, theme?: string | null) {
   const { family, variant } = componentName(name);
   const fixed = typeof height === "number";
   const compact = fixed && height < 220;
@@ -51,8 +51,10 @@ export function componentSpecimen(name: string, tag: string, source: string, hei
     return `<span class="sp-component-prop">${escape(name)} <em>${escape(value)}</em></span>`;
   });
   if (slot) propItems.push('<span class="sp-component-prop">slot <em>accepts content</em></span>');
-  return `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escape(`${family} / ${variant} component`)}">
-<div class="sp-component-stage"><div class="sp-component-instance"><${tag}></${tag}></div></div>
+  // A theme override is the same component in another theme, so it names that theme rather than a new variant.
+  if (theme) propItems.unshift(`<span class="sp-component-prop">theme <em>${escape(themeLabel(theme))}</em></span>`);
+  return `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escape(`${family} / ${variant} component${theme ? `, ${themeLabel(theme)} theme` : ""}`)}">
+<div class="sp-component-stage"><div class="sp-component-instance"><${tag} data-sharpner-definition="${escape(theme ?? "")}"></${tag}></div></div>
 ${compact ? "" : `<footer class="sp-component-spec"><code class="sp-component-tag">&lt;${escape(tag)}&gt;</code>${propItems.join("")}</footer>`}
 </article>`;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { effectiveTheme, themeNames, themeSwatches, validateTheme } from "./themes";
-import { frameDocument } from "./types";
+import { componentTheme, effectiveTheme, themeNames, themeSwatches, validateTheme } from "./themes";
+import { frameDocument, renderedHtml } from "./types";
 
 describe("theme selection", () => {
   it("discovers unique CSS theme contexts in order, including legacy dark, without reading comments or strings", () => {
@@ -28,6 +28,55 @@ describe("theme selection", () => {
     expect(swatches.get("uwu")!.vars).toMatchObject({ "--color-surface": "pink", "--color-primary": "oklch(0.6 0.2 260)" });
     expect(swatches.get("dark")).toMatchObject({ background: "var(--color-background)", accent: "var(--color-primary)" });
     expect(themeSwatches("").get("light")).toEqual({ vars: {}, background: undefined, accent: undefined });
+  });
+
+  it("resolves the theme a component instance renders in, as the document theme script will leave it", () => {
+    // Minimal element tree: just what componentTheme reads.
+    const doc = {} as { body: FakeElement; documentElement: FakeElement };
+    class FakeElement {
+      readonly classList = { contains: (c: string) => this.classes.includes(c) };
+      constructor(readonly parentElement: FakeElement | null, readonly attrs: Record<string, string> = {}, readonly classes: string[] = []) {}
+      get ownerDocument() { return doc; }
+      getAttribute(k: string) { return this.attrs[k] ?? null; }
+      closest(_selector: string) {
+        for (let n: FakeElement | null = this; n; n = n.parentElement) if (n.attrs["data-theme"] !== undefined || n.classes.includes("dark") || n.classes.includes("light")) return n;
+        return null;
+      }
+    }
+    const make = (parent: FakeElement | null, attrs?: Record<string, string>, classes?: string[]) => new FakeElement(parent, attrs, classes);
+    const html = make(null), body = make(html);
+    doc.documentElement = html; doc.body = body;
+    const at = (parent: FakeElement) => make(parent) as unknown as Element;
+    const dark = make(body, {}, ["dark"]), nestedLight = make(dark, {}, ["light"]), sakura = make(body, { "data-theme": "sakura" });
+
+    expect(componentTheme(at(body), "uwu")).toBe("uwu");
+    expect(componentTheme(at(dark), "uwu")).toBe("uwu");
+    expect(componentTheme(at(nestedLight), "uwu")).toBe("light");
+    expect(componentTheme(at(sakura), null)).toBe("sakura");
+    expect(componentTheme(at(dark), undefined)).toBe("dark");
+    expect(componentTheme(at(body), null)).toBe("");
+  });
+
+  it("ships every definition of a component to the document, grouped by theme", () => {
+    const html = frameDocument("<x-button></x-button>", { theme: "sakura", design: { tokens: "", components: [
+      { tag: "x-button", html: "<button>Plain</button>" },
+      { tag: "x-button", html: "<button>Petals</button>", theme: "sakura" },
+    ] } });
+    expect(html).toContain('"x-button":{"":"\\u003cbutton>Plain\\u003c/button>","sakura":"\\u003cbutton>Petals\\u003c/button>"}');
+    expect(html).toContain("function componentTheme(");
+    expect(html).toContain("__sharpnerTheme = theme");
+    // The theme announcement must run before parsing ends, when components expand.
+    expect(html.indexOf(')("sakura")</script>')).toBeGreaterThan(html.indexOf("customElements.define"));
+  });
+
+  it("renders a component override's specimen in its own theme, whatever the file uses", () => {
+    expect(effectiveTheme({ kind: "component", theme: "sakura" }, "dark")).toBe("sakura");
+    expect(effectiveTheme({ kind: "component", theme: null }, "dark")).toBe("dark");
+    const override = renderedHtml({ kind: "component", name: "Button/Primary", theme: "sakura" }, "<button>Go</button>");
+    expect(override).toContain("theme <em>Sakura</em>");
+    // Each specimen shows its own definition, so the default stays visible while the file uses an overriding theme.
+    expect(override).toContain('<x-button-primary data-sharpner-definition="sakura">');
+    expect(renderedHtml({ kind: "component", name: "Button/Primary" }, "<button>Go</button>")).toContain('<x-button-primary data-sharpner-definition="">');
   });
 
   it("inherits file themes while retaining screen overrides and foundation comparisons", () => {

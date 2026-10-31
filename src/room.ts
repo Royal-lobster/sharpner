@@ -464,7 +464,7 @@ export class Room {
     const previous = this.designNodes.get(node.id);
     if (isDesignNode(node)) {
       this.designNodes.set(node.id, node);
-      if (!previous || previous.name !== node.name || previous.rev !== node.rev) this.designRevision++;
+      if (!previous || previous.name !== node.name || previous.rev !== node.rev || (previous.theme ?? null) !== (node.theme ?? null)) this.designRevision++;
     } else if (this.designNodes.delete(node.id)) this.designRevision++;
   }
 
@@ -495,7 +495,7 @@ export class Room {
     const src = (n: CanvasNode) => this.sources.get(n.id)?.source;
     const design = mergeDesignSystems(this.library?.design, {
       tokens: own.filter((n) => n.kind === "tokens").map(src).filter(Boolean).join("\n"),
-      components: own.filter((n) => n.kind === "component" && src(n) !== undefined).map((n) => ({ tag: componentTag(n.name), html: src(n)! })),
+      components: own.filter((n) => n.kind === "component" && src(n) !== undefined).map((n) => ({ tag: componentTag(n.name), html: src(n)!, theme: n.theme ?? null })),
     });
     this.designCache = { revision: this.designRevision, design };
     return design;

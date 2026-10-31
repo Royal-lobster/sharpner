@@ -58,14 +58,32 @@ export function validateTheme(value: unknown): string | null {
   return value.trim();
 }
 
-/** Foundations always compare all themes; component specimens inherit the file choice. */
+/** Foundations always compare all themes; component specimens inherit the file choice unless they define a theme override. */
 export function effectiveTheme(node: { kind: string; theme?: string | null }, fileTheme?: string | null): string | undefined {
   if (node.kind === "tokens" || node.kind === "image" || node.kind === "section") return undefined;
-  return (node.kind === "frame" ? node.theme ?? fileTheme : fileTheme) ?? undefined;
+  // A component's own theme marks the definition it serves, so its specimen always shows that theme.
+  return (node.kind === "frame" || node.kind === "component" ? node.theme ?? fileTheme : fileTheme) ?? undefined;
+}
+
+/**
+ * Runs inside the rendered document: the theme a component instance renders in, which picks its definition.
+ * An applied document theme replaces outer theme contexts (see applyDocumentTheme), so it wins unless the
+ * instance sits in a nested context; without one, the nearest authored context decides. "" is the default.
+ */
+export function componentTheme(element: Element, applied: string | null | undefined): string {
+  const selector = "[data-theme],.dark,.light";
+  const doc = element.ownerDocument;
+  const outer = (e: Element | null | undefined) => !e || e === doc.body || e === doc.documentElement;
+  const name = (e: Element) => e.getAttribute("data-theme") || (e.classList.contains("dark") ? "dark" : e.classList.contains("light") ? "light" : "");
+  const context = element.parentElement?.closest(selector);
+  if (applied != null && (outer(context) || outer(context!.parentElement?.closest(selector)))) return applied;
+  return context ? name(context) : "";
 }
 
 /** Runs inside the rendered document. Stored HTML stays unchanged. */
 function applyDocumentTheme(theme: string) {
+  // Announced before parsing finishes, so component expansion can pick this theme's definitions.
+  (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme;
   const selector = "[data-theme],.dark,.light";
   const apply = () => {
     // Authored screens may put their theme on wrappers rather than <html>, including separate

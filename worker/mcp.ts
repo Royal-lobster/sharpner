@@ -279,6 +279,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
           ...(n.kind === "image" ? { src: abs(n.src) } : {}),
           ...(n.kind === "component" ? { tag: componentTag(n.name) } : {}),
           ...(n.kind === "frame" ? { theme: n.theme ?? null, effectiveTheme: effectiveTheme(n, fileTheme) ?? null } : {}),
+          ...(n.kind === "component" && n.theme ? { theme: n.theme } : {}),
         })),
       };
     });
@@ -286,7 +287,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "Read tokens, CSS, themes, and component tags, props, slots, locations, and use counts from the file and its library.",
+    description: "Read tokens, CSS, themes, and component tags, props, slots, theme overrides, locations, and use counts from the file and its library.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -296,9 +297,19 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const s = room(env, id);
       const [outline, own] = await Promise.all([s.outline(), s.ownDesignSystem()]);
       const nodes = outline.flatMap((p) => p.nodes.map((n) => ({ ...n, page: p.name })));
-      return own.components.map((c) => {
-        const n = nodes.find((x) => x.kind === "component" && componentTag(x.name) === c.tag)!;
-        return { tag: c.tag, name: n?.name, nodeId: n?.id, page: n?.page, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html), source, ...(source === "library" ? { libraryFileId: id } : {}) };
+      const node = (tag: string, theme: string | null) => nodes.find((x) => x.kind === "component" && componentTag(x.name) === tag && (x.theme ?? null) === theme);
+      // One entry per tag. Theme overrides are listed with it: the same component, restructured for one theme.
+      const tags = [...new Set(own.components.map((c) => c.tag))];
+      return tags.map((tag) => {
+        const defs = own.components.filter((c) => c.tag === tag);
+        const c = defs.find((d) => !d.theme) ?? defs[0]!;
+        const n = node(tag, c.theme ?? null);
+        const overrides = defs.filter((d) => d.theme).map((d) => ({ theme: d.theme!, nodeId: node(tag, d.theme!)?.id, props: propsOf(d.html) }));
+        return {
+          tag, name: n?.name, nodeId: n?.id, page: n?.page, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html),
+          ...(c.theme ? { missingDefault: true } : {}), ...(overrides.length ? { themeOverrides: overrides } : {}),
+          source, ...(source === "library" ? { libraryFileId: id } : {}),
+        };
       });
     };
     const own = await describe(file.id, "file");
@@ -416,7 +427,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         kind: z.enum(["frame", "component", "tokens", "image"]).optional(),
         name: z.string().describe("Component names set their tag: Button/Primary -> <x-button-primary>"),
         source: z.string().optional().describe("HTML for frames/components, Tailwind v4 CSS for token sheets"),
-        theme: themeChoice.optional().describe("Frames only: named theme override; null or omitted inherits the file theme."),
+        theme: themeChoice.optional().describe("Frames: named theme override; null or omitted inherits the file theme. Components: create a theme override, a second definition of an existing component (same name) used only inside that theme; omit for the default definition."),
         imageUrl: z.string().optional().describe("For images, e.g. a URL from upload_image"),
         previewUrl: z.string().optional().describe("Small image preview. Omit to generate one if Browser Rendering is available."),
         width: z.number().positive().optional().describe("Viewport width in px. Default 400; token sheets default to 960."),
@@ -477,6 +488,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         layout: node.kind === "section" ? node.layout ?? "free" : undefined,
         order: node.order,
         ...(node.kind === "frame" ? { theme: node.theme ?? null, effectiveTheme: effectiveTheme(node, fileTheme) ?? null } : {}),
+        ...(node.kind === "component" && node.theme ? { theme: node.theme } : {}),
         ...nodeGeometry(node, rects),
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
       };
@@ -496,7 +508,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         name: z.string().optional(),
         description: sectionDescription.optional(),
         source: z.string().optional(),
-        theme: themeChoice.optional().describe("Frames only: named theme override; null restores file inheritance. Omit to preserve."),
+        theme: themeChoice.optional().describe("Frames: named theme override; null restores file inheritance. Components: the theme this definition overrides; null makes it the default. Omit to preserve."),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
         x: z.number().optional(),
