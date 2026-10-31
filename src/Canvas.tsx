@@ -818,9 +818,9 @@ function LiveFrame({ id, html, design, width, height }: { id: string; html: stri
 // ---- raster layer -------------------------------------------------------------
 
 const COLORS = {
-  select: "oklch(0.72 0.14 275)", accent: "oklch(0.82 0.18 78)", muted: "#9d9da6", box: "#202024", edge: "rgba(255,255,255,0.07)",
-  component: "#c084fc", tokens: "#f9a8d4", section: "rgba(255,255,255,0.035)", sectionEdge: "rgba(255,255,255,0.07)", sectionText: "#d4d4d8",
-  placeholder: "#141416",
+  select: "oklch(0.72 0.14 275)", accent: "oklch(0.82 0.17 78)", muted: "#aca397", box: "#24201c", edge: "rgba(255,240,215,0.08)",
+  component: "#c084fc", tokens: "#f9a8d4", section: "rgba(255,236,200,0.035)", sectionEdge: "rgba(255,240,215,0.08)", sectionText: "#dcd7cf",
+  placeholder: "#171412",
 };
 const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", section: "", component: "◆ ", tokens: "◎ " };
 
