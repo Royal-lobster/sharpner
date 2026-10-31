@@ -42,6 +42,8 @@ type Props = {
   fileId: string;
   pageId: string;
   selection: string[];
+  /** Opening a link or traversing history fits its selection; local selections leave the camera alone. */
+  selectionFocus?: { ids: string[] };
   onSelect: (ids: string[]) => void;
   /** Link viewers can look around but never select, move, delete, or add anything. */
   readOnly?: boolean;
@@ -53,7 +55,7 @@ type Props = {
   draftComment?: CommentAnchor | null;
 };
 
-export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = false, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
+export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, readOnly = false, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
   useSyncExternalStore(room.subscribe, room.getVersion);
   const rootRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -65,7 +67,7 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     }
   }, [pageId]);
   const [cam, setCamState] = useState<Cam>(saved ?? { x: 0, y: 0, z: 1 });
-  const [cameraReady, setCameraReady] = useState(Boolean(saved));
+  const [cameraReady, setCameraReady] = useState(Boolean(saved) && !selectionFocus?.ids.some((id) => room.nodes.get(id)?.pageId === pageId));
   const camRef = useRef(cam);
   const needsFit = useRef(!saved);
   const [settled, setSettled] = useState(true);
@@ -182,6 +184,17 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     if (navigationRects.length) fitTo([], 1, false);
     else setCam({ x: size.w / 2 - 400, y: size.h / 2 - 300, z: 1 });
   });
+
+  const focusedSelection = useRef<Props["selectionFocus"]>(undefined);
+  useEffect(() => {
+    if (!selectionFocus?.ids.length || focusedSelection.current === selectionFocus || !size.w || !size.h || room.status !== "open") return;
+    const targets = selectionFocus.ids.flatMap((id) => { const rect = rects.get(id); return rect ? [rect] : []; });
+    if (!targets.length) return;
+    focusedSelection.current = selectionFocus;
+    needsFit.current = false;
+    cancelAnimationFrame(tween.current);
+    fitTo(targets, 1, false);
+  }, [selectionFocus, size.w, size.h, room.status, rects, fitTo]);
 
   const zoomAt = useCallback((sx: number, sy: number, factor: number, animate = false) => {
     const c = camRef.current;

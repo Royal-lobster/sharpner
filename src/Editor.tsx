@@ -7,6 +7,7 @@ import { CommentsPanel } from "./Comments";
 import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
+import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { Room } from "./room";
 import { Link } from "./router";
 import { askConfirm, askText, ResponsiveDialog } from "./dialog";
@@ -32,7 +33,7 @@ import { AvatarStack } from "@/components/ui/avatar-stack";
 type FileMeta = { user: User; file: FileInfo; workspace: Workspace; files: { id: string; name: string }[]; shareToken: string | null };
 type SharedMeta = { file: { id: string; name: string }; workspace: { name: string } };
 
-const shareUrl = (token: string) => `${location.origin}/s/${token}`;
+const shareUrl = (token: string, view: CanvasLocation) => `${location.origin}${canvasLocationUrl(new URL(`/s/${token}`, location.origin), view)}`;
 
 /** A file opened through a view link: no account, no editing, live updates. */
 export function SharedEditor({ token }: { token: string }) {
@@ -102,8 +103,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   useSyncExternalStore(room.subscribe, room.getVersion);
   const desktop = useDesktop();
   const { file, workspace } = meta;
-  const [pageId, setPageId] = useState<string | null>(() => localStorage.getItem(`sharpner:page:${file.id}`));
-  const [selection, setSelection] = useState<string[]>([]);
+  const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes } = useCanvasLocation(file.id, room);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [open, setOpen] = useState<"pages" | "file" | "share" | "people" | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -127,7 +127,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   };
   const selectComment = (thread: CommentThread | null) => {
     setActiveCommentId(thread?.id ?? null); setCommentMode(false); setCommentsOpen(true);
-    if (thread) { setPageId(thread.anchor.pageId); setSelection([]); setCommentFocus((f) => ({ id: thread.id, request: (f?.request ?? 0) + 1 })); }
+    if (thread) { selectPage(thread.anchor.pageId); setCommentFocus((f) => ({ id: thread.id, request: (f?.request ?? 0) + 1 })); }
   };
 
   useEffect(() => {
@@ -150,7 +150,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   }, [page?.id]);
 
   // Drop selected nodes that no longer exist, and share the selection with agents and peers.
-  const liveSelection = selection.filter((id) => room.nodes.has(id));
   useEffect(() => room.setPresence({ selection: liveSelection }), [liveSelection.join(",")]);
 
   if (room.status === "gone") return <Notice title="This file was deleted" message="Someone in the workspace removed it." action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
@@ -161,7 +160,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const addPage = () => {
     const id = crypto.randomUUID();
     room.send([{ t: "page.put", page: { id, name: `Page ${room.pages.length + 1}`, sort: Math.max(0, ...room.pages.map((p) => p.sort)) + 1 } }]);
-    setPageId(id);
+    selectPage(id);
     setRenaming(id);
   };
 
@@ -200,13 +199,13 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} onSelect={setSelection} readOnly={readOnly}
+          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
-        {selected.length > 0 && (
+        {!readOnly && selected.length > 0 && (
           <Badge variant="secondary" className="selection-pill canvas-glass" key={selected.length > 1 ? "many" : "one"}>
             <span className="truncate">{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span><b>· visible to agents</b>
           </Badge>
@@ -276,7 +275,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                     />
                   ) : (
-                    <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { setPageId(p.id); setSelection([]); setOpen(null); }}>
+                    <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
                       <span className="page-option-text">
                         <span className="truncate">{p.name}</span>
                         {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
@@ -306,7 +305,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             </Button>}>
             {people.map((person) => <Button key={person.id} variant="ghost" className="person-row" onClick={() => {
               const target = person.pageIds.includes(page?.id ?? "") ? page?.id : person.pageIds[0];
-              if (target) { setPageId(target); setSelection([]); setOpen(null); }
+              if (target) { selectPage(target); setOpen(null); }
             }}>
               <Avatar id={person.id} name={person.name} src={person.avatar} />
               <span><strong>{person.name}{person.id === user.id ? " (you)" : ""}</strong><small>{person.pageIds.map((id) => room.pages.find((p) => p.id === id)?.name).filter(Boolean).join(", ") || "Opening file…"}</small></span>
@@ -328,7 +327,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 <span className="dock-share-label">Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
               </Button>
             }>
-            <ShareLink fileId={file.id} token={meta.shareToken} onChange={(token) => onShare?.(token)} />
+            <ShareLink fileId={file.id} token={meta.shareToken} view={{ pageId, selection: liveSelection }} onChange={(token) => onShare?.(token)} />
           </DockPanel>
         </ButtonGroup></nav>
       </div>}
@@ -472,13 +471,13 @@ function trackKeyboardInset(el: HTMLElement | null) {
 }
 
 /** View-only link sharing for a file: off, or one link anyone can open to watch. */
-function ShareLink({ fileId, token, onChange }: { fileId: string; token: string | null; onChange: (token: string | null) => void }) {
+function ShareLink({ fileId, token, view, onChange }: { fileId: string; token: string | null; view: CanvasLocation; onChange: (token: string | null) => void }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const copy = async (t: string) => {
-    try { await navigator.clipboard.writeText(shareUrl(t)); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1400); }
+    try { await navigator.clipboard.writeText(shareUrl(t, view)); setCopied(true); clearTimeout(timer.current); timer.current = setTimeout(() => setCopied(false), 1400); }
     catch { toast("Could not copy. Select the link to copy it manually.", { tone: "error" }); }
   };
   const run = async (fn: () => Promise<void>) => {
@@ -490,7 +489,7 @@ function ShareLink({ fileId, token, onChange }: { fileId: string; token: string 
       <p className="m-0 text-xs leading-relaxed text-muted-foreground">{token ? "Anyone with this link can view this file." : "Create a link to let anyone view this file."}</p>
       {token ? (
         <>
-          <Input className="share-url" readOnly value={shareUrl(token)} aria-label="Share link" onFocus={(e) => e.currentTarget.select()} />
+          <Input className="share-url" readOnly value={shareUrl(token, view)} aria-label="Share link" onFocus={(e) => e.currentTarget.select()} />
           <div className="share-actions">
             <Button variant="secondary" className={cn("flex-1", copied && "copy-done")} disabled={busy} onClick={() => void copy(token)} aria-live="polite">
               {copied ? <><Check aria-hidden />Copied</> : "Copy link"}
