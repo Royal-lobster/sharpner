@@ -114,8 +114,8 @@
 .ds-guidelines{font-size:16px}
 .ds-foundation-grid{grid-template-columns:minmax(0,1fr);gap:12px}
 .ds-color-row{grid-template-columns:minmax(120px,1.15fr) repeat(var(--ds-themes),minmax(84px,1fr));gap:8px}
-.ds-color-row code{font-size:9px}
-.ds-color-row small{font-size:9px}
+.ds-color-row code{font-size:10px}
+.ds-color-row small{font-size:10px}
 .ds-color-row>[role=cell]{gap:5px;flex-wrap:wrap}
 .ds-color-row i{width:17px;height:17px}
 .ds-show-colors{font-size:11px}
