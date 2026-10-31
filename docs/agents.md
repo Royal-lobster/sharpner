@@ -102,6 +102,10 @@ each page and section they create; members can edit page descriptions from the
 Pages panel. Use `read_guide("design-system")` and
 `read_guide("screens")` for the built-in authoring guides.
 
+Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
+
+Compare named themes in neighboring frames using `data-theme` on each HTML root. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. A shared screen component is optional, and substantial structural alternatives can use separate frames.
+
 Create screens inside sections without coordinates to use automatic layout.
 Read sources before editing, then inspect screenshots to check the result.
 See the [design-system guide](../worker/guides/design-system.md) and

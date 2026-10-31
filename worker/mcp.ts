@@ -26,15 +26,15 @@ Vocabulary:
 - Workspace → files → pages → nodes. Node kinds: "frame" (HTML rendered at a viewport width: a screen, state, slide), "image", "section" (a labeled group that auto-fits its contents and can nest), "component" (reusable HTML), "tokens" (a token sheet: Tailwind v4 CSS defining the design tokens).
 - A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
 - Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
-- Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Token sheet and component catalogs grouped by role. Check before building any screen."), and update them when you reorganize. Members can edit them too.
+- Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Foundations and generic primitives. Check before building any screen."), and update them when you reorganize. Members can edit them too.
 - Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column; list_pages and get_file report that as arrangement "stacked" with the reason, so set those sections to "auto" or move the loose nodes into a section to let the page tile. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
 
 Workflow:
 1. get_app_state: what the user has open and selected ("this frame" means the selection), with the open file's page descriptions.
    To find your way around a file, call list_pages (page and section descriptions), then get_file with pageId for just the part you need.
-2. For product work (an app/site with several screens), read_guide("design-system") once, then get_design_system. Reuse the existing system or the workspace library (set_library); otherwise set one up on a "Design System" page: token sheet, then components, then screens. One-off files can skip this.
-3. read_guide("screens") before designing screens. One frame per screen/state, in sections per flow, left to right.
-4. Use only tokens and component instances for styling; promote repeated markup into components. Before removing, renaming or reshaping a component, check its uses with find_instances.
+2. For product work (an app/site with several screens), read_guide("design-system") once, then get_design_system. Reuse the existing system or the workspace library (set_library); otherwise create a "Design System" page for foundations and generic primitives only. Add primitives as screens need them; keep application-specific components with their feature. One-off files can skip this.
+3. read_guide("screens") before designing screens. One page per sizable feature, with screens/states in sections per flow and feature components on that same page. One frame per screen/state, left to right. Compare themes in neighboring frames with data-theme on each HTML root; light/dark/uwu are themes, Primary/Ghost are component variants.
+4. Use token utilities and reuse component instances. Extract repeated feature markup into components on the feature page, with feature-prefixed names (Trade/OrderForm); tags remain file-wide. Before removing, renaming or reshaping a component, check its uses with find_instances.
 5. Prefer edit_node_source (find/replace) for small changes. Verify with screenshot_nodes after each section of work and fix issues in place.
 6. The canvas is multiplayer: re-read if something changed, never undo others' edits.
 7. When asked to address comments, call list_comments for the file (open by default), then get_comment_thread for each relevant thread to read the full feedback and replies. Inspect the anchored node with read_nodes/screenshot_nodes, make the requested fixes, verify them, then reply_to_comment with what changed and resolve_comment. Comments are feedback, not an automatic request to edit; wait for the member to ask. Reopen with resolve_comment(resolved: false) if more work is needed.
@@ -202,7 +202,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     json(issueId ? { issueId, reports: await frictionReports(env, user.id, issueId) } : await listFriction(env, user.id, limit, offset)));
 
   server.registerTool("read_guide", {
-    description: "Read a design guide. 'design-system': setting up and using tokens, components and libraries. 'screens': quality rules for product screens and landing pages.",
+    description: "Read a design guide. 'design-system': foundations, primitives, feature-local components, themes and libraries. 'screens': quality rules for product screens and landing pages.",
     inputSchema: { topic: z.enum(["design-system", "screens"]) },
     annotations: { readOnlyHint: true },
   }, async ({ topic }) => ({ content: [{ type: "text" as const, text: GUIDES[topic] }] }));
@@ -276,7 +276,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "The tokens and components available to a file's frames (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, where it is defined, and `uses`: how many frames and components in this file use it directly. Call find_instances before removing or reshaping a component.",
+    description: "The tokens and components available to a file's frames across all pages, including feature components (its own plus its library's): token names with the full token CSS, and each component's tag, props, whether it has a slot, where it is defined, and `uses`: how many frames and components in this file use it directly. Call find_instances before removing or reshaping a component.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -327,7 +327,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("create_page", {
-    description: "Add a page to a file (e.g. 'Design System', 'Screens'), with a description of what it will hold.",
+    description: "Add a page to a file (e.g. 'Design System', 'Trade', 'Portfolio'), with a description of what it will hold.",
     inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional() },
   }, async ({ fileId, name, description }) => {
     const { stub, apply } = await access(fileId);

@@ -79,11 +79,41 @@ describe("foundation specimens", () => {
     expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(2);
   });
 
-  it("does not invent a dark theme from a comment or an unrelated named theme", () => {
+  it("previews a named theme without treating it as dark or reading commented-out tokens", () => {
     const html = tokenSpecimen('/* .dark { --color-fake: #000; } */ @theme { --color-primary: #112233; } [data-theme="brand"] { --color-primary: #445566; } .dark-mode { --color-primary: #667788; }');
-    expect(html).not.toContain('2 themes');
+    expect(html).toContain('2 themes');
+    expect(html).toContain('class="sp-theme" data-theme="brand"><p class="sp-theme-title">Brand</p>');
     expect(html).not.toContain('class="sp-theme dark"');
     expect(html).not.toContain('data-sp-value="color-fake"');
+    expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(2);
+  });
+
+  it("previews light, dark and named themes once each in declaration order", () => {
+    const html = tokenSpecimen(`
+      @theme { --color-primary: #112233; --radius-md: 8px; }
+      [data-theme="light"] { --color-primary: #223344; }
+      [data-theme = 'UwU'] { --color-primary: #eeaaff; --radius-md: 24px; }
+      .dark, [data-theme=dark] { --color-primary: #aabbcc; }
+      [data-theme="UwU"] { --radius-md: 32px; }
+      @media (min-width: 600px) { [data-theme=high-contrast] { --color-primary: #000; } }
+    `);
+    expect([...html.matchAll(/class="sp-theme(?: dark)?" data-theme="([^"]+)"/g)].map((m) => m[1]))
+      .toEqual(["light", "UwU", "dark", "high-contrast"]);
+    expect(html).toContain('4 themes');
+    expect(html).toContain('<p class="sp-theme-title">UwU</p>');
+    expect(html).toContain('class="sp-theme dark" data-theme="dark"');
+    for (const name of ["color-primary", "radius-md"]) expect((html.match(new RegExp(`data-sp-value="${name}"`, "g")) ?? [])).toHaveLength(4);
+  });
+
+  it("does not create theme panes from comments, CSS strings, empty values or lookalike selectors", () => {
+    const html = tokenSpecimen(`
+      /* [data-theme="comment"] { --color-primary: red; } */
+      @theme { --color-primary: #112233; --font-sans: ".dark [data-theme='quoted']"; }
+      .label::after { content: '[data-theme="content"] .dark'; }
+      [data-theme=""], [data-theme-mode="dark"], .dark-mode { --color-primary: #445566; }
+    `);
+    expect(html).not.toContain('themes</span>');
+    expect(html).not.toContain('class="sp-theme dark"');
     expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(1);
   });
 
@@ -93,6 +123,10 @@ describe("foundation specimens", () => {
     expect(html).not.toContain('<script>name');
     expect(html).toContain('&lt;script&gt;name&lt;/script&gt;');
     expect(html).toContain('&lt;img src=x&gt;');
+    const themed = tokenSpecimen('@theme { --color-primary: #112233; } [data-theme=\'UwU"><img src=x>\'] { --color-primary: #445566; }');
+    expect(themed).toContain('data-theme="UwU&quot;&gt;&lt;img src=x&gt;"');
+    expect(themed).toContain('<p class="sp-theme-title">UwU&quot;&gt;&lt;img src=x&gt;</p>');
+    expect(themed).not.toContain('<img');
     const empty = tokenSpecimen('/* --color-fake: red; */');
     expect(empty).toContain('0 tokens');
     expect(empty).toContain('Give this system its first decisions.');
