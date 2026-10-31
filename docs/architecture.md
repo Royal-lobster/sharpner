@@ -62,6 +62,17 @@ Agents start with `get_design_system` and `read_guide("design-system")`, reuse e
 
 ## Rendering and loading
 
+Workspace cards use a file's **cover**. A member or agent can pin an ordinary
+frame or image with the shared `cover.set` operation (`set_cover` over MCP).
+The FileRoom stores the chosen node ID in metadata and resolves its latest
+preview through the existing thumbnail pipeline, mirroring the resulting URL
+into D1's `files.cover`. The choice survives edits and room hibernation; a
+pending first preview uses an automatic fallback without losing the pin.
+Deleting the chosen node, its containing section or its page clears the choice.
+`get_file` reports the choice and URL, while socket init/sync messages carry
+`coverNodeId` to keep member controls current. Agent-authored covers conventionally
+live as fixed 1600 × 900 HTML frames on a described Cover page.
+
 Each mounted canvas keeps one world-layout snapshot. Camera movement, presence,
 source delivery, preview loading and agent effects reuse its rectangles and
 catalog labels. Node/page changes, measured heights and exact drag membership

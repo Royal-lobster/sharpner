@@ -102,6 +102,9 @@ export class FileRoom extends DurableObject<Env> {
   private commentStore = new Comments(this.sql);
   private touchedAt = 0;
   private viewerAccess = new ViewerAccess();
+  /** Serializes the D1 projection so a slower old write cannot overwrite the current cover. */
+  private coverProjection: Promise<void> | null = null;
+  private coverDirty = false;
   /** Cached library info; undefined = not fetched since wake-up. */
   private library: LibraryInfo | null | undefined;
 
@@ -147,6 +150,19 @@ export class FileRoom extends DurableObject<Env> {
 
   /** null preserves each screen's authored theme; otherwise screens inherit this default. */
   theme(): string | null { return this.meta("fileTheme") || null; }
+
+  /** The explicit choice and its current preview. A pending first preview uses the automatic fallback. */
+  cover(): { nodeId: string | null; url: string | null } {
+    const nodeId = this.meta("coverNodeId") || null;
+    const url = this.sql.exec<{ c: string }>(
+      `SELECT CASE WHEN n.kind = 'image' THEN n.thumb_lo ELSE COALESCE(n.thumb_hi, n.thumb_lo) END AS c
+       FROM nodes n JOIN pages p ON p.id = n.page_id
+       WHERE n.thumb_lo IS NOT NULL AND n.kind IN ('frame', 'image', 'tokens', 'component')
+       ORDER BY CASE WHEN n.id = ? THEN -1 WHEN n.kind = 'frame' THEN 0 WHEN n.kind = 'image' THEN 1 WHEN n.kind = 'tokens' THEN 2 ELSE 3 END,
+         p.sort, p.id, n.sort, n.id LIMIT 1`, nodeId,
+    ).toArray()[0]?.c ?? null;
+    return { nodeId, url };
+  }
 
   peers(): Peer[] {
     return this.ctx.getWebSockets().flatMap((ws) => {
@@ -240,6 +256,7 @@ export class FileRoom extends DurableObject<Env> {
     const reconcileComments = ops.some((op) => op.t === "page.del" || op.t === "node.del" || op.t === "node.put" && op.node.pageId !== undefined);
     const before = reconcileComments && this.comments().length ? layoutRects(this.nodes(), layoutHeight) : null;
     let commentChanges: { threads: CommentThread[]; deleted: string[] } | undefined;
+    const previousCoverNodeId = this.meta("coverNodeId") || null;
     const previousFileTheme = this.theme();
 
     this.ctx.storage.transactionSync(() => {
@@ -270,6 +287,15 @@ export class FileRoom extends DurableObject<Env> {
             for (const id of ids) this.deleteNode(id, staleThumbs, design, touched.nodeDels);
             break;
           }
+          case "cover.set": {
+            if (op.id !== null) {
+              if (typeof op.id !== "string" || !op.id) throw new Error("A cover needs a frame or image ID, or null for automatic selection");
+              const node = this.node(op.id);
+              if (!node || (node.kind !== "frame" && node.kind !== "image")) throw new Error("Cover must be a frame or image in this file");
+            }
+            this.setMeta("coverNodeId", op.id ?? "");
+            break;
+          }
           case "theme.set": {
             this.setMeta("fileTheme", validateTheme(op.theme) ?? "");
             break;
@@ -288,9 +314,15 @@ export class FileRoom extends DurableObject<Env> {
         if (inherited.length) renderChanged = true;
       }
       for (const id of touched.nodeDels) touched.nodes.delete(id);
+      const coverNodeId = this.meta("coverNodeId");
+      if (coverNodeId) {
+        const node = this.node(coverNodeId);
+        if (!node || (node.kind !== "frame" && node.kind !== "image")) this.setMeta("coverNodeId", "");
+      }
       if (before) commentChanges = this.commentStore.reconcile(new Map(this.nodes().map((n) => [n.id, n])), new Set(this.pages().map((p) => p.id)), before);
     });
 
+    const coverNodeId = this.meta("coverNodeId") || null;
     const fileTheme = this.theme();
     this.broadcast({
       type: "sync",
@@ -298,6 +330,7 @@ export class FileRoom extends DurableObject<Env> {
       pageDels: touched.pageDels.size ? [...touched.pageDels] : undefined,
       nodes: touched.nodes.size ? this.nodes([...touched.nodes]) : undefined,
       nodeDels: touched.nodeDels.size ? [...touched.nodeDels] : undefined,
+      coverNodeId: previousCoverNodeId !== coverNodeId ? coverNodeId : undefined,
       fileTheme: previousFileTheme !== fileTheme ? fileTheme : undefined,
       by,
     });
@@ -770,6 +803,7 @@ export class FileRoom extends DurableObject<Env> {
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
     this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
+      coverNodeId: this.meta("coverNodeId") || null,
       fileTheme: this.theme(),
       comments: att.shareToken ? [] : this.comments(),
       ...(!att.shareToken && att.principal ? { principal: att.principal } : {}),
@@ -822,17 +856,24 @@ export class FileRoom extends DurableObject<Env> {
     this.sql.exec(`INSERT OR REPLACE INTO meta VALUES (?, ?)`, k, v);
   }
 
-  /** Mirrors the first thumbnail into D1 as the file's cover image. */
+  /** Mirrors the chosen preview into D1. Failed writes remain eligible for the next activity's retry. */
   private updateCover(fileId: string) {
-    const cover = this.sql.exec<{ c: string }>(
-      `SELECT CASE WHEN n.kind = 'image' THEN n.thumb_lo ELSE COALESCE(n.thumb_hi, n.thumb_lo) END AS c
-       FROM nodes n JOIN pages p ON p.id = n.page_id
-       WHERE n.thumb_lo IS NOT NULL AND n.kind IN ('frame', 'image', 'tokens', 'component')
-       ORDER BY CASE n.kind WHEN 'frame' THEN 0 WHEN 'image' THEN 1 WHEN 'tokens' THEN 2 ELSE 3 END, p.sort, p.rowid, n.rowid LIMIT 1`,
-    ).toArray()[0]?.c ?? "";
-    if (cover === (this.meta("cover") ?? "")) return;
-    this.setMeta("cover", cover);
-    this.ctx.waitUntil(this.env.DB.prepare(`UPDATE files SET cover = ? WHERE id = ?`).bind(cover || null, fileId).run().then(() => {}));
+    this.coverDirty = true;
+    if (this.coverProjection) return;
+    const project = async () => {
+      do {
+        this.coverDirty = false;
+        const cover = this.cover().url ?? "";
+        if (cover === (this.meta("cover") ?? "")) continue;
+        await this.env.DB.prepare(`UPDATE files SET cover = ? WHERE id = ?`).bind(cover || null, fileId).run();
+        this.setMeta("cover", cover);
+      } while (this.coverDirty);
+    };
+    this.coverProjection = project().finally(() => {
+      this.coverProjection = null;
+      if (this.coverDirty) this.updateCover(fileId);
+    });
+    this.ctx.waitUntil(this.coverProjection);
   }
 
   /** Bumps files.updated_at in D1 at most once a minute. */

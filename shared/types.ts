@@ -65,7 +65,9 @@ export type Op =
   | { t: "node.put"; id: string; node: NodeInput }
   | { t: "node.del"; ids: string[] }
   /** File theme inherited by frames without an override; null preserves authored theme contexts. */
-  | { t: "theme.set"; theme: string | null };
+  | { t: "theme.set"; theme: string | null }
+  /** Pins a frame or image as the file's workspace cover; null restores automatic selection. */
+  | { t: "cover.set"; id: string | null };
 
 export type Actor = { id: string; name: string; avatar: string | null; agent?: boolean };
 
@@ -98,9 +100,9 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; fileTheme?: string | null }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null; fileTheme?: string | null }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
-  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; fileTheme?: string | null; by: Actor | null }
+  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; coverNodeId?: string | null; fileTheme?: string | null; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
   /** An agent is looking at or working on these nodes without changing them (reading, screenshotting). */
   | { type: "activity"; by: Actor; ids: string[] }

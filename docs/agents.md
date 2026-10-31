@@ -76,9 +76,10 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `read_guide` | Design-system or screen-design guidance |
 | `create_file` | Create a workspace file, optionally linked to a library |
 | `set_library` | Link or remove a file's workspace library |
+| `set_cover` | Pin a frame or image as the workspace card cover; pass `nodeId: null` to restore automatic selection |
 | `set_theme` | Set the file theme inherited by screens; null preserves authored theme contexts. Frames can override with their `theme` field |
 | `list_pages` | A file's table of contents: page and section descriptions with design counts, and whether each page tiles or stacks (and why) |
-| `get_file` | Pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
+| `get_file` | Cover choice, pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
 | `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
 | `find_instances` | Frames and components using a component, here and in files using this one as a library |
 | `create_page` / `update_page` / `delete_page` | Organize and describe pages; deleting a page deletes its nodes. `rename_page` remains as a deprecated alias |
@@ -106,6 +107,19 @@ Pages panel. Use `read_guide("design-system")` and
 Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
 
 Use `set_theme` for the file default and a frame's `theme` field in `create_nodes` or `update_nodes` for an override (`null` restores inheritance). `get_design_system` reports theme names from the token CSS; `get_file` and `read_nodes` report each frame's choice and effective theme. Members have File theme and selected Screen theme menus. With no file choice, As authored preserves existing HTML theme contexts. Compare themes in neighboring frames with explicit theme overrides so a file change keeps the comparison intact. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. A shared screen component is optional, and substantial structural alternatives can use separate frames.
+
+Finish a new product file with a designed 1600 × 900 HTML frame on a described
+Cover page. Use the file's identity and design system, keep its name readable at
+thumbnail size, inspect it with `screenshot_nodes`, then pin it with
+`set_cover({ fileId, nodeId })`. `get_file` reports `cover: { nodeId, url }`;
+`nodeId: null` means automatic selection. Maintain an established cover in place,
+respect member choices, and update it when the product's identity changes.
+The saved choice follows edits and preview regeneration; deleting its node,
+section or page restores automatic selection. Pass `nodeId: null` to reset it
+explicitly. The screen guide includes cover composition guidance.
+
+Members can select a frame or image and choose **File → Use selection as cover**.
+**File → Use automatic cover** clears that choice.
 
 Create screens inside sections without coordinates to use automatic layout.
 Read sources before editing, then inspect screenshots to check the result.

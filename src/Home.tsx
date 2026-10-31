@@ -177,7 +177,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
                 {visible.map((file, i) => (
                   <Card key={file.id} size="sm" className="rise min-w-0 gap-0 pt-0" style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
                     <Link href={`/f/${file.id}`} className="block outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`Open ${file.name}`}>
-                      <div className="grid aspect-video place-items-center overflow-hidden bg-muted/30">{file.cover ? <img src={file.cover} alt="" loading="lazy" className="h-full w-full object-contain p-3" /> : <Empty className="gap-1 p-2"><EmptyMedia className="mb-0 text-muted-foreground"><IconLayout2 className="size-4" aria-hidden /></EmptyMedia><EmptyDescription>Empty canvas</EmptyDescription></Empty>}</div>
+                      <div className="grid aspect-video place-items-center overflow-hidden bg-muted/30">{file.cover ? <img src={file.cover} alt="" loading="lazy" className="h-full w-full object-contain" /> : <Empty className="gap-1 p-2"><EmptyMedia className="mb-0 text-muted-foreground"><IconLayout2 className="size-4" aria-hidden /></EmptyMedia><EmptyDescription>Empty canvas</EmptyDescription></Empty>}</div>
                     </Link>
                     <CardFooter className="items-start gap-1 pt-3">
                       <div className="min-w-0 flex-1">

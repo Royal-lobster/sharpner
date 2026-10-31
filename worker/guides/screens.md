@@ -16,6 +16,18 @@ Product UI should be functional and honest. These rules apply to any product: CR
 - Name frames clearly: `Checkout · Payment`, `Checkout · Payment · Error`.
 - Use `set_theme` for a file-wide theme, inherited by frames. Set a frame's `theme` in `create_nodes` or `update_nodes` for a screen override; null restores inheritance. For comparisons, place ordinary frames next to each other (`Trade · Light`, `Trade · Dark`, `Trade · UwU`) with explicit `theme` fields. Reuse the same components and token names; leave new HTML roots unthemed. A shared screen component is optional. Keep theme-specific artwork and scoped decoration CSS with the feature. Substantial structural alternatives can remain separate frames.
 
+## File covers
+
+When establishing a product file, finish with a cover that makes it recognizable in the workspace.
+
+- Check `get_file`'s `cover` first. A non-null `nodeId` is an explicit choice: maintain that frame in place and respect a member's chosen cover rather than replacing it during unrelated work.
+- Create a described **Cover** page and an ordinary HTML frame with fixed **1600 × 900** dimensions. It remains editable on the canvas and uses the file's existing tokens, fonts and components.
+- Compose a title slide: the product name, a concise descriptor, and one deliberate visual drawn from its identity or representative UI. Give the title enough contrast and scale to read on a small workspace card. Avoid dense UI screenshots, tiny labels and interchangeable decorative backgrounds.
+- Inspect the frame with `screenshot_nodes`, including whether the composition still reads at thumbnail size. Fix clipping and overflow before calling `set_cover({ fileId, nodeId })` to pin it. The preview can take a moment to render; the pin survives while it is pending.
+- Update the established cover when the product's identity or purpose changes. Source and design-system edits regenerate its preview automatically. `set_cover({ fileId, nodeId: null })` restores automatic selection; deleting the selected node or its containing page or section also restores it.
+
+A cover is a use of a frame or image, not a separate node kind. New work in other pages does not change an explicit cover choice.
+
 ## Structure
 
 1. **One purpose per screen.** It answers one dominant question and has one primary action.
