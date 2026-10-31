@@ -5,15 +5,16 @@ Product UI should be functional and honest. These rules apply to any product: CR
 ## Ground every screen in the design system
 
 - Call `get_design_system` first. Build from component instances (`<x-…>`) and token utilities (`bg-background`, `text-muted-foreground`, `border-border`, `rounded-md`, `font-display`).
-- Only write bespoke markup for layout and one-off content. If you write the same markup twice, make it a component.
+- Write bespoke markup for layout and one-off content. Extract repeated feature markup into components on the owning feature page; repetition does not make it a Design System primitive.
 - No hardcoded colors or arbitrary values. If a value is missing, add a token.
 
 ## Frames and layout on the canvas
 
 - One frame per screen or state. Common widths: **1440** desktop, **1280** compact desktop, **768** tablet, **390** mobile. Give mobile screens a fixed height (844). Leave desktop pages' height empty so they fit their content.
-- Group screens into **sections per flow** ("Onboarding", "Checkout"), laid out left to right in the order a user moves through them. Give each page and flow section a short description (what it covers, when to look at it), so later agents can navigate with `list_pages`. Put states and variants of one screen (empty, loading, error) next to it.
+- Use **one page per sizable feature**, keeping its reused components in a separate Components section on that page. Keep the Design System page for foundations and generic primitives. Group screens into **sections per flow** ("Onboarding", "Checkout"), laid out left to right in the order a user moves through them. Give each page and flow section a short description (what it covers, when to look at it), so later agents can navigate with `list_pages`. Put states and variants of one screen (empty, loading, error) next to it.
 - **Omit x/y.** New sections use automatic layout: children wrap after four screens (or the row-width limit). A section that contains screens is a flow and always takes its own row, so flows never read as continuations of each other. Other sibling sections (component catalogs, token sheets, groups of them) tile into about √n columns, filled top to bottom. Rows and groups reflow when actual content heights arrive, so agents do not need to estimate positions. Creation appends; use `update_nodes`' `order` to change sibling order. Dragging within an automatic group reorders it. Loose nodes and older sections retain free positioning; use `layout: "free"` on a section to opt out, preserving its current arrangement.
 - Name frames clearly: `Checkout · Payment`, `Checkout · Payment · Error`.
+- For theme comparisons, place ordinary frames next to each other (`Trade · Light`, `Trade · Dark`, `Trade · UwU`) and set `data-theme` on each frame's HTML root. Reuse the same components and token names; a shared screen component is optional. Keep theme-specific artwork and scoped decoration CSS with the feature. Substantial structural alternatives can remain separate frames.
 
 ## Structure
 
@@ -51,7 +52,7 @@ After each screen: `screenshot_nodes`, then check:
 - Nothing is clipped, overflowing, or collapsed.
 - There is one clear focal point and one primary action.
 - Spacing and alignment are consistent, and contrast is sufficient.
-- Only tokens and components were used.
+- Styling uses tokens and existing components; new feature components stay with their screens.
 Then fix issues by editing the existing frame (`edit_node_source`). Don't recreate it.
 
 ## Landing pages and marketing sites

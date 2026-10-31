@@ -73,6 +73,8 @@ const MIGRATIONS = [
   // Page and section descriptions, for agent navigation. A separate table keyed by page or node id keeps the
   // migration repeatable and leaves the pages/nodes columns that older deployments write unchanged.
   `CREATE TABLE IF NOT EXISTS descriptions (id TEXT PRIMARY KEY, text TEXT NOT NULL);`,
+  // Token specimens now include named themes; refresh their cached previews and content heights.
+  `UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind = 'tokens';`,
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */

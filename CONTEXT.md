@@ -75,11 +75,11 @@ A node that defines tokens for its file.
 _Avoid_: Theme file, variables node, stylesheet
 
 **Theme**:
-An alternative set of values for the same tokens, such as dark.
+A named presentation of the same design, with alternate token values and optional visual decoration, such as Light, Dark, or UwU.
 _Avoid_: Mode, skin, variant
 
 **Component**:
-A reusable piece of UI, defined once as a node and used inside frames.
+A reusable piece of UI, defined once as a node and used inside frames. Generic primitives belong on the Design System page; feature-specific components belong with their feature's screens.
 _Avoid_: Symbol, widget, partial, template
 
 **Instance**:
@@ -95,7 +95,7 @@ The place in a component where an instance's own content goes.
 _Avoid_: Children area, outlet, placeholder
 
 **Variant**:
-A component representing one version of a family, named `Family/Variant` (e.g. `Button/Primary`).
+A component representing one appearance or state of a family, such as a primary or ghost button. A theme can apply to every variant.
 _Avoid_: State component, flavor
 
 **Library**:
@@ -103,7 +103,7 @@ A file whose design system other files in the same workspace use. A file uses at
 _Avoid_: Shared design system, package, kit
 
 **Design system page**:
-A page, by convention named "Design System", that holds a file's token sheets and components. Optional; one-off files don't need one.
+A page, by convention named "Design System", that holds foundations and generic primitives. Feature-specific components live on their feature pages; one-off files need no Design System page.
 _Avoid_: Components page, styles page
 
 ## Relationships

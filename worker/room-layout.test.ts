@@ -72,7 +72,27 @@ describe("persisted automatic layout", () => {
     expect(room.node("legacy-section")!.layout).toBe("free");
     expect(rects().get("legacy-screen")).toMatchObject({ x: 1000, y: 1200 });
     expect(room.node("component")!.rev).toBe(2);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "6" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "7" });
+  });
+
+  it("refreshes cached token previews once for named themes without rerendering screens or components", () => {
+    const { db, wake, put } = fixture();
+    const source = '@theme { --color-primary: #112233; } [data-theme="uwu"] { --color-primary: #eeaaff; }';
+    put("tokens", { kind: "tokens", source });
+    put("button", { kind: "component", name: "Button", source: "<button>Continue</button>" });
+    put("screen", { source: "<x-button></x-button>" });
+    db.exec("UPDATE nodes SET thumb_rev = rev, thumb_tries = 3, measured_h = 400; UPDATE meta SET v = '6' WHERE k = 'schema';");
+
+    const upgraded = wake();
+    expect(upgraded.node("tokens")).toMatchObject({ rev: 2, measuredHeight: null, source });
+    expect(db.prepare("SELECT thumb_rev, thumb_tries FROM nodes WHERE id = 'tokens'").get())
+      .toEqual({ thumb_rev: 1, thumb_tries: 0 });
+    for (const id of ["button", "screen"]) {
+      expect(upgraded.node(id)).toMatchObject({ rev: 1, measuredHeight: 400 });
+      expect(db.prepare("SELECT thumb_rev, thumb_tries FROM nodes WHERE id = ?").get(id))
+        .toEqual({ thumb_rev: 1, thumb_tries: 3 });
+    }
+    expect(wake().node("tokens")!.rev).toBe(2);
   });
 
   it("switches automatic groups to free without shifting their descendants or the remaining stack", () => {
