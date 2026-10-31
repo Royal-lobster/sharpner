@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { auth, authenticate, authErrorStatus, clerkClient, type AppEnv } from "./auth";
+import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFor } from "./data";
 import { mcp } from "./mcp";
 import { oauth } from "./oauth";
@@ -176,6 +177,20 @@ api.patch("/files/:id/comments/:threadId", async (c) => {
   return c.json(await room(c.env, file.id).resolveComment(file.id, c.req.param("threadId"), resolved, { id: user.id, name: user.name, avatar: user.avatar_url }));
 });
 
+/** Renew an existing connection with a freshly verified session and current file access. */
+api.post("/files/:id/session", async (c) => {
+  const { user, sessionExpiresAt, sessionId } = c.get("identity");
+  if (!sessionId || typeof sessionExpiresAt !== "number" || !Number.isFinite(sessionExpiresAt) || sessionExpiresAt <= Date.now()) {
+    return c.json({ error: "A current Clerk session is required" }, 401);
+  }
+  const { cid } = await c.req.json<{ cid?: unknown }>();
+  if (typeof cid !== "string" || !cid || cid.length > 128) return c.json({ error: "Invalid connection" }, 400);
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const lease = await room(c.env, file.id).renewSession(file.id, cid, user.id, sessionId, sessionExpiresAt);
+  return lease ? c.json(lease) : c.json({ error: "Connection is no longer current" }, 409);
+});
+
 /** Upgrades to the file's realtime WebSocket. */
 api.get("/files/:id/ws", async (c) => {
   const user = c.get("user");
@@ -196,6 +211,9 @@ api.get("/files/:id/ws", async (c) => {
   headers.set("x-actor", JSON.stringify({ id: user.id, name: user.name, avatar: user.avatar_url }));
   // Never trust a client-supplied lease: only the verified JWT sets its lifetime.
   headers.set("x-session-expiry", String(sessionExpiresAt));
+  // Bind renewal to this exact verified Clerk session, never a caller-supplied header.
+  headers.delete("x-session-id");
+  if (c.get("identity").sessionId) headers.set("x-session-id", c.get("identity").sessionId!);
   return room(c.env, file.id).fetch(new Request(c.req.url, { headers }));
 });
 
@@ -248,17 +266,8 @@ api.delete("/keys/:id", async (c) => {
 app.route("/api", api);
 
 // Uploaded images and thumbnails. Keys contain random ids, so URLs work as capabilities and cache forever.
-app.get("/a/*", async (c) => {
-  const obj = await c.env.FILES.get(c.req.path.slice(3));
-  if (!obj) return c.notFound();
-  return c.body(obj.body, 200, {
-    "content-type": obj.httpMetadata?.contentType ?? "application/octet-stream",
-    "cache-control": "public, max-age=31536000, immutable",
-    // Uploaded SVGs must never run script on this origin.
-    "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox",
-    "x-content-type-options": "nosniff",
-    etag: obj.httpEtag,
-  });
-});
+const ASSET_CACHE = "immutable-assets-v4";
+app.get("/a/:fileId/bundle", async (c) => servePreviewBatch(c.req.raw, c.req.param("fileId"), c.env.FILES, await caches.open(ASSET_CACHE), c.executionCtx));
+app.get("/a/*", async (c) => serveAsset(c.req.raw, c.env.FILES, await caches.open(ASSET_CACHE), c.executionCtx));
 
 export default app satisfies ExportedHandler<Env>;

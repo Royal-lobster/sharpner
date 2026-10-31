@@ -37,7 +37,7 @@ describe("viewport thumbnail cache", () => {
     const f = fixture();
     const requests = Array.from({ length: 800 }, (_, i) => request(`/preview-${i}.webp`));
     f.cache.setViewport(requests);
-    expect(f.started).toHaveLength(8);
+    expect(f.started).toHaveLength(16);
     f.drain();
     const first = f.started.length;
     expect(first).toBeGreaterThan(0);
@@ -49,7 +49,7 @@ describe("viewport thumbnail cache", () => {
     }
     expect(f.started).toHaveLength(first);
     expect(f.instances).toHaveLength(first);
-    expect(f.maxActive()).toBeLessThanOrEqual(8);
+    expect(f.maxActive()).toBeLessThanOrEqual(16);
     expect(f.cache.stats.decodedPixels).toBeLessThanOrEqual(16 * 1024 * 1024);
   });
 

@@ -62,6 +62,8 @@ export class Room {
   private presenceTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private reconnectCheck: AbortController | null = null;
+  private renewal: AbortController | null = null;
+  private renewalTimer: ReturnType<typeof setTimeout> | null = null;
   private timers = new Set<ReturnType<typeof setTimeout>>();
   private designCache: { revision: number; design: DesignSystem } | null = null;
   private designRevision = 0;
@@ -117,13 +119,53 @@ export class Room {
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
+      this.cancelRenewal();
       this.inflight.clear();
       this.wanted.clear();
       this.peers.clear();
-      this.status = e.code === 4404 ? "gone" : e.code === 4403 ? "denied" : "offline";
+      this.status = e.code === 4404 ? "gone" : e.code === 4403 ? "denied" : e.code === 4001 ? "connecting" : "offline";
       this.emit();
       if (!this.closed && this.status !== "gone" && this.status !== "denied") this.retryConnection(ws);
     };
+  }
+
+  private cancelRenewal() {
+    this.renewal?.abort();
+    this.renewal = null;
+    if (this.renewalTimer) {
+      clearTimeout(this.renewalTimer);
+      this.timers.delete(this.renewalTimer);
+      this.renewalTimer = null;
+    }
+  }
+
+  private scheduleRenewal(cid: string, expiresAt: number, retry = false) {
+    this.cancelRenewal();
+    const ws = this.ws;
+    if (this.shareToken || !ws || !Number.isFinite(expiresAt)) return;
+    this.renewalTimer = this.later(() => {
+      this.renewalTimer = null;
+      if (this.ws !== ws || ws.readyState !== WebSocket.OPEN) return;
+      const controller = this.renewal = new AbortController();
+      void api<{ expiresAt: number }>(`/files/${this.fileId}/session`, {
+        method: "POST", json: { cid }, freshToken: true, signal: controller.signal,
+      }).then((lease) => {
+        if (!this.closed && this.ws === ws && !controller.signal.aborted) this.scheduleRenewal(cid, lease.expiresAt);
+      }).catch((error: unknown) => {
+        if (this.closed || this.ws !== ws || controller.signal.aborted) return;
+        if (error instanceof HttpError && [401, 403, 404].includes(error.status)) {
+          this.status = "denied";
+          this.emit();
+          ws.close(4403, "Session access changed");
+        } else if (error instanceof HttpError && error.status === 409) {
+          ws.close(4001, "Session renewal required");
+        } else {
+          this.scheduleRenewal(cid, expiresAt, true);
+        }
+      }).finally(() => {
+        if (this.renewal === controller) this.renewal = null;
+      });
+    }, retry ? 3000 : Math.max(1000, expiresAt - Date.now() - 15_000));
   }
 
   /** A rejected upgrade hides its HTTP status; check access before opening another socket. */
@@ -150,6 +192,7 @@ export class Room {
   close() {
     this.closed = true;
     this.reconnectCheck?.abort();
+    this.cancelRenewal();
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
     const ws = this.ws;
@@ -167,6 +210,7 @@ export class Room {
   private receive(msg: ServerMsg) {
     switch (msg.type) {
       case "init": {
+        if (msg.sessionExpiresAt !== undefined) this.scheduleRenewal(msg.cid, msg.sessionExpiresAt);
         const previousNodes = this.nodes;
         this.status = "open";
         this.pages = msg.pages;

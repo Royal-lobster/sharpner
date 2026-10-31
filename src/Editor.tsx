@@ -71,17 +71,22 @@ export function Editor({ fileId }: { fileId: string }) {
     let active: Room | null = null;
     const controller = new AbortController();
     setMeta(null); setRoom(null); setError(null);
+    // Metadata and the socket each authorize access; neither needs to wait for the other.
+    active = new Room(fileId);
     api<FileMeta>(`/files/${fileId}`, { signal: controller.signal }).then(async (data) => {
       if (cancelled) return;
       if (orgId !== data.workspace.clerkOrganizationId) {
+        active?.close();
         await clerk.setActive({ organization: data.workspace.clerkOrganizationId });
         return;
       }
       if (cancelled) return;
       setMeta(data);
-      active = new Room(fileId);
       setRoom(active);
-    }).catch((e: Error) => { if (!cancelled && e.name !== "AbortError") setError(e.message); });
+    }).catch((e: Error) => {
+      active?.close();
+      if (!cancelled && e.name !== "AbortError") setError(e.message);
+    });
     return () => { cancelled = true; controller.abort(); active?.close(); };
   }, [fileId, orgId, clerk]);
 

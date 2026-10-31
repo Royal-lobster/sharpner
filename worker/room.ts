@@ -21,6 +21,7 @@ type Attachment = {
   cid: string; fileId: string; origin: string; actor: Actor; presence: Presence; sessionExpiresAt: number;
   /** Member leases are tied to the Clerk instance that authenticated the upgrade. Legacy leases have no issuer. */
   sessionIssuer?: string;
+  sessionId?: string;
   shareToken?: string;
 };
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
@@ -617,6 +618,7 @@ export class FileRoom extends DurableObject<Env> {
       actor: shareToken ? VIEWER : JSON.parse(req.headers.get("x-actor")!) as Actor,
       presence: { pageId: null, selection: [], cursor: null },
       sessionExpiresAt,
+      ...(!shareToken && req.headers.get("x-session-id") ? { sessionId: req.headers.get("x-session-id")! } : {}),
       // Stamp trusted Worker configuration, never a client-supplied issuer header.
       ...(shareToken ? { shareToken } : { sessionIssuer: clerkIssuer(this.env.CLERK_PUBLISHABLE_KEY) }),
     };
@@ -710,13 +712,29 @@ export class FileRoom extends DurableObject<Env> {
     }
   }
 
+  /** Called only after the Worker verifies a fresh JWT and current file access. */
+  renewSession(fileId: string, cid: string, actorId: string, sessionId: string, expiresAt: number) {
+    if (!sessionId || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
+    const issuer = clerkIssuer(this.env.CLERK_PUBLISHABLE_KEY);
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as Attachment;
+      if (ws.readyState !== WebSocket.OPEN || att.shareToken || att.cid !== cid || att.fileId !== fileId ||
+        att.actor.id !== actorId || att.sessionId !== sessionId || att.sessionIssuer !== issuer) continue;
+      att.sessionExpiresAt = Math.max(att.sessionExpiresAt, expiresAt);
+      ws.serializeAttachment(att);
+      return { expiresAt: att.sessionExpiresAt };
+    }
+    return null;
+  }
+
   private async sendInit(ws: WebSocket, att: Attachment) {
     if (!this.currentSession(ws, att)) return;
     const library = await this.libraryInfo();
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
     this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
-      comments: att.shareToken ? [] : this.comments() });
+      comments: att.shareToken ? [] : this.comments(),
+      ...(!att.shareToken && att.sessionId ? { sessionExpiresAt: att.sessionExpiresAt } : {}) });
   }
 
   private broadcast(msg: ServerMsg, except?: WebSocket) {

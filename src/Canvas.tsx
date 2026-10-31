@@ -7,6 +7,7 @@ import { colorFor, uploadImage } from "./api";
 import { toast } from "./toast";
 import { Avatar } from "./Avatar";
 import { ThumbnailCache, thumbnailSource } from "./thumbnail-cache";
+import { PreviewLoader } from "./preview-loader";
 import { applyTouch, TouchNavigator } from "./touch-gestures";
 import { canvasGestureBoundary } from "./canvas-gesture-boundary";
 import type { Room } from "./room";
@@ -254,13 +255,17 @@ export function Canvas({ room, fileId, pageId, selection, onSelect, readOnly = f
     const changed = () => {
       if (!pending) pending = requestAnimationFrame(() => { pending = 0; redraw(); });
     };
-    const cache = new ThumbnailCache(changed);
-    const highCache = new ThumbnailCache(changed, { maxEntries: 32, maxPixels: 32 * 1024 * 1024, maxConcurrent: 2 });
+    const loader = new PreviewLoader();
+    const sharpLoader = new PreviewLoader({ maxBatches: 1 });
+    const cache = new ThumbnailCache(changed, { loadImage: loader.load, prepareImages: loader.prepare });
+    const highCache = new ThumbnailCache(changed, { maxEntries: 32, maxPixels: 32 * 1024 * 1024, maxConcurrent: 2, loadImage: sharpLoader.load, prepareImages: sharpLoader.prepare });
     thumbnailCache.current = cache;
     highPreviewCache.current = highCache;
     return () => {
       cache.dispose();
       highCache.dispose();
+      loader.dispose();
+      sharpLoader.dispose();
       if (thumbnailCache.current === cache) thumbnailCache.current = null;
       if (highPreviewCache.current === highCache) highPreviewCache.current = null;
       cancelAnimationFrame(pending);
@@ -820,14 +825,17 @@ export function paintRaster(
   // Load small previews first. Sharpen visible content in a separate bounded queue, without
   // promoting DOM nodes, fetching sources, or downloading original uploaded images.
   const highPreviews = upgrades?.cache;
+  const smallPreviewsReady = !thumbnails || thumbnails.stats.loading === 0 && thumbnails.stats.queued === 0;
   highPreviews?.setViewport(items.flatMap(({ node: f, rect: r, screenWidth, visibleArea }) => {
     const lo = thumbnailSource(f), hi = f.thumbHi;
     if (f.kind === "image" || !lo || !hi || hi === lo || visibleArea <= 0 || screenWidth * dpr < 64) return [];
     const ready = highPreviews.get(hi);
-    if (!ready && (!upgrades?.enabled || !upgrades.settled || !thumbnails?.get(lo))) return [];
+    if (!ready && (!upgrades?.enabled || !upgrades.settled || !smallPreviewsReady || !thumbnails?.get(lo))) return [];
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y;
     const distance = (x + screenWidth / 2 - size.w / 2) ** 2 + (y + r.h * cam.z / 2 - size.h / 2) ** 2;
-    return [{ url: hi, pixels: 1280 * 1280 * r.h / Math.max(1, r.w), priority: (selected.has(f.id) ? 1e9 : 0) + visibleArea * 100 - distance }];
+    // Match the renderer: smaller frames are never enlarged to 1280px when captured.
+    const side = Math.min(1280, Math.max(1, Math.round(f.width)));
+    return [{ url: hi, pixels: side * side * r.h / Math.max(1, r.w), priority: (selected.has(f.id) ? 1e9 : 0) + visibleArea * 100 - distance }];
   }));
 
   for (const { node: f, rect: r, screenWidth: sw } of sections) {

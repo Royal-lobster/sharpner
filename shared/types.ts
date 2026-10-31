@@ -92,7 +92,7 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[] }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
   | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }

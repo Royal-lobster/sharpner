@@ -7,6 +7,31 @@
     <meta name="theme-color" content="#0a0a0a" />
     <meta name="color-scheme" content="dark" />
     <title>Sharpner</title>
+    <script>
+      // Start public sign-in configuration while the application bundle downloads.
+      if (!/^\/s\//.test(location.pathname)) {
+        window.__sharpnerAuthConfig = fetch("/auth/config").then((response) => {
+          if (!response.ok) throw new Error("Sign-in could not be loaded.");
+          return response.json();
+        }).then((config) => {
+          if (config.configured && config.publishableKey && (!config.appOrigin || config.appOrigin === location.origin)) {
+            try {
+              const host = atob(config.publishableKey.replace(/^pk_(test|live)_/, "")).replace(/\$$/, "");
+              if (/^[a-z0-9.-]+$/i.test(host) && host.includes(".")) {
+                for (const path of ["clerk-js@6/dist/clerk.browser.js", "ui@1/dist/ui.browser.js"]) {
+                  const link = document.createElement("link");
+                  link.rel = "preload"; link.as = "script"; link.crossOrigin = "anonymous";
+                  link.href = "https://" + host + "/npm/@clerk/" + path;
+                  document.head.append(link);
+                }
+              }
+            } catch {}
+          }
+          return config;
+        });
+        window.__sharpnerAuthConfig.catch(() => {});
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

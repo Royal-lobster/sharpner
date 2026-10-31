@@ -14,6 +14,7 @@ export type Identity = {
   organizationId: string | null;
   /** Verified session JWT expiry in epoch milliseconds; machines have no browser session. */
   sessionExpiresAt: number | null;
+  sessionId: string | null;
 };
 type AuthBindings = Env & {
   CLERK_MCP_CLIENT_ID?: string;
@@ -70,7 +71,8 @@ export async function authenticate(env: Env, request: Request, mode: "session" |
   const account = await syncAccount(env, client, auth.userId);
   const expiry = auth.tokenType === "session_token" ? auth.sessionClaims?.exp : null;
   const sessionExpiresAt = typeof expiry === "number" && expiry > 0 && Number.isFinite(expiry * 1000) ? expiry * 1000 : null;
-  return { ...account, clerkUserId: auth.userId, method, scopes, organizationId: auth.tokenType === "session_token" ? auth.orgId ?? null : null, sessionExpiresAt };
+  const sessionId = auth.tokenType === "session_token" ? auth.sessionId ?? null : null;
+  return { ...account, clerkUserId: auth.userId, method, scopes, organizationId: auth.tokenType === "session_token" ? auth.orgId ?? null : null, sessionExpiresAt, sessionId };
 }
 
 export function requireScope(identity: Identity, scope: Scope) {

@@ -40,6 +40,50 @@ afterEach(() => {
 });
 
 describe("canvas reconnect authorization", () => {
+  it("renews the verified socket lease before expiry without reconnecting or dropping the live canvas", async () => {
+    const token = vi.fn(async () => "fresh_session_fixture");
+    setApiTokenGetter(token);
+    const socket = start([node("screen")]);
+    const expiresAt = Date.now() + 60_000;
+    socket.receive({ type: "init", pages: room.pages, nodes: [...room.nodes.values()], cid: "current-tab", peers: [], library: null, sessionExpiresAt: expiresAt });
+    fetcher.mockImplementation(async () => Response.json({ expiresAt: Date.now() + 60_000 }));
+
+    await vi.advanceTimersByTimeAsync(130_000);
+
+    expect(Socket.instances).toHaveLength(1);
+    expect(room.status).toBe("open");
+    expect(room.nodes.has("screen")).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledWith("/api/files/file_fixture/session", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ cid: "current-tab" }),
+    }));
+    expect(token).toHaveBeenCalledWith({ skipCache: true });
+  });
+
+  it("aborts renewal and cancels future renewal work when the editor closes", async () => {
+    const socket = start([]);
+    socket.receive({ type: "init", pages: room.pages, nodes: [], cid: "current-tab", peers: [], library: null, sessionExpiresAt: Date.now() + 60_000 });
+    fetcher.mockReturnValue(new Promise(() => {}));
+    await vi.advanceTimersByTimeAsync(45_000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const signal = fetcher.mock.calls[0]![1]!.signal;
+    room.close();
+    expect(signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a temporary renewal failure while the existing connection remains live", async () => {
+    const socket = start([]);
+    socket.receive({ type: "init", pages: room.pages, nodes: [], cid: "current-tab", peers: [], library: null, sessionExpiresAt: Date.now() + 60_000 });
+    fetcher.mockResolvedValueOnce(Response.json({ error: "temporary" }, { status: 503 }))
+      .mockImplementation(async () => Response.json({ expiresAt: Date.now() + 60_000 }));
+    await vi.advanceTimersByTimeAsync(50_000);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(Socket.instances).toHaveLength(1);
+    expect(room.status).toBe("open");
+  });
+
   it.each([401, 403, 404])("stops reconnecting when the hidden upgrade failure is HTTP %s", async (status) => {
     fetcher.mockResolvedValue(Response.json({ error: "unavailable" }, { status }));
     Socket.instances[0]!.disconnect();

@@ -72,17 +72,19 @@ function SignedApp() {
   useEffect(() => {
     const controller = new AbortController();
     setError(null);
-    fetch("/auth/config", { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Sign-in could not be loaded.");
-        const config = await response.json() as AuthConfig;
-        if (config.appOrigin && config.appOrigin !== location.origin) {
-          location.replace(`${config.appOrigin}${location.pathname}${location.search}${location.hash}`);
-          return;
-        }
-        setConfig(config);
-      })
-      .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); });
+    const preload = (window as Window & { __sharpnerAuthConfig?: Promise<AuthConfig> }).__sharpnerAuthConfig;
+    const pending = attempt === 0 && preload ? preload : fetch("/auth/config", { signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error("Sign-in could not be loaded.");
+      return response.json() as Promise<AuthConfig>;
+    });
+    pending.then((config) => {
+      if (controller.signal.aborted) return;
+      if (config.appOrigin && config.appOrigin !== location.origin) {
+        location.replace(`${config.appOrigin}${location.pathname}${location.search}${location.hash}`);
+        return;
+      }
+      setConfig(config);
+    }).catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); });
     return () => controller.abort();
   }, [attempt]);
 
@@ -102,7 +104,7 @@ function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
   const loc = useLocation();
   // Initialize before child effects; replacing the getter cancels requests waiting for an old token.
   useLayoutEffect(() => {
-    setApiTokenGetter(isSignedIn ? () => getToken() : null);
+    setApiTokenGetter(isSignedIn ? (options) => getToken(options) : null);
     return () => setApiTokenGetter(null);
   }, [getToken, isSignedIn, userId, orgId]);
 

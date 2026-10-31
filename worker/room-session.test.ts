@@ -12,7 +12,7 @@ const member: Actor = { id: "local-member", name: "Member", avatar: null };
 const token = "A".repeat(43);
 type Lease = {
   cid: string; fileId: string; origin: string; actor: Actor; presence: Presence;
-  sessionExpiresAt: number; sessionIssuer?: string; shareToken?: string;
+  sessionExpiresAt: number; sessionIssuer?: string; sessionId?: string; shareToken?: string;
 };
 
 beforeEach(() => {
@@ -26,7 +26,7 @@ function socket(patch: Partial<Lease> = {}) {
   let attachment: Lease = {
     cid: "member", fileId: "file", origin: "https://sharpner.example", actor: member,
     presence: { pageId: null, selection: [], cursor: null },
-    sessionExpiresAt: Date.now() + 60_000, sessionIssuer: issuer, ...patch,
+    sessionExpiresAt: Date.now() + 60_000, sessionIssuer: issuer, sessionId: "session-member", ...patch,
   };
   const ws = {
     readyState: 1,
@@ -59,6 +59,36 @@ function fixture(...sockets: ReturnType<typeof socket>[]) {
 }
 
 describe("FileRoom member session issuer", () => {
+  it("renews only the authenticated member's matching session and keeps it live past the old expiry", () => {
+    const ws = socket();
+    const { room, broadcast } = fixture(ws);
+    vi.advanceTimersByTime(45_000);
+    const expiresAt = Date.now() + 60_000;
+    expect(room.renewSession("file", "member", member.id, "session-member", expiresAt)).toEqual({ expiresAt });
+    vi.advanceTimersByTime(30_000);
+    broadcast({ type: "sync", nodes: [], by: null });
+    expect(ws.send).toHaveBeenCalledTimes(1);
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(ws.deserializeAttachment().sessionExpiresAt).toBe(expiresAt);
+  });
+
+  it.each([
+    { actorId: "other" }, { fileId: "other" }, { cid: "other" }, { sessionId: "other-session" },
+    { sessionIssuer: previousIssuer }, { shareToken: token }, { sessionId: undefined },
+  ])("does not renew a different, legacy or anonymous socket: %j", (patch) => {
+    const ws = socket(patch);
+    const { room } = fixture(ws);
+    expect(room.renewSession("file", "member", patch.actorId ?? member.id, "session-member", Date.now() + 120_000)).toBeNull();
+    expect(ws.deserializeAttachment().sessionExpiresAt).toBe(Date.now() + 60_000);
+  });
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])("never grants a lease from invalid expiry %s", (expiresAt) => {
+    const ws = socket();
+    const { room } = fixture(ws);
+    expect(room.renewSession("file", "member", member.id, "session-member", expiresAt)).toBeNull();
+    expect(ws.serializeAttachment).not.toHaveBeenCalled();
+  });
+
   it("does not allow presence payloads to impersonate another member in the avatar stack", async () => {
     const ws = socket();
     const { room } = fixture(ws);

@@ -54,6 +54,23 @@ function fixture(options: ConstructorParameters<typeof ThumbnailCache>[1] = {}) 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("raster previews while zoomed out", () => {
+  it("admits a stable sharper working set using the renderer's actual maximum image size", () => {
+    const f = fixture();
+    const nodes = Array.from({ length: 32 }, (_, i) => ({
+      ...component, id: String(i), width: 400, height: 800,
+      x: (i % 8) * 420, y: Math.floor(i / 8) * 850,
+      thumbLo: `/small-${i}.webp`, thumbHi: `/sharp-${i}.webp`,
+    }));
+    const upgrades = { enabled: true, settled: true };
+    f.paint(0.2, nodes, upgrades);
+    f.finish(); f.finish();
+    f.paint(0.2, nodes, upgrades);
+    // These previews are 400x800, not upscaled 1280px captures. All 32 fit the existing budget.
+    expect(f.highCache.stats.admitted).toBe(32);
+    expect(f.highCache.stats.loading).toBe(2);
+    f.cache.dispose(); f.highCache.dispose();
+  });
+
   it("sharpens a visible component before the DOM threshold without waiting for more zoom", () => {
     const f = fixture();
     const upgrades = { enabled: true, settled: true };

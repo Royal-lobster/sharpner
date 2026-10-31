@@ -57,7 +57,7 @@ describe("Clerk request authentication", () => {
     });
     expect(mocks.syncAccount).toHaveBeenCalledWith(env, client, "user_clerk_alice");
     expect(identity).toEqual({
-      ...account, clerkUserId: "user_clerk_alice", method: "session", scopes: ["sharpner:read", "sharpner:write"], organizationId: "org_design", sessionExpiresAt: sessionExpiry * 1000,
+      ...account, clerkUserId: "user_clerk_alice", method: "session", scopes: ["sharpner:read", "sharpner:write"], organizationId: "org_design", sessionExpiresAt: sessionExpiry * 1000, sessionId: null,
     });
   });
 
@@ -66,6 +66,11 @@ describe("Clerk request authentication", () => {
     expect(identity).toMatchObject({ user: { id: "local-author" }, clerkUserId: "user_clerk_alice" });
     expect(identity?.workspaces).toEqual(account.workspaces);
     expect(identity?.user.id).not.toBe(identity?.clerkUserId);
+  });
+
+  it("carries the verified Clerk session ID for connection renewal", async () => {
+    verified({ isAuthenticated: true, tokenType: "session_token", userId: "user_clerk_alice", sessionId: "session_verified", sessionClaims: { exp: sessionExpiry } });
+    expect(await authenticate(env, request(), "session")).toMatchObject({ sessionId: "session_verified" });
   });
 
   it("returns no active organization for a session in personal account context", async () => {

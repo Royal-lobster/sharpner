@@ -1,6 +1,6 @@
 export type ThumbnailRequest = { url: string; priority: number; pixels?: number };
 type Status = "queued" | "loading" | "ready" | "error";
-type Entry = { url: string; status: Status; image: HTMLImageElement | null; pixels: number; used: number; retryAt: number };
+type Entry = { url: string; status: Status; image: HTMLImageElement | null; pixels: number; used: number; retryAt: number; cancel?: () => void };
 type Knowledge = { pixels: number; retryAt: number };
 type Options = {
   maxEntries?: number;
@@ -8,6 +8,8 @@ type Options = {
   maxConcurrent?: number;
   createImage?: () => HTMLImageElement;
   now?: () => number;
+  loadImage?: (image: HTMLImageElement, url: string) => () => void;
+  prepareImages?: (urls: string[]) => void;
 };
 const DEFAULT_PIXELS = 256 * 256;
 const RETRY_MS = 30_000;
@@ -30,6 +32,8 @@ export class ThumbnailCache {
   private readonly maxConcurrent: number;
   private readonly makeImage: () => HTMLImageElement;
   private readonly now: () => number;
+  private readonly loadImage: NonNullable<Options["loadImage"]>;
+  private readonly prepareImages: Options["prepareImages"];
   private requests: ThumbnailRequest[] = [];
   private desired = new Set<string>();
   private active = 0;
@@ -40,9 +44,11 @@ export class ThumbnailCache {
   constructor(private changed: () => void, options: Options = {}) {
     this.maxEntries = Math.max(1, options.maxEntries ?? 600);
     this.maxPixels = Math.max(1, options.maxPixels ?? 16 * 1024 * 1024);
-    this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 8);
+    this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 16);
     this.makeImage = options.createImage ?? (() => new Image());
     this.now = options.now ?? Date.now;
+    this.loadImage = options.loadImage ?? ((image, url) => { image.src = url; return () => image.removeAttribute("src"); });
+    this.prepareImages = options.prepareImages;
   }
 
   setViewport(requests: ThumbnailRequest[]) {
@@ -54,6 +60,7 @@ export class ThumbnailCache {
     }
     this.requests = [...unique.values()].sort((a, b) => b.priority - a.priority || a.url.localeCompare(b.url)).slice(0, this.maxEntries * 4);
     this.reconcile();
+    this.prepareImages?.([...this.desired]);
     this.pump();
   }
 
@@ -138,7 +145,7 @@ export class ThumbnailCache {
           image.fetchPriority = "low";
           image.onload = () => this.settle(entry, true);
           image.onerror = () => this.settle(entry, false);
-          image.src = entry.url;
+          entry.cancel = this.loadImage(image, entry.url);
         } catch { this.settle(entry, false); }
       }
     } finally { this.pumping = false; }
@@ -167,6 +174,8 @@ export class ThumbnailCache {
     if (entry.status === "loading") this.active--;
     if (entry.image) {
       entry.image.onload = entry.image.onerror = null;
+      entry.cancel?.();
+      entry.cancel = undefined;
       entry.image.removeAttribute("src");
       entry.image = null;
     }

@@ -4,13 +4,13 @@ export class HttpError extends Error {
   }
 }
 
-type TokenGetter = (() => Promise<string | null>) | null;
+type TokenGetter = ((options?: { skipCache?: boolean }) => Promise<string | null>) | null;
 let tokenGetter: TokenGetter = null;
 export const setApiTokenGetter = (getter: TokenGetter) => { tokenGetter = getter; };
 
-export async function api<T = unknown>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
+export async function api<T = unknown>(path: string, init?: RequestInit & { json?: unknown; freshToken?: boolean }): Promise<T> {
   const auth = tokenGetter;
-  const token = await auth?.();
+  const token = await auth?.(init?.freshToken ? { skipCache: true } : undefined);
   if (auth !== tokenGetter) throw new DOMException("The signed-in account changed.", "AbortError");
   const headers = new Headers(init?.headers);
   if (init?.json !== undefined) headers.set("content-type", "application/json");
