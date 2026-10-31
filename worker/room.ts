@@ -31,7 +31,7 @@ type Attachment = {
   shareToken?: string;
 };
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
-type NodeRow = Omit<CanvasNode, "thumbnails"> & { thumbnails: string };
+type NodeRow = Omit<CanvasNode, "thumbnails" | "interactive"> & { thumbnails: string; interactive: number };
 type BrowserTab = Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>;
 
 const MAX_SOURCE = 1_000_000;
@@ -40,7 +40,7 @@ const THUMB_DELAY = THUMBNAIL_POLICY.debounceMs;
 const THUMB_BATCH = THUMBNAIL_POLICY.batch;
 const THUMB_TABS = THUMBNAIL_POLICY.tabs;
 const THUMB_MAX_TRIES = THUMBNAIL_POLICY.maxTries;
-const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, theme, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
+const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, theme, interactive, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
   src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev, thumb_theme AS thumbTheme,
   (SELECT json_group_object(t.theme, json_object('rev', t.rev, 'lo', t.thumb_lo, 'hi', t.thumb_hi, 'measuredHeight', t.measured_h))
    FROM node_thumbnails t WHERE t.node_id = nodes.id AND t.thumb_lo IS NOT NULL) AS thumbnails`;
@@ -106,6 +106,12 @@ const MIGRATIONS = [
    INSERT OR IGNORE INTO used_themes SELECT coalesce((SELECT v FROM meta WHERE k = 'fileTheme'), ''), 0 WHERE EXISTS (SELECT 1 FROM nodes WHERE kind = 'frame');
    INSERT OR IGNORE INTO used_themes SELECT theme, 0 FROM nodes WHERE kind = 'frame' AND theme IS NOT NULL;`);
   },
+  // Interaction is a capability, independent of the content and its cached previews.
+  (sql: SqlStorage) => {
+    if (!sql.exec<{ name: string }>(`PRAGMA table_info(nodes)`).toArray().some((column) => column.name === "interactive")) {
+      sql.exec(`ALTER TABLE nodes ADD COLUMN interactive INTEGER NOT NULL DEFAULT 0 CHECK (interactive IN (0, 1))`);
+    }
+  },
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -167,9 +173,9 @@ export class FileRoom extends DurableObject<Env> {
     return row ? this.nodeMeta(row) : null;
   }
 
-  private nodeMeta<T extends NodeRow>(row: T): Omit<T, "thumbnails"> & CanvasNode {
+  private nodeMeta<T extends NodeRow>(row: T): Omit<T, "thumbnails" | "interactive"> & CanvasNode {
     const thumbnails = JSON.parse(row.thumbnails ?? "{}") as ThemeThumbnails;
-    return selectThumbnail(meta({ ...row, thumbnails: isRendered(row.kind) ? thumbnails : undefined, thumbTheme: isRendered(row.kind) ? row.thumbTheme : undefined }), this.theme());
+    return selectThumbnail(meta({ ...row, interactive: !!row.interactive, thumbnails: isRendered(row.kind) ? thumbnails : undefined, thumbTheme: isRendered(row.kind) ? row.thumbTheme : undefined }), this.theme());
   }
 
   /** Pages with their nodes' metadata (no sources). */
@@ -429,6 +435,9 @@ export class FileRoom extends DurableObject<Env> {
     if (input.description && kind !== "section") throw new Error("Only sections and pages have descriptions");
     const theme = input.theme !== undefined ? validateTheme(input.theme) : cur?.theme ?? null;
     if (theme !== null && kind !== "frame" && kind !== "component") throw new Error("Only screens and components have a theme");
+    if (input.interactive !== undefined && typeof input.interactive !== "boolean") throw new Error("Interactive must be a boolean");
+    const interactive = input.interactive ?? cur?.interactive ?? false;
+    if (interactive && kind !== "frame" && kind !== "component") throw new Error("Only screens and components can be interactive");
     // When a node leaves a managed group, its stored placeholder coordinates must become its actual
     // visible position. The same applies when changing a section's layout mode.
     if (cur) {
@@ -496,10 +505,10 @@ export class FileRoom extends DurableObject<Env> {
     const thumbHi = kind === "image" ? next.src : cur?.thumbHi ?? null;
     const thumb = this.thumbState(id);
     this.sql.exec(
-      `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme, interactive)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
-      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? cur?.thumbRev ?? 0 : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
+      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? cur?.thumbRev ?? 0 : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme, Number(interactive),
     );
     if (cur?.thumbTheme !== undefined) this.sql.exec(`UPDATE nodes SET thumb_theme = ? WHERE id = ?`, cur.thumbTheme, id);
     if (kind === "frame" && (!cur || themeChanged)) this.sql.exec(`INSERT OR REPLACE INTO used_themes VALUES (?, ?)`, theme ?? this.theme() ?? "", Date.now());

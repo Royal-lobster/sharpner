@@ -12,15 +12,17 @@ import { PreviewLoader } from "./preview-loader";
 import { applyTouch, TouchNavigator } from "./touch-gestures";
 import { canvasGestureBoundary } from "./canvas-gesture-boundary";
 import type { Room } from "./room";
-import { HI_RES_MIN_PIXELS, planCanvasRendering, type Camera as Cam, type ProjectedNode } from "./canvas-render-plan";
+import { canInteract, HI_RES_MIN_PIXELS, planCanvasRendering, type Camera as Cam, type ProjectedNode } from "./canvas-render-plan";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
+import { Separator } from "@/components/ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-react";
+import { IconLayout, IconMaximize, IconMinus, IconPlus, IconPlayerPlay, IconPlayerStop, IconRotateClockwise } from "@tabler/icons-react";
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { CanvasLayout } from "./canvas-layout";
 import { LiveFrame } from "./live-frame";
+import { InteractionFrame } from "./InteractionFrame";
 import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
 
 type Tier = "lo" | "hi";
@@ -50,6 +52,8 @@ type Props = {
   onSelect: (ids: string[]) => void;
   /** Link viewers can look around but never select, move, delete, or add anything. */
   readOnly?: boolean;
+  interactionId?: string | null;
+  onInteract?: (id: string | null) => void;
   commentMode?: boolean;
   activeCommentId?: string | null;
   commentFocus?: { id: string; request: number } | null;
@@ -58,9 +62,24 @@ type Props = {
   draftComment?: CommentAnchor | null;
 };
 
-export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, readOnly = false, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
+export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, readOnly = false, interactionId, onInteract, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
   useSyncExternalStore(room.subscribe, room.getVersion);
   const rootRef = useRef<HTMLDivElement>(null);
+  const [playbackReset, setPlaybackReset] = useState(0);
+  const candidate = interactionId ? room.nodes.get(interactionId) : undefined;
+  const playingNode = !commentMode && room.status === "open" && candidate?.pageId === pageId && canInteract(candidate) ? candidate : undefined;
+  const playingId = playingNode?.id;
+  const stopInteraction = useCallback((reason?: "timeout") => {
+    onInteract?.(null);
+    rootRef.current?.focus({ preventScroll: true });
+    if (reason === "timeout") toast("This interaction didn’t finish loading. Try Interact again.", { tone: "error" });
+  }, [onInteract]);
+  const startInteraction = useCallback((id: string) => {
+    if (!canInteract(room.nodes.get(id)) || room.status !== "open") return;
+    if (!readOnly) onSelect([id]);
+    onInteract?.(id);
+  }, [room, readOnly, onSelect, onInteract]);
+  const playback = useMemo(() => ({ reset: playbackReset, stop: stopInteraction }), [playbackReset, stopInteraction]);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const saved = useMemo(() => {
     try {
@@ -180,6 +199,15 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     animate ? animateCam(target) : setCam(target);
   }, [size, setCam, animateCam]);
 
+  const focusedPlayback = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!playingId) { focusedPlayback.current = undefined; return; }
+    const viewport = `${playingId}:${size.w}:${size.h}`;
+    if (focusedPlayback.current === viewport || !size.w || !size.h) return;
+    const rect = rects.get(playingId);
+    if (rect) { focusedPlayback.current = viewport; fitTo([rect], 1, false); }
+  }, [playingId, rects, size.w, size.h, fitTo]);
+
   // First visit to a page: fit its content.
   useEffect(() => {
     if (!needsFit.current || !size.w || room.status !== "open") return;
@@ -239,6 +267,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     pixelRatio: dpr,
     ready: cameraReady,
     settled,
+    interactionId: playingId,
     previous: { liveIds: live.current, imageIds: highImages.current },
   });
   live.current = renderPlan.liveIds;
@@ -333,6 +362,10 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useEffect(() => {
     const typing = (e: KeyboardEvent) => (e.target as HTMLElement).closest?.("input, textarea, [contenteditable=true]");
     const down = (e: KeyboardEvent) => {
+      if (playingId) {
+        if (e.key === "Escape") { e.preventDefault(); stopInteraction(); }
+        return;
+      }
       if (typing(e)) return;
       const mod = e.metaKey || e.ctrlKey;
       const center = () => [size.w / 2, size.h / 2] as const;
@@ -410,7 +443,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       const frame = id && room.nodes.get(id);
       if (frame) fitTo([rectOf(frame)], frame.kind === "section" ? 1 : 4);
     } else if (action.type === "tap") {
-      if (readOnly) return;
+      if (readOnly || playingId) return;
       if (commentMode) return placeComment(action.x, action.y);
       const hit = hitTest(action.x, action.y);
       onSelect(hit ? [hit] : []);
@@ -429,9 +462,10 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     stopTween();
     const { sx, sy } = local(e);
     if (commentMode && !readOnly && e.button === 0 && !spaceDown) return placeComment(sx, sy);
-    const hit = readOnly ? null : hitTest(sx, sy);
+    const navigationOnly = readOnly || !!playingId;
+    const hit = navigationOnly ? null : hitTest(sx, sy);
     rootRef.current!.setPointerCapture(e.pointerId);
-    if (readOnly || e.button === 1 || spaceDown || (!hit && !e.shiftKey)) {
+    if (navigationOnly || e.button === 1 || spaceDown || (!hit && !e.shiftKey)) {
       gesture.current = { kind: "pan", sx, sy, moved: false };
     } else if (!hit) {
       const w = toWorld(sx, sy);
@@ -551,7 +585,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const g = gesture.current;
     gesture.current = null;
     setMarquee(null);
-    if (g?.kind === "pan" && !g.moved && !readOnly) onSelect([]);
+    if (g?.kind === "pan" && !g.moved && !readOnly && !playingId) onSelect([]);
     if (g?.kind === "move" && g.moved) {
       const { sx, sy } = local(e);
       sendMoves(g.roots, true, g.anchors, g.start, toWorld(sx, sy));
@@ -597,7 +631,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
-      if (readOnly || !files.length || (e.target as HTMLElement).closest?.("input, textarea")) return;
+      if (readOnly || playingId || !files.length || (e.target as HTMLElement).closest?.("input, textarea")) return;
       e.preventDefault();
       // Pasted images go to the right of everything on the page (dropped ones land where dropped).
       const all = topLevel();
@@ -610,7 +644,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (readOnly) return;
+    if (readOnly || playingId) return;
     const b = rootRef.current!.getBoundingClientRect();
     placeImages([...e.dataTransfer.files], toWorld(e.clientX - b.left, e.clientY - b.top));
   };
@@ -634,6 +668,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   return <>
     <div
       ref={rootRef}
+      tabIndex={-1}
       className={`canvas${spaceDown || gesture.current?.kind === "pan" ? " panning" : ""}${commentMode ? " commenting" : ""}`}
       data-ready={cameraReady || undefined}
       style={{
@@ -668,9 +703,12 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               height={r.h}
               tier={screenWidth * dpr > HI_RES_MIN_PIXELS ? "hi" : "lo"}
               live={live.current.has(f.id)}
-              html={src && renderedHtml(f, src.source)}
+              html={src && (f.id !== playingId || src.rev === f.rev) ? renderedHtml(f, src.source) : undefined}
               design={design}
               onHeight={reportHeight}
+              playback={f.id === playingId ? playback : undefined}
+              suspendLive={!!playingId}
+              onPlay={onInteract ? startInteraction : undefined}
               theme={effectiveTheme(f, room.fileTheme)}
               selected={selected.has(f.id)}
               peerColor={peerSelections.get(f.id)}
@@ -715,6 +753,14 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
         </div>
       )}
     </div>
+    {playingNode && <div className="selection-bar interaction-controls canvas-glass" role="toolbar" aria-label="Interaction playback"
+      onPointerDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") stopInteraction(); event.stopPropagation(); }}>
+      <span className="selection-name" title={playingNode.name}>{playingNode.name}</span>
+      <span className="interaction-status">Interacting</span>
+      <Separator orientation="vertical" className="selection-divider" />
+      <Button variant="ghost" size="sm" className="selection-action" aria-label="Reset interaction" onClick={() => setPlaybackReset((value) => value + 1)}><IconRotateClockwise aria-hidden />Reset</Button>
+      <Button variant="ghost" size="sm" className="selection-action" aria-label="Stop interaction" onClick={() => stopInteraction()}><IconPlayerStop aria-hidden />Stop</Button>
+    </div>}
     <ButtonGroup className="zoom canvas-glass" role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
       <Button variant="ghost" size="icon" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
         <IconMinus aria-hidden />
@@ -747,6 +793,9 @@ type FrameNodeProps = {
   html: string | undefined;
   design: DesignSystem;
   onHeight: (id: string, height: number) => void;
+  playback?: { reset: number; stop: (reason?: "timeout") => void };
+  suspendLive: boolean;
+  onPlay?: (id: string) => void;
   theme: string | undefined;
   selected: boolean;
   peerColor: string | undefined;
@@ -758,7 +807,7 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, onHeight, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, onHeight, playback, suspendLive, onPlay, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
   const settling = doneAt !== undefined;
   const reportHeight = useCallback((height: number) => onHeight(f.id, height), [onHeight, f.id]);
   const lo = thumbnailSource(f);
@@ -776,8 +825,8 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
     const fallback = setTimeout(() => setHandoff(false), 4000);
     return () => clearTimeout(fallback);
   }, [handoff, top]);
-  const showLive = (live || handoff) && html !== undefined;
-  const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh", outdated(f) && "outdated"].filter(Boolean).join(" ");
+  const showLive = !suspendLive && !f.interactive && (live || handoff) && html !== undefined;
+  const cls = ["frame", f.kind, playback && "interacting", f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh", outdated(f) && "outdated"].filter(Boolean).join(" ");
   return (
     <div
       className={cls}
@@ -789,10 +838,16 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
       <div className="frame-body">
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
-        {!lo && !showLive && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
+        {!lo && !showLive && !playback && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
         {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} onHeight={reportHeight} />}
+        {playback && html !== undefined && <InteractionFrame key={`${f.rev}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`} html={html} design={design} theme={theme} width={f.width} height={height} onStop={playback.stop} />}
+        {playback && html === undefined && <div className="interaction-loading" role="status">Loading interaction…</div>}
         {(agent || settling) && <AgentSheen />}
       </div>
+      {!playback && canInteract(f) && onPlay && <Button className="frame-play" variant="secondary" size="sm" aria-label={`Interact with ${f.name}`}
+        onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+        onKeyDown={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); onPlay(f.id); }}><IconPlayerPlay aria-hidden />Interact</Button>}
       {(agent || settling) && <Trace doneAt={doneAt} />}
       {peerColor && <div className="peer-ring" />}
     </div>
@@ -834,7 +889,7 @@ const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", 
 function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
   const name = catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name;
   // A component theme override shares its default's name; the theme tells them apart.
-  return KIND_PREFIX[f.kind] + name + (f.kind === "component" && f.theme ? ` · ${themeLabel(f.theme)}` : "");
+  return (canInteract(f) ? "▷ " : "") + KIND_PREFIX[f.kind] + name + (f.kind === "component" && f.theme ? ` · ${themeLabel(f.theme)}` : "");
 }
 
 /** Previews behind their node's revision: kept on screen, dimmed, until the renderer catches up. */

@@ -281,7 +281,7 @@ export class Room {
         this.status = "open";
         this.pages = msg.pages;
         this.fileTheme = msg.fileTheme ?? null;
-        this.nodes = new Map(msg.nodes.map((n) => [n.id, selectThumbnail(n, this.fileTheme)]));
+        this.nodes = new Map(msg.nodes.map((n) => [n.id, selectThumbnail({ ...n, interactive: n.interactive ?? false }, this.fileTheme)]));
         this.peers = new Map(msg.peers.map((p) => [p.cid, p]));
         const comments = new Map((msg.comments ?? []).map((t) => [t.id, t]));
         for (const id of this.comments.keys()) if (!comments.has(id)) this.deletedComments.add(id);
@@ -323,7 +323,7 @@ export class Room {
           // The previous source keeps live previews on screen until the new revision arrives; unmounting
           // them would flash the outdated thumbnail underneath. reconcileSources refetches by revision.
           if (previous && (previous.rev !== n.rev || n.thumbRev === n.rev && (previous.thumbHi !== n.thumbHi || previous.thumbTheme !== n.thumbTheme))) this.heights.delete(n.id);
-          this.nodes.set(n.id, selectThumbnail(n, this.fileTheme));
+          this.nodes.set(n.id, selectThumbnail({ ...n, interactive: n.interactive ?? false }, this.fileTheme));
           this.updateDesignNode(n);
           if (msg.by?.agent) this.markAgent(n.id, msg.by.name);
         }
@@ -587,6 +587,7 @@ export class Room {
             layout: meta.layout ?? (meta.kind === "section" ? "auto" : "free"),
             order: meta.order ?? Math.max(0, ...[...this.nodes.values()].map((n) => n.order ?? 0)) + 1,
             theme: meta.theme ?? null,
+            interactive: meta.interactive ?? false,
             measuredHeight: null, src: meta.src ?? null, thumbLo: meta.thumbLo ?? meta.src ?? null, thumbHi: meta.src ?? null, rev: 0,
           });
         }

@@ -46,6 +46,35 @@ beforeEach(() => {
   mocks.screenshot.mockResolvedValue({ content: [{type:"image", data:"AQID", mimeType:"image/jpeg"}] });
 });
 
+describe("agent interaction capability metadata", () => {
+  it("exposes saved capability in file and source reads, including the legacy false default", async () => {
+    mocks.nodes.mockResolvedValue([node("screen", { interactive: true }), node("component", { kind: "component" }), node("tokens", { kind: "tokens" })]);
+    const nodes = (await call("get_file", { fileId: "file" })).value.pages[0].nodes;
+    expect(nodes[0]).toMatchObject({ id: "screen", interactive: true });
+    expect(nodes[1]).toMatchObject({ id: "component", interactive: false });
+    expect(nodes[2]).not.toHaveProperty("interactive");
+    expect((await call("read_nodes", { fileId: "file", nodeIds: ["screen", "component"] })).value).toMatchObject([
+      { id: "screen", interactive: true }, { id: "component", interactive: false },
+    ]);
+  });
+
+  it("forwards frame/component creation and metadata-only updates", async () => {
+    await call("create_nodes", { fileId: "file", nodes: [{ name: "Screen", source: "<button>Go</button>", interactive: true }, { kind: "component", name: "Button", source: "<button>Go</button>", interactive: true }] });
+    expect(mocks.apply.mock.calls.at(-1)![2]).toMatchObject([
+      { t: "node.put", node: { kind: "frame", interactive: true } },
+      { t: "node.put", node: { kind: "component", interactive: true } },
+    ]);
+    await call("update_nodes", { fileId: "file", updates: [{ nodeId: "inherited", interactive: false }] });
+    expect(mocks.apply.mock.calls.at(-1)![2]).toEqual([{ t: "node.put", id: "inherited", node: { interactive: false } }]);
+  });
+
+  it.each([null, "true", 1])("rejects invalid capability values: %j", async (interactive) => {
+    expect((await call("create_nodes", { fileId: "file", nodes: [{ name: "Screen", source: "<p>Screen</p>", interactive }] })).isError).toBe(true);
+    expect((await call("update_nodes", { fileId: "file", updates: [{ nodeId: "inherited", interactive }] })).isError).toBe(true);
+    expect(mocks.apply).not.toHaveBeenCalled();
+  });
+});
+
 describe("agent theme controls", () => {
   it("creates component theme overrides and lists them with their component", async () => {
     mocks.nodes.mockResolvedValue([

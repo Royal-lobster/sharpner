@@ -158,10 +158,11 @@ recreates the initial document. Preserving playback state across theme or source
 changes needs an explicit runtime contract; the conservative theme fast path in
 this PR excludes authored scripts and retains their existing reload semantics.
 
-Selective input, playback controls, resource policy and dedicated preview-origin
-hardening are follow-up product work. This PR keeps pointer input disabled and
-preserves the opaque sandbox. The same document renderer must remain the source
-for live playback, covers and explicitly requested agent screenshots.
+[Selective interaction playback](interaction-playback.md) now supplies the saved
+capability, viewer-local Interact/Stop/Reset controls and one disposable sandboxed
+document. Normal canvas previews keep pointer input disabled. Dedicated preview
+origin and stronger resource isolation remain hardening work. Live playback,
+covers and explicitly requested agent screenshots use the same document renderer.
 
 ### Native HTML in canvas
 

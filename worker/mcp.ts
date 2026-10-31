@@ -278,6 +278,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
           ...(n.kind === "component" ? { tag: componentTag(n.name) } : {}),
           ...(n.kind === "frame" ? { theme: n.theme ?? null, effectiveTheme: effectiveTheme(n, fileTheme) ?? null } : {}),
           ...(n.kind === "component" && n.theme ? { theme: n.theme } : {}),
+          ...(n.kind === "frame" || n.kind === "component" ? { interactive: n.interactive ?? false } : {}),
         })),
       };
     });
@@ -426,6 +427,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         name: z.string().describe("Component names set their tag: Button/Primary -> <x-button-primary>"),
         source: z.string().optional().describe("HTML for frames/components, Tailwind v4 CSS for token sheets"),
         theme: themeChoice.optional().describe("Frames: named theme override; null or omitted inherits the file theme. Components: create a theme override, a second definition of an existing component (same name) used only inside that theme; omit for the default definition."),
+        interactive: z.boolean().optional().describe("Frames/components only: allow the viewer to enter interaction mode. Default false. Playback and input state stay local to the viewer."),
         imageUrl: z.string().optional().describe("For images, e.g. a URL from upload_image"),
         previewUrl: z.string().optional().describe("Small image preview. Omit to generate one if Browser Rendering is available."),
         width: z.number().positive().optional().describe("Viewport width in px. Default 400; token sheets default to 960."),
@@ -444,7 +446,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const width = n.width ?? (kind === "tokens" ? 960 : 400);
       const x = n.x ?? at.x, y = n.y ?? at.y;
       at = { x: Math.max(at.x, x + width + 80), y: at.y };
-      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y, ...(n.theme !== undefined ? { theme: n.theme } : {}) };
+      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y, ...(n.theme !== undefined ? { theme: n.theme } : {}), ...(n.interactive !== undefined ? { interactive: n.interactive } : {}) };
       const node: NodeInput = kind === "image"
         ? { ...base, src: n.imageUrl, thumbLo: n.previewUrl ?? null, height: n.height ?? width }
         : { ...base, source: n.source, height: n.height ?? null };
@@ -487,6 +489,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         order: node.order,
         ...(node.kind === "frame" ? { theme: node.theme ?? null, effectiveTheme: effectiveTheme(node, fileTheme) ?? null } : {}),
         ...(node.kind === "component" && node.theme ? { theme: node.theme } : {}),
+        ...(node.kind === "frame" || node.kind === "component" ? { interactive: node.interactive ?? false } : {}),
         ...nodeGeometry(node, rects),
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
       };
@@ -507,6 +510,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         description: sectionDescription.optional(),
         source: z.string().optional(),
         theme: themeChoice.optional().describe("Frames: named theme override; null restores file inheritance. Components: the theme this definition overrides; null makes it the default. Omit to preserve."),
+        interactive: z.boolean().optional().describe("Frames/components only: allow entering interaction mode. Omit to preserve. Playback and input state are viewer-local; this changes no source or thumbnail."),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
         x: z.number().optional(),

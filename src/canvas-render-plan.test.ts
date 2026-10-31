@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layoutHeight, layoutRects } from "../shared/layout";
 import type { CanvasNode } from "../shared/types";
-import { planCanvasRendering } from "./canvas-render-plan";
+import { planCanvasRendering, canInteract } from "./canvas-render-plan";
 
 const node = (id: string, overrides: Partial<CanvasNode> = {}): CanvasNode => ({
   id, pageId: "page", parentId: null, kind: "frame", name: id, x: 0, y: 0,
@@ -13,12 +13,42 @@ const viewport = {
   ready: true, settled: true,
   previous: { liveIds: new Set<string>(), imageIds: new Set<string>() },
 };
-function plan(nodes: CanvasNode[], overrides: Partial<typeof viewport> = {}) {
+function plan(nodes: CanvasNode[], overrides: Partial<typeof viewport> & { interactionId?: string | null } = {}) {
   return planCanvasRendering(nodes, layoutRects(nodes, layoutHeight), { ...viewport, ...overrides });
 }
 const ids = (nodes: { node: CanvasNode }[]) => nodes.map(({ node }) => node.id);
 
 describe("canvas render plan", () => {
+  it("keeps enabled interaction designs on posters until explicitly played", () => {
+    const result = plan([node("playable", { interactive: true }), node("ordinary")]);
+    expect([...result.liveIds]).toEqual(["ordinary"]);
+    expect(ids(result.domFrames)).toContain("playable");
+  });
+
+  it("admits exactly one requested playable design, including tiny screens during navigation", () => {
+    const frames = [node("tiny", { interactive: true, width: 80 }), node("other", { interactive: true }), node("ordinary")];
+    const result = plan(frames, { interactionId: "tiny", settled: false, previous: { liveIds: new Set(["ordinary"]), imageIds: new Set() } });
+    expect([...result.liveIds]).toEqual(["tiny"]);
+    expect(ids(result.domFrames)).toContain("tiny");
+    expect(plan(frames, { interactionId: "other" }).liveIds).toEqual(new Set(["other"]));
+  });
+
+  it("pins only the active document when panning away, retaining one playback state", () => {
+    const result = plan([node("active", { interactive: true, x: 5000 }), node("inactive", { interactive: true, x: 5000 })], { interactionId: "active" });
+    expect(ids(result.domFrames)).toEqual(["active"]);
+    expect(result.domFrames[0]!.visibleArea).toBe(0);
+    expect([...result.liveIds]).toEqual(["active"]);
+  });
+
+  it("cannot activate disabled, deleted or unsupported designs", () => {
+    expect(plan([node("disabled")], { interactionId: "disabled" }).liveIds.size).toBe(0);
+    expect(plan([node("other")], { interactionId: "deleted" }).liveIds.size).toBe(0);
+    for (const kind of ["tokens", "image", "section"] as const) {
+      expect(canInteract(node("bad", { kind, interactive: true }))).toBe(false);
+      expect(plan([node("bad", { kind, interactive: true })], { interactionId: "bad" }).liveIds.size).toBe(0);
+    }
+  });
+
   it("waits for the opening camera before promoting sources or originals", () => {
     const result = plan([node("frame"), node("image", { kind: "image" })], {
       ready: false,

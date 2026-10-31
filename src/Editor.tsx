@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck, IconHandFinger, IconPlayerPlay } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
@@ -10,6 +10,7 @@ import { themeNames, themeSwatches } from "../shared/themes";
 import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
+import { canInteract } from "./canvas-render-plan";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { Room } from "./room";
 import { Link } from "./router";
@@ -19,7 +20,7 @@ import { Loading, Notice } from "./states";
 import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -147,6 +148,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const [draftComment, setDraftComment] = useState<CommentAnchor | null>(null);
   const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
   const [dialog, setDialog] = useState<"library" | "help" | null>(null);
+  const [interactionId, setInteractionId] = useState<string | null>(null);
   const fileTrigger = useRef<HTMLButtonElement>(null);
   const commentsTrigger = useRef<HTMLButtonElement>(null);
   const pendingFileAction = useRef<(() => void) | null>(null);
@@ -154,6 +156,16 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
   const page = room.pages.find((p) => p.id === pageId) ?? room.pages[0];
+  const playingNode = interactionId ? room.nodes.get(interactionId) : undefined;
+  useEffect(() => {
+    if (interactionId && (!canInteract(playingNode) || playingNode?.pageId !== page?.id || commentMode || room.status !== "open" ||
+      !readOnly && !liveSelection.includes(interactionId))) setInteractionId(null);
+  }, [interactionId, playingNode?.interactive, playingNode?.kind, playingNode?.pageId, page?.id, commentMode, room.status, readOnly, liveSelection.join(",")]);
+  useEffect(() => {
+    const hide = () => { if (document.hidden) setInteractionId(null); };
+    document.addEventListener("visibilitychange", hide);
+    return () => document.removeEventListener("visibilitychange", hide);
+  }, []);
   const closeComments = () => { setCommentsOpen(false); commentsTrigger.current?.focus({ preventScroll: true }); };
   const startComment = () => {
     setActiveCommentId(null); setOpen(null);
@@ -168,6 +180,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   useEffect(() => {
     if (readOnly) return;
     const key = (event: KeyboardEvent) => {
+      if (interactionId) return;
       if ((event.target as HTMLElement).closest?.("input,textarea,[contenteditable=true],[role=dialog],[role=menu]")) return;
       if (event.key === "Escape") { setCommentMode(false); setCommentsOpen(false); }
       else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
@@ -176,7 +189,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [readOnly, draftComment]);
+  }, [readOnly, draftComment, interactionId]);
 
   useEffect(() => {
     if (!page) return;
@@ -215,6 +228,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
   const coverCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "image") ? selected[0]! : null;
   const themeScreen = selected.length === 1 && selected[0]!.kind === "frame" ? selected[0]! : null;
+  const interactionCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "component") ? selected[0]! : null;
   const themes = themeNames(tokens);
   const overriding = [...room.nodes.values()].filter((node) => node.kind === "frame" && !!node.theme);
   const hasThemes = themes.length > 1 || room.fileTheme !== null || overriding.length > 0;
@@ -247,16 +261,30 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
           <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
+            interactionId={interactionId} onInteract={setInteractionId}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
-        {!readOnly && !commentMode && selected.length > 0 && (
+        {!readOnly && !commentMode && !interactionId && selected.length > 0 && (
           <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
             <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
             <span className="selection-agents">visible to agents</span>
-            {(themeScreen && hasThemes || coverCandidate) && <Separator orientation="vertical" className="selection-divider" />}
+            {(themeScreen && hasThemes || coverCandidate || interactionCandidate) && <Separator orientation="vertical" className="selection-divider" />}
+            {interactionCandidate && <>
+              {canInteract(interactionCandidate) && <Button variant="ghost" size="sm" className="selection-action" aria-label={`Interact with ${interactionCandidate.name}`}
+                disabled={room.status !== "open"} onClick={() => setInteractionId(interactionCandidate.id)}><IconPlayerPlay aria-hidden />Interact</Button>}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" className="selection-action" aria-label="Interaction options"><IconHandFinger aria-hidden /></Button></DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuLabel>Interaction</DropdownMenuLabel>
+                  <DropdownMenuCheckboxItem checked={!!interactionCandidate.interactive} disabled={room.status !== "open"}
+                    onCheckedChange={(interactive) => room.send([{ t: "node.put", id: interactionCandidate.id, node: { interactive } }])}>Enable interaction</DropdownMenuCheckboxItem>
+                  <DropdownMenuLabel className="max-w-56 text-xs font-normal text-muted-foreground">Allow viewers to try clicks, typing and scrolling.</DropdownMenuLabel>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>}
             {hasThemes && themeScreen && <ScreenThemeMenu themes={themes} swatches={swatches} value={themeScreen.theme ?? null} fileTheme={room.fileTheme}
               disabled={room.status !== "open"} onChange={(theme) => room.send([{ t: "node.put", id: themeScreen.id, node: { theme } }])} />}
             {coverCandidate && (room.coverNodeId === coverCandidate.id
@@ -405,6 +433,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Zoom</dt><dd>Pinch with two fingers</dd>
               {!readOnly && <><dt>Select</dt><dd>Tap a design to show it to agents</dd></>}
               <dt>Fit</dt><dd>Fit button, or double-tap a design</dd>
+              <dt>Interact</dt><dd>Play an enabled design; Stop returns to the canvas</dd>
             </dl>
             {!readOnly && <p>Designs can’t be moved by touch, so navigating never rearranges a page.</p>}
           </div>
@@ -413,6 +442,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Pan</dt><dd>Drag, scroll, or hold Space</dd>
               <dt>Zoom</dt><dd>Pinch, <Kbd>⌘</Kbd> scroll, <Kbd>⌘+</Kbd> / <Kbd>⌘−</Kbd></dd>
               <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
+              <dt>Interact</dt><dd>Play an enabled design; <Kbd>Esc</Kbd> stops, Reset starts again</dd>
               {!readOnly && <>
                 <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag</dd>
                 <dt>Images</dt><dd>Drop or paste</dd>

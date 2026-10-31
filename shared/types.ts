@@ -35,6 +35,8 @@ export type CanvasNode = {
    * Components: the theme this definition serves; null or missing is the default definition.
    */
   theme?: string | null;
+  /** Frames/components: allow entering interaction mode. Missing means false; playback state stays viewer-local. */
+  interactive?: boolean;
   x: number;
   y: number;
   /** Stable sibling order for automatic layout. Optional only for older client metadata. */
@@ -68,7 +70,7 @@ export const previewCurrent = (node: Pick<CanvasNode, "rev" | "thumbRev" | "thum
   !!node.thumbHi && (node.thumbRev === undefined || node.thumbRev >= node.rev);
 
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
-export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "theme" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
+export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "theme" | "interactive" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
   source?: string;
 };
 

@@ -64,6 +64,13 @@ _Avoid_: Group, area, container, folder
 The nodes a member currently has selected, which their agents can see.
 _Avoid_: Focus, highlight
 
+**Interaction playback**:
+A viewer-local session that sends input to one enabled frame or component.
+Eligibility is saved on the node; typed values, clicked states and animation state
+belong to the viewer. Reset restores the initial document, and Stop returns to
+canvas navigation. Interaction studies stay beside the designs they belong to.
+_Avoid_: A separate lab page, shared runtime state
+
 ### Design system
 
 **Design system**:

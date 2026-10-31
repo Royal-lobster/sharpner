@@ -155,6 +155,47 @@ const sourceIds = (socket: Socket) => socket.sent.flatMap((message) => message.t
 const tick = () => vi.advanceTimersByTimeAsync(0);
 const supply = (socket: Socket, id: string, source = `<p>${id}</p>`, rev = 1) => socket.receive({ type: "source", items: [{ id, source, rev }] });
 
+describe("interaction capability metadata", () => {
+  it("defaults legacy and new optimistic nodes to false and applies local and remote changes", () => {
+    const socket = start([node("screen")]);
+    expect(room.nodes.get("screen")!.interactive).toBe(false);
+    room.send([{ t: "node.put", id: "new", node: { pageId: "page_one" } }]);
+    expect(room.nodes.get("new")!.interactive).toBe(false);
+    room.send([{ t: "node.put", id: "screen", node: { interactive: true } }]);
+    expect(room.nodes.get("screen")!.interactive).toBe(true);
+    room.send([{ t: "node.put", id: "screen", node: { name: "Renamed" } }]);
+    expect(room.nodes.get("screen")!.interactive).toBe(true);
+    socket.receive({ type: "sync", nodes: [{ ...room.nodes.get("screen")!, interactive: false }], by: null });
+    expect(room.nodes.get("screen")!.interactive).toBe(false);
+    socket.receive({ type: "sync", nodes: [node("legacy")], by: null });
+    expect(room.nodes.get("legacy")!.interactive).toBe(false);
+    room.send([{ t: "node.put", id: "enabled", node: { pageId: "page_one", kind: "component", interactive: true } }]);
+    expect(room.nodes.get("enabled")!.interactive).toBe(true);
+  });
+
+  it("keeps sources, live height, cached previews, and the design system when toggled", async () => {
+    const screen = node("screen", { height: null, thumbLo: "lo", thumbHi: "hi", thumbRev: 1 });
+    const button = node("button", { kind: "component", name: "Button" });
+    const socket = start([screen, button]);
+    room.needSources(["screen", "button"]);
+    await tick();
+    supply(socket, "screen", "<x-button></x-button>"); supply(socket, "button", "<button>Continue</button>");
+    room.heights.set("screen", 800);
+    const design = room.design(), requests = sourceIds(socket);
+    room.send(["screen", "button"].map((id) => ({ t: "node.put", id, node: { interactive: true } })));
+    expect(room.nodes.get("screen")).toMatchObject({ ...screen, interactive: true });
+    expect(room.heights.get("screen")).toBe(800);
+    expect(room.sources.get("screen")!.source).toBe("<x-button></x-button>");
+    expect(room.design()).toBe(design);
+    await tick();
+    expect(sourceIds(socket)).toEqual(requests);
+    expect(socket.sent.at(-1)).toEqual({ type: "ops", ops: [
+      { t: "node.put", id: "screen", node: { interactive: true } },
+      { t: "node.put", id: "button", node: { interactive: true } },
+    ] });
+  });
+});
+
 describe("file and screen themes", () => {
   it("restores the file theme on reconnect and distinguishes an omitted sync field from a reset", () => {
     const socket = start([node("screen")]);

@@ -20,6 +20,7 @@ edits and fan out changes.
 | `src/canvas-layout.ts` | One active page's cached geometry, catalog labels, and navigation bounds |
 | `src/canvas-render-plan.ts` | Viewport culling, preview layers, and live-content budgets |
 | `src/live-frame.tsx` | Sandboxed live documents, warm theme updates, and no-flicker document swaps |
+| `src/InteractionFrame.tsx`, `shared/interaction-document.ts` | Disposable viewer-local playback and its input/resource policy |
 | `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
 | `src/room.ts` | Realtime client, optimistic edits, and demand-loaded sources |
 | `src/thumbnail-cache.ts` | Bounded image loading and decoded-pixel budget |
@@ -105,6 +106,14 @@ theme definitions, executable author behavior, source/design edits and cold asse
 retain the existing fresh-document swap. Overview admission remains bounded by
 the policy above. See [live canvas experiments](live-canvas-rendering.md) for the
 measured alternatives and the larger interactive rendering plan.
+
+Frames and components can opt into interaction with saved `interactive` metadata;
+this does not change content revisions or preview identity. Enabled inactive
+designs use posters. Interact admits one disposable input-enabled document per
+viewer and suspends other live HTML. Stop, Reset and Escape control its lifecycle;
+input and transient heights stay local. Shared-link viewers can play enabled
+designs without editing them. See [interaction playback](interaction-playback.md)
+for lifecycle, resource policy and isolation limits.
 
 Visible frames, components, and token sheets can sharpen on the canvas before reaching the DOM threshold. Once the initial small-preview pass is complete and the camera stops, nodes at least 64 device pixels wide can load their sharper preview through a separate queue capped at 32 entries, 32 million decoded pixels, and two concurrent image loads. A separate transport uses one stable high-preview batch at a time while retaining the two-image decode limit. Admission estimates match the renderer's maximum width of 1280px without assuming smaller frames are enlarged. This keeps the working set stable instead of replacing batches as actual image sizes arrive. The small preview stays visible until the sharper one is ready. Data Saver and limited connection hints disable this optional work; browsers without those hints use the bounded queue. These upgrades fetch neither live sources nor original image uploads, and cached sharp previews remain visible during navigation.
 

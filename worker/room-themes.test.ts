@@ -71,6 +71,88 @@ function fixture(browser = false, sockets: { deserializeAttachment(): unknown }[
   return { db, room, wake, apply, create, cached, broadcasts, storage, render, enqueue, env, stopViewing: () => { viewing = false; } };
 }
 
+describe("persisted interaction capability", () => {
+  it("defaults to false, round-trips across hibernation, and preserves capability through unrelated edits", async () => {
+    const { room, wake, create, apply, broadcasts, db } = fixture();
+    await create("screen");
+    await create("button", { kind: "component", name: "Button", interactive: true });
+    expect(room.node("screen")!.interactive).toBe(false);
+    expect(room.nodes().find((n) => n.id === "button")!.interactive).toBe(true);
+    expect(db.prepare("SELECT interactive FROM nodes WHERE id = 'button'").get()).toEqual({ interactive: 1 });
+    await apply([{ t: "node.put", id: "screen", node: { interactive: true } }]);
+    expect(broadcasts.at(-1)).toMatchObject({ type: "sync", nodes: [{ id: "screen", interactive: true }] });
+    await apply([{ t: "node.put", id: "screen", node: { name: "Renamed" } }]);
+    expect(wake().node("screen")).toMatchObject({ name: "Renamed", interactive: true });
+    expect(wake().node("button")!.interactive).toBe(true);
+    await apply([{ t: "node.put", id: "screen", node: { interactive: false } }]);
+    expect(wake().node("screen")!.interactive).toBe(false);
+  });
+
+  it("migrates existing rows without changing sources, revisions, thumbnails, or the cover, and survives replay", async () => {
+    const { room, wake, create, apply, cached, db } = fixture();
+    await create("screen");
+    await create("button", { kind: "component", name: "Button" });
+    cached();
+    await apply([{ t: "cover.set", id: "screen" }]);
+    const before = room.nodes();
+    const cover = room.cover();
+    const thumbnails = db.prepare("SELECT * FROM node_thumbnails ORDER BY node_id, theme").all();
+    db.exec("ALTER TABLE nodes DROP COLUMN interactive; UPDATE meta SET v = '9' WHERE k = 'schema';");
+    const migrated = wake();
+    expect(migrated.nodes()).toEqual(before);
+    expect(migrated.nodes().every((n) => n.interactive === false)).toBe(true);
+    expect(migrated.node("screen")!.source).toBe("<p>screen</p>");
+    expect(migrated.cover()).toEqual(cover);
+    expect(db.prepare("SELECT * FROM node_thumbnails ORDER BY node_id, theme").all()).toEqual(thumbnails);
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "10" });
+    await apply([{ t: "node.put", id: "screen", node: { interactive: true } }]);
+    db.exec("UPDATE meta SET v = '9' WHERE k = 'schema';");
+    expect(wake().node("screen")!.interactive).toBe(true);
+  });
+
+  it("changes only metadata, without invalidating dependents, previews, or the design revision", async () => {
+    const { room, create, apply, cached, db, enqueue, env, storage } = fixture(true);
+    await create("button", { kind: "component", name: "Button", source: "<button>Continue</button>" });
+    await create("screen", { source: "<x-button></x-button>" });
+    cached();
+    await apply([{ t: "cover.set", id: "screen" }]);
+    const before = room.nodes();
+    const cover = room.cover(), design = room.ownDesignSystem();
+    const designRev = db.prepare("SELECT v FROM meta WHERE k = 'designRev'").get();
+    const thumbnails = db.prepare("SELECT * FROM node_thumbnails ORDER BY node_id, theme").all();
+    const notify = vi.spyOn(room as unknown as { notifyDependents(): Promise<void> }, "notifyDependents");
+    enqueue.mockClear(); storage.setAlarm.mockClear(); vi.mocked(env.FILES.delete).mockClear();
+    await apply(["button", "screen"].map((id) => ({ t: "node.put", id, node: { interactive: true } })));
+    expect(room.nodes().map((n) => ({ ...n, interactive: false }))).toEqual(before);
+    expect(room.ownDesignSystem()).toEqual(design);
+    expect(room.cover()).toEqual(cover);
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'designRev'").get()).toEqual(designRev);
+    expect(db.prepare("SELECT * FROM node_thumbnails ORDER BY node_id, theme").all()).toEqual(thumbnails);
+    expect(notify).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+    expect(env.FILES.delete).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 0, 1, "true", {}, []])("rejects non-boolean interaction capability: %j", async (interactive) => {
+    const { room, create, apply } = fixture();
+    await create("screen");
+    await expect(apply([{ t: "node.put", id: "screen", node: { interactive: interactive as never } }])).rejects.toThrow(/interactive must be a boolean/i);
+    expect(room.node("screen")!.interactive).toBe(false);
+  });
+
+  it.each(["section", "tokens", "image"] as const)("does not enable interaction on %s nodes, including kind-spoofing updates", async (kind) => {
+    const { room, create, apply } = fixture();
+    const node = { kind, src: "/a/file/image.png", thumbLo: "/a/file/preview.webp" };
+    await expect(create("invalid", { ...node, interactive: true })).rejects.toThrow(/only screens and components/i);
+    expect(room.node("invalid")).toBeNull();
+    await create("existing", node);
+    await expect(apply([{ t: "node.put", id: "existing", node: { kind: "frame", interactive: true } }])).rejects.toThrow(/only screens and components/i);
+    await apply([{ t: "node.put", id: "existing", node: { interactive: false } }]);
+    expect(room.node("existing")).toMatchObject({ kind, interactive: false });
+  });
+});
+
 describe("file and screen themes", () => {
   it("persists a file default and screen overrides across hibernation without rewriting sources", async () => {
     const { room, wake, apply, create, broadcasts } = fixture();
