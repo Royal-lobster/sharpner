@@ -40,7 +40,9 @@ Agents write the designs and inspect their rendered screenshots.
 - **Design systems that carry through.** Define tokens and reusable components
   once. Link another file as a library to share them across designs.
 - **A link for the review.** Share a live, view-only canvas without requiring an
-  account. Revoke the link when the review is done.
+  account. File and review links include the current page and selection, so your
+  team opens directly on the designs you selected. Revoke the review link when
+  the review is done.
 - **Built for the overview.** Small designs use cached previews; large designs
   become live HTML. Sources and images load as you need them.
 

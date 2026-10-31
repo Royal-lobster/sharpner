@@ -14,6 +14,7 @@ edits and fan out changes.
 | `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition |
 | `src/presence.ts` | Active member grouping across tabs and pages |
 | `src/Canvas.tsx` | Camera, gestures, selection, and canvas composition |
+| `src/canvas-location.ts` | URL-backed page and selection, deep-link resolution, and navigation history |
 | `src/canvas-layout.ts` | One active page's cached geometry, catalog labels, and navigation bounds |
 | `src/canvas-render-plan.ts` | Viewport culling, preview layers, and live-content budgets |
 | `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
@@ -104,6 +105,15 @@ use the same constraints. Bounds update with live layout and viewport changes;
 visible comment pins also contribute so detached feedback remains reachable.
 Empty pages fit a virtual 800×600 area until content arrives. Page changes cancel
 pending camera animation and persistence work.
+
+File URLs and anonymous view links include `?page=<page-id>` and one `node=<node-id>`
+parameter per selected node. Explicit links override the recipient's remembered
+page and fit the linked selection after the initial room snapshot, even when a
+camera was saved locally. Selecting nodes replaces the current history entry
+without moving the camera; switching pages adds an entry. Back and Forward restore
+the linked page and selection. Deleted targets fall back to an existing page, and
+selection is always limited to nodes on that page. Links without a target retain
+the remembered-page behavior.
 
 ## Identity and access
 

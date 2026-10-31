@@ -5,8 +5,8 @@ const subscribe = (fn: () => void) => {
   return () => removeEventListener("popstate", fn);
 };
 
-export function navigate(to: string) {
-  history.pushState(null, "", to);
+export function navigate(to: string, { replace = false } = {}) {
+  history[replace ? "replaceState" : "pushState"](null, "", to);
   dispatchEvent(new PopStateEvent("popstate"));
 }
 
