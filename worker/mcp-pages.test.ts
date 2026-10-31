@@ -8,9 +8,10 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
     const outline = async () => (await mocks.outline(id)) as (Page & { nodes: CanvasNode[] })[];
     return {
       apply: mocks.apply, outline, peers: async () => [], instances: () => mocks.instances(id),
+      theme: async () => null,
       pages: async () => (await outline()).map(({ nodes: _nodes, ...page }) => page),
       nodes: async () => (await outline()).flatMap((p) => p.nodes),
-      designSystem: async () => ({ tokens: "", components: [], library: null }),
+      designSystem: async () => ({ tokens: "", components: [], library: null, fileTheme: null }),
       ownDesignSystem: async () => ({ tokens: "", components: (await outline()).flatMap((p) => p.nodes).filter((n) => n.kind === "component").map((n) => ({ tag: componentTag(n.name), html: "" })) }),
     };
   },

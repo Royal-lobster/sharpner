@@ -11,6 +11,7 @@ import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
+import { effectiveTheme, validateTheme } from "../shared/themes";
 import {
   componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
@@ -35,7 +36,7 @@ const THUMB_DELAY = 1_200;
 const THUMB_BATCH = 24;
 const THUMB_TABS = 4;
 const THUMB_MAX_TRIES = 3;
-const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
+const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, theme, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
   src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev`;
 /** Node rows with their descriptions (only sections have one). */
 const NODES = `nodes LEFT JOIN descriptions d ON d.id = nodes.id`;
@@ -77,6 +78,12 @@ const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS descriptions (id TEXT PRIMARY KEY, text TEXT NOT NULL);`,
   // Token specimens now include named themes; refresh their cached previews and content heights.
   `UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind = 'tokens';`,
+  // Older deployments can lower the recorded schema version; adding the column must survive replay.
+  (sql: SqlStorage) => {
+    if (!sql.exec<{ name: string }>(`PRAGMA table_info(nodes)`).toArray().some((column) => column.name === "theme")) {
+      sql.exec(`ALTER TABLE nodes ADD COLUMN theme TEXT`);
+    }
+  },
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -102,7 +109,10 @@ export class FileRoom extends DurableObject<Env> {
     super(ctx, env);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)`);
     const version = Number(this.meta("schema") ?? 0);
-    for (const m of MIGRATIONS.slice(version)) this.sql.exec(m);
+    for (const m of MIGRATIONS.slice(version)) {
+      if (typeof m === "string") this.sql.exec(m);
+      else m(this.sql);
+    }
     this.setMeta("schema", String(MIGRATIONS.length));
     if (this.sql.exec(`SELECT 1 FROM pages LIMIT 1`).toArray().length === 0) {
       this.sql.exec(`INSERT INTO pages (id, name, sort) VALUES (?, ?, ?)`, crypto.randomUUID(), "Page 1", 0);
@@ -134,6 +144,9 @@ export class FileRoom extends DurableObject<Env> {
     const nodes = this.nodes();
     return this.pages().map((p) => ({ ...p, nodes: nodes.filter((n) => n.pageId === p.id) }));
   }
+
+  /** null preserves each screen's authored theme; otherwise screens inherit this default. */
+  theme(): string | null { return this.meta("fileTheme") || null; }
 
   peers(): Peer[] {
     return this.ctx.getWebSockets().flatMap((ws) => {
@@ -197,9 +210,9 @@ export class FileRoom extends DurableObject<Env> {
   }
 
   /** What this file's frames render with: its library's design system overridden by its own. */
-  async designSystem(): Promise<DesignSystem & { library: { fileId: string; name: string } | null }> {
+  async designSystem(): Promise<DesignSystem & { library: { fileId: string; name: string } | null; fileTheme: string | null }> {
     const lib = await this.libraryInfo();
-    return { ...mergeDesignSystems(lib?.design, this.ownDesignSystem()), library: lib && { fileId: lib.fileId, name: lib.name } };
+    return { ...mergeDesignSystems(lib?.design, this.ownDesignSystem()), library: lib && { fileId: lib.fileId, name: lib.name }, fileTheme: this.theme() };
   }
 
   private async libraryInfo(): Promise<LibraryInfo | null> {
@@ -227,6 +240,7 @@ export class FileRoom extends DurableObject<Env> {
     const reconcileComments = ops.some((op) => op.t === "page.del" || op.t === "node.del" || op.t === "node.put" && op.node.pageId !== undefined);
     const before = reconcileComments && this.comments().length ? layoutRects(this.nodes(), layoutHeight) : null;
     let commentChanges: { threads: CommentThread[]; deleted: string[] } | undefined;
+    const previousFileTheme = this.theme();
 
     this.ctx.storage.transactionSync(() => {
       for (const op of ops) {
@@ -256,22 +270,35 @@ export class FileRoom extends DurableObject<Env> {
             for (const id of ids) this.deleteNode(id, staleThumbs, design, touched.nodeDels);
             break;
           }
+          case "theme.set": {
+            this.setMeta("fileTheme", validateTheme(op.theme) ?? "");
+            break;
+          }
           default:
             throw new Error(`Unknown op ${(op as { t: string }).t}`);
         }
       }
       for (const id of this.invalidate(design.tokens, design.tags)) touched.nodes.add(id);
       if (design.tokens || design.tags.size) renderChanged = true;
+      if (this.theme() !== previousFileTheme) {
+        // Explicit screen overrides and token comparison sheets keep their current appearance.
+        const inherited = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`).toArray();
+        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`);
+        for (const { id } of inherited) touched.nodes.add(id);
+        if (inherited.length) renderChanged = true;
+      }
       for (const id of touched.nodeDels) touched.nodes.delete(id);
       if (before) commentChanges = this.commentStore.reconcile(new Map(this.nodes().map((n) => [n.id, n])), new Set(this.pages().map((p) => p.id)), before);
     });
 
+    const fileTheme = this.theme();
     this.broadcast({
       type: "sync",
       pages: touched.pages.size ? this.pages().filter((p) => touched.pages.has(p.id)) : undefined,
       pageDels: touched.pageDels.size ? [...touched.pageDels] : undefined,
       nodes: touched.nodes.size ? this.nodes([...touched.nodes]) : undefined,
       nodeDels: touched.nodeDels.size ? [...touched.nodeDels] : undefined,
+      fileTheme: previousFileTheme !== fileTheme ? fileTheme : undefined,
       by,
     });
     if (commentChanges && (commentChanges.threads.length || commentChanges.deleted.length)) this.broadcast({ type: "comments", ...commentChanges });
@@ -311,6 +338,8 @@ export class FileRoom extends DurableObject<Env> {
     if (input.layout !== undefined && (kind !== "section" || !["auto", "free"].includes(input.layout))) throw new Error("Layout must be auto or free on a section");
     if (input.order !== undefined && !Number.isFinite(input.order)) throw new Error("Order must be a finite number");
     if (input.description && kind !== "section") throw new Error("Only sections and pages have descriptions");
+    const theme = input.theme !== undefined ? validateTheme(input.theme) : cur?.theme ?? null;
+    if (theme !== null && kind !== "frame") throw new Error("Only screens have a theme override");
     // When a node leaves a managed group, its stored placeholder coordinates must become its actual
     // visible position. The same applies when changing a section's layout mode.
     if (cur) {
@@ -336,6 +365,7 @@ export class FileRoom extends DurableObject<Env> {
       height: kind === "section" ? null : input.height === null ? null : input.height !== undefined ? Math.max(1, num(input.height)) : cur?.height ?? null,
       source: isRendered(kind) ? (input.source !== undefined ? source(input.source) : cur?.source ?? "") : "",
       src: kind === "image" ? str(input.src ?? cur?.src) : null,
+      theme,
     };
     if (kind === "image" && !next.src) throw new Error("Images need a src");
 
@@ -356,7 +386,8 @@ export class FileRoom extends DurableObject<Env> {
       }
     }
 
-    const changed = !cur || next.source !== cur.source || next.width !== cur.width || next.height !== cur.height || next.src !== cur.src;
+    const themeChanged = next.theme !== (cur?.theme ?? null);
+    const changed = !cur || next.source !== cur.source || next.width !== cur.width || next.height !== cur.height || next.src !== cur.src || themeChanged;
     const rev = changed ? (cur?.rev ?? 0) + 1 : cur!.rev;
     if (kind === "component" && (changed || next.name !== cur?.name)) {
       design.tags.add(componentTag(next.name));
@@ -369,10 +400,10 @@ export class FileRoom extends DurableObject<Env> {
     const thumbHi = kind === "image" ? next.src : cur?.thumbHi ?? null;
     const thumb = this.thumbState(id);
     this.sql.exec(
-      `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
-      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source,
+      `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, themeChanged ? null : cur?.measuredHeight ?? null,
+      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
     );
     if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);
     return changed && (isRendered(kind) || kind === "image" && !thumbLo);
@@ -521,9 +552,9 @@ export class FileRoom extends DurableObject<Env> {
     const fileId = this.meta("fileId");
     const base = this.meta("origin") ?? "";
     if (!this.env.BROWSER || !fileId) return;
-    const dirty = this.sql.exec<{ id: string; kind: NodeKind; name: string; source: string; src: string | null; width: number; height: number | null; rev: number }>(
-      `SELECT id, kind, name, source, src, width, height, rev FROM nodes WHERE ${PENDING_THUMBS} ORDER BY thumb_tries LIMIT ${THUMB_BATCH}`,
-    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source) }));
+    const dirty = this.sql.exec<{ id: string; kind: NodeKind; name: string; source: string; src: string | null; width: number; height: number | null; rev: number; theme: string | null }>(
+      `SELECT id, kind, name, source, src, width, height, rev, theme FROM nodes WHERE ${PENDING_THUMBS} ORDER BY thumb_tries LIMIT ${THUMB_BATCH}`,
+    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source), theme: effectiveTheme(n, this.theme()) }));
     if (!dirty.length) return;
     const design = await this.designSystem();
 
@@ -560,7 +591,7 @@ export class FileRoom extends DurableObject<Env> {
   /** Renders one node's lo/hi thumbnails into R2 and records them. Returns false if it failed or the node is gone. */
   private async renderThumb(
     tab: BrowserTab,
-    n: { id: string; kind: NodeKind; src: string | null; html: string; width: number; height: number | null; rev: number },
+    n: { id: string; kind: NodeKind; src: string | null; html: string; width: number; height: number | null; rev: number; theme?: string },
     fileId: string,
     base: string,
     design: DesignSystem,
@@ -739,6 +770,7 @@ export class FileRoom extends DurableObject<Env> {
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
     this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
+      fileTheme: this.theme(),
       comments: att.shareToken ? [] : this.comments(),
       ...(!att.shareToken && att.principal ? { principal: att.principal } : {}),
       ...(!att.shareToken && att.sessionId ? { sessionExpiresAt: att.sessionExpiresAt } : {}) });
@@ -819,6 +851,7 @@ const str = (v: unknown) => String(v ?? "");
 /** Most nodes have no description; leaving the empty field out keeps sync payloads for large pages lean. */
 const meta = <T extends CanvasNode>(row: T): T => {
   if (!row.description) delete row.description;
+  if (row.theme == null) delete row.theme;
   return row;
 };
 /** Exact custom-element tags opened in HTML, so `<x-button>` doesn't count as `<x-button-primary>`. */

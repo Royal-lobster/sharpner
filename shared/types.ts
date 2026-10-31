@@ -1,6 +1,7 @@
 // Shapes shared by the browser, the worker, and the FileRoom Durable Object. Vocabulary: see CONTEXT.md.
 import { componentSpecimen, tokenSpecimen } from "./specimens";
 import type { SessionPrincipal } from "./session-principal";
+import { documentThemeScript } from "./themes";
 export { tokenNames } from "./specimens";
 
 /**
@@ -28,6 +29,8 @@ export type CanvasNode = {
   parentId: string | null;
   kind: NodeKind;
   name: string;
+  /** Frames: named theme override. null or missing inherits the file's theme. */
+  theme?: string | null;
   x: number;
   y: number;
   /** Stable sibling order for automatic layout. Optional only for older client metadata. */
@@ -51,7 +54,7 @@ export type CanvasNode = {
 };
 
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
-export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
+export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "theme" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
   source?: string;
 };
 
@@ -60,7 +63,9 @@ export type Op =
   | { t: "page.del"; id: string }
   /** Creates the node if `id` is new, otherwise merges the given fields. */
   | { t: "node.put"; id: string; node: NodeInput }
-  | { t: "node.del"; ids: string[] };
+  | { t: "node.del"; ids: string[] }
+  /** File theme inherited by frames without an override; null preserves authored theme contexts. */
+  | { t: "theme.set"; theme: string | null };
 
 export type Actor = { id: string; name: string; avatar: string | null; agent?: boolean };
 
@@ -93,9 +98,9 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; fileTheme?: string | null }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
-  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; by: Actor | null }
+  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; fileTheme?: string | null; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
   /** An agent is looking at or working on these nodes without changing them (reading, screenshotting). */
   | { type: "activity"; by: Actor; ids: string[] }
@@ -136,7 +141,7 @@ this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,d)=>esc(th
 }});})()</script>`;
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
-export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem } = {}): string {
+export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null } = {}): string {
   // Remote @imports (web fonts) become <link>s; the rest is Tailwind CSS that defines the token utilities.
   const imports: string[] = [];
   const css = (opts.design?.tokens ?? "").replace(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g, (_, href: string) => {
@@ -157,7 +162,7 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
   const probe = opts.measure
     ? `<script>(()=>{let h=0;const post=()=>{const n=Math.ceil(document.body.getBoundingClientRect().height);if(n!==h){h=n;parent.postMessage({sharpnerHeight:n},"*")}};new ResizeObserver(post).observe(document.body);addEventListener("load",post)})()</script>`
     : "";
-  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + probe;
+  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + documentThemeScript(opts.theme) + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
     const withHead = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => m + head)

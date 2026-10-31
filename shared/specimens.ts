@@ -1,4 +1,6 @@
 /** Presentation for design-system nodes; component definitions themselves stay untouched. */
+import { themeLabel, themeNames } from "./themes";
+
 const escape = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 export const tokenNames = (css: string) => [...new Set([...css.matchAll(/--([\w-]+)\s*:/g)].map((m) => m[1]!))];
@@ -116,13 +118,8 @@ export function tokenSpecimen(css: string, title = "Design tokens") {
     row("Radius", group("radius-").map((name) => item(name, `<div class="sp-radius-stage"><div class="sp-radius" style="border-radius:var(--${name})"></div></div>`))),
     row("Shadow", group("shadow-").map((name) => item(name, `<div class="sp-shadow-stage"><div class="sp-shadow" style="box-shadow:var(--${name})"></div></div>`))),
   ].filter(Boolean);
-  const themes = new Set(["light"]);
-  // Discover literal theme selectors, keeping legacy .dark and ignoring selector text in CSS strings.
-  const selectors = /\.dark(?![\w-])|\[data-theme\s*=\s*(?:"([^"\\]+)"|'([^'\\]+)'|([\w-]+))\s*\]|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g;
-  for (const match of declarations.matchAll(selectors)) {
-    if (match[0].startsWith(".") || match[0].startsWith("[")) themes.add(match[1] ?? match[2] ?? match[3] ?? "dark");
-  }
+  const themes = themeNames(css);
   const sheet = sections.join("") || '<p class="sp-empty">Give this system its first decisions.<br>Declare named tokens in an <code>@theme { … }</code> block.</p>';
-  const pane = (theme: string) => `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escape(theme)}">${themes.size > 1 ? `<p class="sp-theme-title">${escape(theme.charAt(0).toUpperCase() + theme.slice(1))}</p>` : ""}${sheet}</div>`;
-  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escape(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${themes.size > 1 ? ` · ${themes.size} themes` : ""}</span></header><div class="sp-themes">${[...themes].map(pane).join("")}</div></article>${tokenValueScript}`;
+  const pane = (theme: string) => `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escape(theme)}">${themes.length > 1 ? `<p class="sp-theme-title">${escape(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
+  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escape(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${themes.length > 1 ? ` · ${themes.length} themes` : ""}</span></header><div class="sp-themes">${themes.map(pane).join("")}</div></article>${tokenValueScript}`;
 }

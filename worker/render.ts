@@ -7,14 +7,14 @@ const MAX_HEIGHT = 8000;
  * Loads HTML into a browser tab at its viewport width and waits for fonts and Tailwind.
  * Returns the height to capture (fixed height, or measured content height for auto frames).
  */
-export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null }, base: string, design: DesignSystem) {
+export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null; theme?: string | null }, base: string, design: DesignSystem) {
   const width = Math.max(1, Math.round(f.width));
   // A fresh document (and window) per render, so nothing — e.g. custom element definitions — leaks between nodes.
   await page.goto("about:blank");
   await page.setViewport({ width, height: Math.round(f.height ?? 800) });
   // "load" covers the Tailwind script, stylesheets and images; then wait for web fonts and let Tailwind
   // flush its generated styles. (No requestAnimationFrame: it never fires in background tabs.)
-  await page.setContent(frameDocument(f.html, { base, design }), { waitUntil: "load", timeout: 20_000 });
+  await page.setContent(frameDocument(f.html, { base, design, theme: f.theme }), { waitUntil: "load", timeout: 20_000 });
   const measured = await page.evaluate(async () => {
     await document.fonts.ready;
     await new Promise((r) => setTimeout(r, 50));

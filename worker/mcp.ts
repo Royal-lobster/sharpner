@@ -9,6 +9,7 @@ import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, w
 import { capture, loadFrame } from "./render";
 import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
 import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
+import { effectiveTheme, themeNames } from "../shared/themes";
 import designSystemGuide from "./guides/design-system.md?raw";
 import screensGuide from "./guides/screens.md?raw";
 import { commentAnchor, commentBody } from "./comment-schema";
@@ -19,12 +20,14 @@ const pageDescription = z.string().max(DESCRIPTION_MAX)
   .describe("One or two sentences: what the page holds and when to look at it, so agents can find their way. Empty clears it.");
 const sectionDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Sections only. One or two sentences: what the group holds and when to look at it. Empty clears it.");
+const themeChoice = z.string().trim().min(1).max(80).regex(/^[^\u0000-\u001f\u007f]+$/).nullable();
 
 const INSTRUCTIONS = `Sharpner is a shared infinite canvas where you design product UI for and with a team, who watch your edits live. Aim for production-quality design grounded in a design system.
 
 Vocabulary:
 - Workspace → files → pages → nodes. Node kinds: "frame" (HTML rendered at a viewport width: a screen, state, slide), "image", "section" (a labeled group that auto-fits its contents and can nest), "component" (reusable HTML), "tokens" (a token sheet: Tailwind v4 CSS defining the design tokens).
 - A file's design system = its token sheets + components, plus those of its library (another workspace file it uses, at most one).
+- Themes come from named [data-theme="…"] selectors in token CSS (legacy .dark also works). set_theme chooses the file default; a frame's theme field overrides it, or null inherits. Keep component variants separate from themes. Use metadata for theme comparisons so file switching preserves explicit frame choices.
 - Frame/component source is the HTML of <body>. Tailwind v4 is preloaded; tokens become utilities (bg-primary, text-muted-foreground, font-display, rounded-md). Components are used as <x-name prop="…">children</x-name>.
 - Pages and sections carry a short description: what they hold and when to look at them, like a skill's description. They are the file's table of contents for you and other agents. Give every page and section you create one or two sentences (e.g. "Foundations and generic primitives. Check before building any screen."), and update them when you reorganize. Members can edit them too.
 - Geometry is in canvas px (x right, y down). Width = the viewport the HTML lays out at (1440 desktop, 390 mobile). Omit height to fit content; set it for fixed artboards (mobile 844). New sections arrange their contents automatically in ordered wrapping rows. Sibling sections that contain screens are flows and each take a row; other sibling sections (catalogs, token sheets, groups of them), nested or top-level, tile into about √n columns filled top to bottom, so a page grows about as wide as it is tall. A page with free sections or loose nodes keeps its top-level automatic sections in one column; list_pages and get_file report that as arrangement "stacked" with the reason, so set those sections to "auto" or move the loose nodes into a section to let the page tile. Omit x/y inside them; measured content heights reflow the layout without overlaps. Loose nodes and legacy/free sections keep manual positioning.
@@ -90,7 +93,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const open = files.find((f) => f.id === me?.last_file_id);
     if (open) {
       const stub = room(env, open.id);
-      const [peers, outline, comments] = await Promise.all([stub.peers(), stub.outline(), stub.comments()]);
+      const [peers, outline, comments, fileTheme] = await Promise.all([stub.peers(), stub.outline(), stub.comments(), stub.theme()]);
       const mine = peers.find((p) => p.id === user.id && !p.agent);
       const page = outline.find((p) => p.id === mine?.pageId);
       const nodes = outline.flatMap((p) => p.nodes);
@@ -98,6 +101,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         fileId: open.id,
         fileName: open.name,
         libraryFileId: open.library_id,
+        fileTheme,
         openInBrowser: Boolean(mine),
         currentPage: page ? { id: page.id, name: page.name } : null,
         pages: outline.map(({ id, name, description }) => ({ id, name, description })),
@@ -227,6 +231,16 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json({ ok: true });
   });
 
+  server.registerTool("set_theme", {
+    description: "Set the file's theme, such as light, dark, or uwu, using the names reported by get_design_system. Frames with their own theme keep that override; other screens and component specimens inherit this choice. Pass null to preserve authored HTML themes. Token sheets keep showing every theme. To choose a single screen's theme, use update_nodes with theme (null restores file inheritance).",
+    inputSchema: { fileId: z.string(), theme: themeChoice.describe("Named theme from the token CSS, or null for As authored.") },
+    annotations: { destructiveHint: false, idempotentHint: true },
+  }, async ({ fileId, theme }) => {
+    const { stub, apply } = await access(fileId);
+    await apply([{ t: "theme.set", theme }]);
+    return json({ ok: true, fileTheme: await stub.theme() });
+  });
+
   server.registerTool("list_pages", {
     description: "A file's table of contents: each page's name and description, and its sections (name, description, parent, number of designs directly inside). Read it to choose where to look, then call get_file with that pageId. Cheaper than get_file for the whole file.",
     inputSchema: { fileId: z.string() },
@@ -253,7 +267,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     annotations: { readOnlyHint: true },
   }, async ({ fileId, pageId }) => {
     const { file, stub } = await access(fileId);
-    const outline = (await stub.outline()).filter((p) => !pageId || p.id === pageId);
+    const [all, fileTheme] = await Promise.all([stub.outline(), stub.theme()]);
+    const outline = all.filter((p) => !pageId || p.id === pageId);
     if (pageId && !outline.length) throw new Error(`Page ${pageId} not found`);
     const pages = outline.map((p) => {
       const rects = layoutRects(p.nodes, (n) => layoutHeight(n));
@@ -269,10 +284,11 @@ function buildServer(env: Env, identity: Identity, origin: string) {
           ...(n.height == null && n.measuredHeight ? { renderedHeight: n.measuredHeight } : {}),
           ...(n.kind === "image" ? { src: abs(n.src) } : {}),
           ...(n.kind === "component" ? { tag: componentTag(n.name) } : {}),
+          ...(n.kind === "frame" ? { theme: n.theme ?? null, effectiveTheme: effectiveTheme(n, fileTheme) ?? null } : {}),
         })),
       };
     });
-    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, pages });
+    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, fileTheme, pages });
   });
 
   server.registerTool("get_design_system", {
@@ -298,6 +314,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const components = [...lib, ...own].map((c) => ({ ...c, uses: uses.get(c.tag) ?? 0 }));
     return json({
       library: design.library,
+      fileTheme: design.fileTheme,
+      themes: themeNames(design.tokens),
       tokens: tokenNames(design.tokens),
       tokenCss: design.tokens,
       components,
@@ -412,6 +430,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         kind: z.enum(["frame", "component", "tokens", "image"]).optional(),
         name: z.string().describe("e.g. 'Checkout · Payment'. For components this sets the tag: 'Button/Primary' -> <x-button-primary>"),
         source: z.string().optional().describe("HTML for frames/components, Tailwind v4 CSS for token sheets"),
+        theme: themeChoice.optional().describe("Frames only: named theme override; null or omitted inherits the file theme."),
         imageUrl: z.string().optional().describe("For images, e.g. a URL from upload_image"),
         previewUrl: z.string().optional().describe("Optional small image preview. If omitted, one is generated in the background when Browser Rendering is available."),
         width: z.number().positive().optional().describe("Viewport width in px, e.g. 1440 or 390. Default 400 (960 for token sheets)"),
@@ -430,7 +449,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const width = n.width ?? (kind === "tokens" ? 960 : 400);
       const x = n.x ?? at.x, y = n.y ?? at.y;
       at = { x: Math.max(at.x, x + width + 80), y: at.y };
-      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y };
+      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y, ...(n.theme !== undefined ? { theme: n.theme } : {}) };
       const node: NodeInput = kind === "image"
         ? { ...base, src: n.imageUrl, thumbLo: n.previewUrl ?? null, height: n.height ?? width }
         : { ...base, source: n.source, height: n.height ?? null };
@@ -458,7 +477,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   }, async ({ fileId, nodeIds }) => {
     const { stub } = await access(fileId);
     const nodes = await Promise.all(nodeIds.map((id) => stub.node(id)));
-    const all = await stub.nodes();
+    const [all, fileTheme] = await Promise.all([stub.nodes(), stub.theme()]);
     const rects = layoutRects(all, (n) => layoutHeight(n));
     await stub.agentActivity(actor, nodes.flatMap((n) => (n && n.kind !== "section" ? [n.id] : [])));
     return json(nodes.map((node, index) => {
@@ -471,6 +490,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         sectionId: node.parentId,
         layout: node.kind === "section" ? node.layout ?? "free" : undefined,
         order: node.order,
+        ...(node.kind === "frame" ? { theme: node.theme ?? null, effectiveTheme: effectiveTheme(node, fileTheme) ?? null } : {}),
         ...nodeGeometry(node, rects),
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
       };
@@ -490,6 +510,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         name: z.string().optional(),
         description: sectionDescription.optional(),
         source: z.string().optional(),
+        theme: themeChoice.optional().describe("Frames only: named theme override; null restores file inheritance. Omit to preserve."),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
         x: z.number().optional(),
@@ -608,7 +629,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         const content = [];
         const tab = await browser.newPage();
         for (const n of nodes) {
-          const { width, height } = await loadFrame(tab, n, origin, design);
+          const { width, height } = await loadFrame(tab, { ...n, theme: effectiveTheme(n, design.fileTheme) }, origin, design);
           // Keep the image within ~1600px on its long side so it stays legible but cheap.
           const scale = Math.min(1, 1600 / Math.max(width, height));
           const data = btoa(Array.from(await capture(tab, width, height, { type: "jpeg", scale }), (b) => String.fromCharCode(b)).join(""));
