@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), workspaceFor: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), workspaceFor: vi.fn(), roomFetch: vi.fn() }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
-vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, workspaceFor: mocks.workspaceFor }));
+vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, workspaceFor: mocks.workspaceFor, room: () => ({ fetch: mocks.roomFetch }) }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
 vi.mock("./mcp", async () => ({ mcp: new (await import("hono")).Hono() }));
 
@@ -11,25 +11,47 @@ import app from "./index";
 const user = { id: "local_author", login: "alice", name: "Alice", avatar_url: null };
 const workspace = { id: "local_workspace", name: "Design", role: "owner", clerkOrganizationId: "org_design" };
 const file = { id: "file_design", workspace_id: workspace.id, name: "Screens", library_id: null, created_at: 1, updated_at: 1 };
-const env = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => ({ share_token: null }) }) }) } } as unknown as Env;
+const env = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => ({ share_token: null }), run: async () => ({}) }) }) } } as unknown as Env;
+const principal = { clerkUserId: "user_clerk_alice", sessionId: "session_verified", organizationId: "org_design" };
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.authenticate.mockResolvedValue({ user, workspaces: [workspace], organizationId: "org_design", method: "session", scopes: [], clerkUserId: "user_clerk_alice", sessionExpiresAt: Date.now() + 60_000 });
+  mocks.authenticate.mockResolvedValue({ user, workspaces: [workspace], ...principal, method: "session", scopes: [], sessionExpiresAt: Date.now() + 60_000 });
   mocks.fileFor.mockResolvedValue(file);
   mocks.workspaceFor.mockResolvedValue(workspace);
+  mocks.roomFetch.mockResolvedValue(new Response(null, { status: 204 }));
 });
 
 describe("authenticated file bootstrap", () => {
   it("returns the verified local author with authorized file metadata in one response", async () => {
     const response = await app.request("https://sharpner.example/api/files/file_design", {
-      headers: { authorization: "Bearer session_fixture", "x-actor": JSON.stringify({ id: "forged_author" }) },
+      headers: { authorization: "Bearer session_fixture", "x-actor": JSON.stringify({ id: "forged_author" }), "x-session-principal": JSON.stringify({ ...principal, sessionId: "forged" }) },
     }, env);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ user, file, workspace, files: [], shareToken: null });
+    expect(await response.json()).toEqual({ user, file, workspace, files: [], shareToken: null, principal, sessionExpiresAt: expect.any(Number) });
     expect(mocks.authenticate).toHaveBeenCalledTimes(1);
     expect(mocks.fileFor).toHaveBeenCalledWith(env, user.id, file.id);
     expect(mocks.workspaceFor).toHaveBeenCalledWith(env, user.id, workspace.id);
+  });
+
+  it("forwards the same verified immutable principal to the socket, replacing every forged identity", async () => {
+    const response = await app.request("https://sharpner.example/api/files/file_design/ws", { headers: {
+      upgrade: "websocket", origin: "https://sharpner.example", cookie: "__session=cookie_fixture",
+      "x-session-id": "forged-session", "x-session-principal": JSON.stringify({ ...principal, clerkUserId: "forged-user", organizationId: "forged-org" }),
+      "x-actor": JSON.stringify({ id: "forged-author" }), "x-session-expiry": "9999999999999",
+    } }, env);
+    expect(response.status).toBe(204);
+    const forwarded = mocks.roomFetch.mock.calls[0]![0] as Request;
+    expect(JSON.parse(forwarded.headers.get("x-session-principal")!)).toEqual(principal);
+    expect(forwarded.headers.get("x-session-id")).toBe(principal.sessionId);
+    expect(JSON.parse(forwarded.headers.get("x-actor")!).id).toBe(user.id);
+    expect(Number(forwarded.headers.get("x-session-expiry"))).toBeLessThan(Date.now() + 61_000);
+  });
+
+  it("preserves the credential's null organization instead of substituting the file's workspace", async () => {
+    mocks.authenticate.mockResolvedValue({ user, workspaces: [workspace], ...principal, organizationId: null, method: "session", sessionExpiresAt: Date.now() + 60_000 });
+    const response = await app.request("https://sharpner.example/api/files/file_design", {}, env);
+    expect((await response.json() as { principal: unknown }).principal).toEqual({ ...principal, organizationId: null });
   });
 
   it("requires a current session before returning bootstrap data", async () => {

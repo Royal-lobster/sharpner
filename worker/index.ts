@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { auth, authenticate, authErrorStatus, clerkClient, type AppEnv } from "./auth";
+import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
 import { mcp } from "./mcp";
@@ -40,6 +40,8 @@ app.get("/api/shared/:token/ws", async (c) => {
   headers.set("x-file", file.id);
   headers.set("x-origin", new URL(c.req.url).origin);
   headers.delete("x-actor");
+  headers.delete("x-session-principal");
+  headers.delete("x-session-id");
   headers.set("x-share-token", token);
   headers.set("x-session-expiry", String(Date.now() + VIEWER_LEASE_MS));
   return room(c.env, file.id).fetch(new Request(c.req.url, { headers }));
@@ -99,7 +101,8 @@ api.get("/files/:id", async (c) => {
     c.env.DB.prepare(`SELECT share_token FROM files WHERE id = ?`).bind(file.id).first<{ share_token: string | null }>(),
   ]);
   // Other files in the workspace are the candidates for this file's library.
-  return c.json({ user: c.get("user"), file, workspace, files: others.results, shareToken: share?.share_token ?? null });
+  return c.json({ user: c.get("user"), file, workspace, files: others.results, shareToken: share?.share_token ?? null,
+    principal: sessionPrincipal(c.get("identity")), sessionExpiresAt: c.get("identity").sessionExpiresAt });
 });
 
 api.patch("/files/:id", async (c) => {
@@ -211,6 +214,10 @@ api.get("/files/:id/ws", async (c) => {
   // Bind renewal to this exact verified Clerk session, never a caller-supplied header.
   headers.delete("x-session-id");
   if (c.get("identity").sessionId) headers.set("x-session-id", c.get("identity").sessionId!);
+  // This internal header is always replaced, including when no principal can be issued.
+  headers.delete("x-session-principal");
+  const principal = sessionPrincipal(c.get("identity"));
+  if (principal) headers.set("x-session-principal", JSON.stringify(principal));
   return room(c.env, file.id).fetch(new Request(c.req.url, { headers }));
 });
 

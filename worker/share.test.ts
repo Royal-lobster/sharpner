@@ -51,10 +51,12 @@ describe("view links", () => {
   });
 
   it("connects viewers as anonymous link viewers, ignoring a forged actor", async () => {
-    await app.request(`https://sharpner.example/api/shared/${token}/ws`, { headers: { ...upgrade.headers, "x-actor": JSON.stringify({ id: "local_author" }) } }, env);
+    await app.request(`https://sharpner.example/api/shared/${token}/ws`, { headers: { ...upgrade.headers, "x-actor": JSON.stringify({ id: "local_author" }), "x-session-id": "forged", "x-session-principal": "forged" } }, env);
     const forwarded = mocks.roomFetch.mock.calls[0]![0] as Request;
     expect(forwarded.headers.get("x-share-token")).toBe(token);
     expect(forwarded.headers.get("x-actor")).toBeNull();
+    expect(forwarded.headers.get("x-session-id")).toBeNull();
+    expect(forwarded.headers.get("x-session-principal")).toBeNull();
     expect(forwarded.headers.get("x-file")).toBe(file.id);
     expect(Number(forwarded.headers.get("x-session-expiry"))).toBeGreaterThan(Date.now());
   });

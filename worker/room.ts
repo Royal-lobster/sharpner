@@ -10,6 +10,7 @@ import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
+import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
   componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
@@ -22,6 +23,7 @@ type Attachment = {
   /** Member leases are tied to the Clerk instance that authenticated the upgrade. Legacy leases have no issuer. */
   sessionIssuer?: string;
   sessionId?: string;
+  principal?: SessionPrincipal;
   shareToken?: string;
 };
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
@@ -613,6 +615,7 @@ export class FileRoom extends DurableObject<Env> {
       return new Response("This link is no longer shared", { status: 403 });
     }
     const { 0: client, 1: server } = new WebSocketPair();
+    const principal: unknown = JSON.parse(req.headers.get("x-session-principal") ?? "null");
     const att: Attachment = {
       cid: crypto.randomUUID(),
       fileId,
@@ -621,6 +624,7 @@ export class FileRoom extends DurableObject<Env> {
       presence: { pageId: null, selection: [], cursor: null },
       sessionExpiresAt,
       ...(!shareToken && req.headers.get("x-session-id") ? { sessionId: req.headers.get("x-session-id")! } : {}),
+      ...(!shareToken && isSessionPrincipal(principal) ? { principal } : {}),
       // Stamp trusted Worker configuration, never a client-supplied issuer header.
       ...(shareToken ? { shareToken } : { sessionIssuer: clerkIssuer(this.env.CLERK_PUBLISHABLE_KEY) }),
     };
@@ -736,6 +740,7 @@ export class FileRoom extends DurableObject<Env> {
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
     this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
       comments: att.shareToken ? [] : this.comments(),
+      ...(!att.shareToken && att.principal ? { principal: att.principal } : {}),
       ...(!att.shareToken && att.sessionId ? { sessionExpiresAt: att.sessionExpiresAt } : {}) });
   }
 

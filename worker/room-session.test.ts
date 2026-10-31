@@ -110,10 +110,14 @@ describe("FileRoom member session issuer", () => {
       upgrade: "websocket", "x-file": "file", "x-origin": "https://sharpner.example",
       "x-actor": JSON.stringify(member), "x-session-expiry": String(Date.now() + 60_000),
       "x-session-issuer": "https://forged.example",
+      "x-session-id": "session-member",
+      "x-session-principal": JSON.stringify({ clerkUserId: "clerk-member", sessionId: "session-member", organizationId: "clerk-workspace" }),
     } }));
     expect(acceptWebSocket).toHaveBeenCalledWith(server);
     expect(server.deserializeAttachment().sessionIssuer).toBe(issuer);
     expect(JSON.parse(server.send.mock.calls[0]![0]).type).toBe("init");
+    expect(JSON.parse(server.send.mock.calls[0]![0]).principal).toEqual({ clerkUserId: "clerk-member", sessionId: "session-member", organizationId: "clerk-workspace" });
+    expect(server.deserializeAttachment().actor.id).toBe("local-member");
     expect(server.close).not.toHaveBeenCalled();
   });
 

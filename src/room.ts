@@ -1,5 +1,6 @@
 import { descendantsOf, layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
+import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
   componentTag, mergeDesignSystems,
   type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Op, type Page, type Peer, type Presence, type ServerMsg,
@@ -30,6 +31,9 @@ export class Room {
   comments = new Map<string, CommentThread>();
   library: LibraryInfo | null = null;
   status: Status = "connecting";
+  /** Verified by the server on this connection's init; never inferred from a local author ID. */
+  principal: SessionPrincipal | null = null;
+  sessionExpiresAt: number | null = null;
   /** Node sources (HTML/CSS), tagged with the revision they belong to. */
   sources = new Map<string, { rev: number; source: string }>();
   /** Content heights reported by live iframes for auto-height nodes. */
@@ -72,10 +76,36 @@ export class Room {
   private designRevision = 0;
   /** Deleted threads cannot be resurrected by an older HTTP response arriving after realtime deletion. */
   private deletedComments = new Set<string>();
+  private startupBytes = 0;
+  private startupMessages = 0;
+  private sessionCid = "";
+  private boundPrincipal: SessionPrincipal | null = null;
+  private pendingIdentity: boolean;
 
   /** `shareToken` opens the file read-only through a view link, without a session. */
-  constructor(private fileId: string, private shareToken: string | null = null) {
+  constructor(private fileId: string, private shareToken: string | null = null, options?: { pendingIdentity?: boolean }) {
+    this.pendingIdentity = options?.pendingIdentity ?? false;
     this.connect();
+  }
+
+  /** Transfer a quiet, bounded startup connection to its verified editor. */
+  adopt(principal: SessionPrincipal): boolean {
+    if (this.closed || !this.pendingIdentity || this.status !== "open" || !samePrincipal(principal, this.principal)
+      || this.sessionExpiresAt === null || !Number.isFinite(this.sessionExpiresAt) || this.sessionExpiresAt <= Date.now()) return false;
+    this.pendingIdentity = false;
+    this.boundPrincipal = principal;
+    this.scheduleRenewal(this.sessionCid, this.sessionExpiresAt);
+    this.sendRaw({ type: "presence", presence: this.presence });
+    this.reconcileSources();
+    return true;
+  }
+
+  /** Bind the regular SDK-backed path too, when the server supports identity-bearing init. */
+  bindIdentity(principal: SessionPrincipal): boolean {
+    if (this.closed || this.status !== "open" || !samePrincipal(principal, this.principal)
+      || this.sessionExpiresAt === null || !Number.isFinite(this.sessionExpiresAt) || this.sessionExpiresAt <= Date.now()) return false;
+    this.boundPrincipal = principal;
+    return true;
   }
 
   // ---- store plumbing ------------------------------------------------------
@@ -118,7 +148,15 @@ export class Room {
       this.sendRaw({ type: "presence", presence: this.presence });
     };
     ws.onmessage = (e) => {
-      if (!this.closed && this.ws === ws) this.receive(JSON.parse(e.data) as ServerMsg);
+      if (this.closed || this.ws !== ws) return;
+      // Unclaimed rooms have no UI working set. Bound all received state, including repeated syncs.
+      if (this.pendingIdentity && (++this.startupMessages > 128 || (this.startupBytes += e.data.length * 2) > 4 * 1024 * 1024)) {
+        this.status = "offline"; this.close(); this.emit(); return;
+      }
+      let message: ServerMsg;
+      try { message = JSON.parse(e.data) as ServerMsg; }
+      catch { this.status = "offline"; this.close(); this.emit(); return; }
+      this.receive(message);
     };
     ws.onclose = (e) => {
       if (this.ws !== ws) return;
@@ -126,9 +164,9 @@ export class Room {
       this.inflight.clear();
       this.wanted.clear();
       this.peers.clear();
-      this.status = e.code === 4404 ? "gone" : e.code === 4403 ? "denied" : e.code === 4001 ? "connecting" : "offline";
+      this.status = e.code === 4404 ? "gone" : e.code === 4403 ? "denied" : e.code === 4001 && !this.pendingIdentity ? "connecting" : "offline";
       this.emit();
-      if (!this.closed && this.status !== "gone" && this.status !== "denied") this.retryConnection(ws);
+      if (!this.closed && !this.pendingIdentity && this.status !== "gone" && this.status !== "denied") this.retryConnection(ws);
     };
   }
 
@@ -145,7 +183,7 @@ export class Room {
   private scheduleRenewal(cid: string, expiresAt: number, retry = false) {
     this.cancelRenewal();
     const ws = this.ws;
-    if (this.shareToken || !ws || !Number.isFinite(expiresAt)) return;
+    if (this.pendingIdentity || this.shareToken || !ws || !Number.isFinite(expiresAt)) return;
     const delay = retry ? SESSION_RENEWAL_RETRY_MS : Math.max(MIN_SESSION_RENEWAL_DELAY_MS, expiresAt - Date.now() - SESSION_RENEWAL_LEAD_MS);
     this.renewalTimer = this.later(() => {
       this.renewalTimer = null;
@@ -211,15 +249,27 @@ export class Room {
       ws.onopen = ws.onmessage = ws.onclose = null;
       ws.close();
     }
+    if (this.pendingIdentity) {
+      this.pages = []; this.nodes.clear(); this.peers.clear(); this.comments.clear(); this.library = null;
+      this.sources.clear(); this.heights.clear(); this.designNodes.clear(); this.pageCache.clear();
+      this.agentActivity.clear(); this.agentDone.clear(); this.appeared.clear();
+    }
   }
 
   private sendRaw(msg: ClientMsg) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+    if (!this.pendingIdentity && this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
 
   private receive(msg: ServerMsg) {
     switch (msg.type) {
       case "init": {
+        if (this.boundPrincipal && (!samePrincipal(this.boundPrincipal, msg.principal)
+          || typeof msg.sessionExpiresAt !== "number" || !Number.isFinite(msg.sessionExpiresAt) || msg.sessionExpiresAt <= Date.now())) {
+          this.status = "denied"; this.close(); this.pages = []; this.nodes.clear(); this.emit(); return;
+        }
+        this.principal = msg.principal ?? null;
+        this.sessionExpiresAt = msg.sessionExpiresAt ?? null;
+        this.sessionCid = msg.cid;
         if (msg.sessionExpiresAt !== undefined) this.scheduleRenewal(msg.cid, msg.sessionExpiresAt);
         const previousNodes = this.nodes;
         this.status = "open";
@@ -351,6 +401,7 @@ export class Room {
   }
 
   private reconcileSources() {
+    if (this.pendingIdentity) return;
     const needed = new Set([...this.designNodes.keys(), ...this.visibleSources]);
     for (const id of this.wanted) {
       const node = this.nodes.get(id);
