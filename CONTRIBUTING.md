@@ -77,6 +77,10 @@ interaction changes in a short video when useful. Keep verification media outsid
 the checkout and attach it to the pull request; do not commit recordings or test
 screenshots.
 
+For startup changes, measure direct file opens and cached refreshes through the
+first rendered canvas preview, as well as the workspace file grid. A successful
+metadata response or an error page does not verify canvas loading.
+
 ## Code conventions
 
 - Follow the vocabulary in [CONTEXT.md](CONTEXT.md).
