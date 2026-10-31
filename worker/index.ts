@@ -7,6 +7,7 @@ import { oauth } from "./oauth";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
 
 export { FileRoom } from "./room";
+export { ThumbnailQueue } from "./thumbnail-queue";
 
 const app = new Hono<AppEnv>();
 

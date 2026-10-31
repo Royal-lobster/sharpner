@@ -1,14 +1,12 @@
 import { Hono } from "hono";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import puppeteer from "@cloudflare/puppeteer";
 import { z } from "zod";
 import { authenticate, authErrorStatus, requireScope, type AppEnv, type Identity } from "./auth";
 import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
-import { capture, loadFrame } from "./render";
 import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
-import { componentTag, DESCRIPTION_MAX, renderedHtml, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
+import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
 import { effectiveTheme, themeNames } from "../shared/themes";
 import skill from "./skills/sharpner/SKILL.md?raw";
 import designSystemGuide from "./skills/sharpner/references/design-system.md?raw";
@@ -616,28 +614,13 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       annotations: { readOnlyHint: true },
     }, async ({ fileId, nodeIds }) => {
       const { stub } = await access(fileId);
-      const nodes = (await Promise.all(nodeIds.map((id) => stub.node(id))))
-        .filter((n) => n && ["frame", "component", "tokens"].includes(n.kind))
-        .map((n) => ({ ...n!, html: renderedHtml(n!, n!.source) }));
+      const nodes = (await stub.nodes(nodeIds))
+        .filter((n) => nodeIds.includes(n.id) && ["frame", "component", "tokens"].includes(n.kind))
+        .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id));
       if (!nodes.length) throw new Error("No matching frames, components or token sheets");
       await stub.agentActivity(actor, nodes.map((n) => n.id));
-      const design = await stub.designSystem();
-      const browser = await puppeteer.launch(browserBinding);
-      try {
-        const content = [];
-        const tab = await browser.newPage();
-        for (const n of nodes) {
-          const { width, height } = await loadFrame(tab, { ...n, theme: effectiveTheme(n, design.fileTheme) }, origin, design);
-          // Keep the image within ~1600px on its long side so it stays legible but cheap.
-          const scale = Math.min(1, 1600 / Math.max(width, height));
-          const data = btoa(Array.from(await capture(tab, width, height, { type: "jpeg", scale }), (b) => String.fromCharCode(b)).join(""));
-          content.push({ type: "text" as const, text: `${n.name} (${n.id}) ${width}x${height}` });
-          content.push({ type: "image" as const, data, mimeType: "image/jpeg" });
-        }
-        return { content };
-      } finally {
-        await browser.close();
-      }
+      const { content } = await stub.screenshotNodes(nodes.map((n) => n.id), origin);
+      return { content };
     });
   }
 

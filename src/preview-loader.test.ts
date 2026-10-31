@@ -31,6 +31,16 @@ beforeEach(() => {
 afterEach(() => { loader.dispose(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("canvas preview batches", () => {
+  it("batches new theme-pair names together with legacy previews", async () => {
+    const themed=url(2).replace("-1-lo.webp",`-2-${"a".repeat(64)}-lo.webp`);
+    loader.prepare([url(1),themed]);
+    const img=image();loader.load(img,themed);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetcher.mock.calls[0]![0]),"https://sharpner.example").searchParams.get("items")).toContain("a".repeat(64));
+    expect(img.src).toMatch(/^data:image\/webp;base64,/);
+  });
+
   it("keeps batch URLs stable when paint priority and image completion order change", async () => {
     const urls = Array.from({ length: 32 }, (_, i) => url(i));
     loader.prepare(urls);

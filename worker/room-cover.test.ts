@@ -5,9 +5,9 @@ import type { Actor, NodeInput, Op, ServerMsg } from "../shared/types";
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class { constructor(readonly ctx: DurableObjectState, readonly env: Env) {} },
 }));
-const renderer = vi.hoisted(() => ({ launch: vi.fn(), loadFrame: vi.fn(), capture: vi.fn() }));
+const renderer = vi.hoisted(() => ({ launch: vi.fn(), loadFrame: vi.fn(), capture: vi.fn(), captureThumbnails: vi.fn() }));
 vi.mock("@cloudflare/puppeteer", () => ({ default: { launch: renderer.launch } }));
-vi.mock("./render", async (original) => ({ ...await original<typeof import("./render")>(), loadFrame: renderer.loadFrame, capture: renderer.capture }));
+vi.mock("./render", async (original) => ({ ...await original<typeof import("./render")>(), loadFrame: renderer.loadFrame, capture: renderer.capture, captureThumbnails: renderer.captureThumbnails }));
 import { FileRoom } from "./room";
 
 const databases: DatabaseSync[] = [];
@@ -16,10 +16,11 @@ beforeEach(() => {
   renderer.launch.mockReset().mockResolvedValue({ newPage: async () => ({}), close: async () => {} });
   renderer.loadFrame.mockReset().mockResolvedValue({ width: 1600, height: 900, measured: 900 });
   renderer.capture.mockReset().mockResolvedValue(new Uint8Array([1, 2, 3]));
+  renderer.captureThumbnails.mockReset().mockResolvedValue({ lo: new Uint8Array([1]), hi: new Uint8Array([2]) });
 });
 const member: Actor = { id: "alice", name: "Alice", avatar: null };
 
-function fixture(browser = false) {
+function fixture(browser = false, viewing = browser) {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
   const sql = { exec(query: string, ...args: (string | number | null)[]) {
@@ -38,7 +39,7 @@ function fixture(browser = false) {
     catch (error) { db.exec("ROLLBACK TO write; RELEASE write"); throw error; }
   } };
   const pending = new Set<Promise<unknown>>();
-  const ctx = { storage, getWebSockets: () => [], waitUntil(promise: Promise<unknown>) {
+  const ctx = { storage, getWebSockets: () => viewing ? [{ readyState: 1, deserializeAttachment: () => ({presence:{pageId}, sessionExpiresAt:Date.now()+60_000}) }] : [], waitUntil(promise: Promise<unknown>) {
     const settled = promise.catch(() => {});
     pending.add(settled);
     void settled.finally(() => pending.delete(settled));
@@ -101,22 +102,37 @@ describe("persistent file covers", () => {
   });
 
   it("preserves a pending pin, then uses its rendered revision and refreshes after design-system edits", async () => {
-    const { room, create, preview, apply, projected } = fixture(true);
+    const { db, room, create, preview, apply, projected } = fixture(true);
     await create("first"); const first = preview("first");
     await create("cover");
     await apply([{ t: "cover.set", id: "cover" }]);
     expect(room.cover()).toEqual({ nodeId: "cover", url: first.hi });
-    await room.alarm();
+    db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+    await room.renderThumbnails();
     await apply([]);
-    expect(room.cover()).toEqual({ nodeId: "cover", url: "/a/file/t/cover-1-hi.webp" });
-    expect(projected.at(-1)).toBe("/a/file/t/cover-1-hi.webp");
+    expect(room.cover()).toEqual({ nodeId: "cover", url: expect.stringMatching(/^\/a\/file\/t\/cover-1-[a-f0-9]{64}-hi\.webp$/) });
+    const firstCover = room.cover().url;
+    expect(projected.at(-1)).toBe(firstCover);
     await create("tokens", { kind: "tokens", source: "@theme { --color-primary: #abcdef; }" });
     expect(room.node("cover")!.rev).toBe(2);
-    expect(room.cover().url).toBe("/a/file/t/cover-1-hi.webp");
-    await room.alarm();
+    expect(room.cover().url).toBe(firstCover);
+    db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+    await room.renderThumbnails();
     await apply([]);
-    expect(room.cover()).toEqual({ nodeId: "cover", url: "/a/file/t/cover-2-hi.webp" });
-    expect(projected.at(-1)).toBe("/a/file/t/cover-2-hi.webp");
+    expect(room.cover()).toEqual({ nodeId: "cover", url: expect.stringMatching(/^\/a\/file\/t\/cover-2-[a-f0-9]{64}-hi\.webp$/) });
+    expect(projected.at(-1)).toBe(room.cover().url);
+  });
+
+  it("renders an explicitly requested cover without viewers, leaving unrelated frames queued", async () => {
+    const {room,create,apply} = fixture(true,false);
+    await create("unviewed"); await create("cover");
+    expect(await room.renderThumbnails()).toMatchObject({rendered:0,browserMs:0});
+    await apply([{t:"cover.set",id:"cover"}]);
+    expect(await room.renderThumbnails()).toMatchObject({rendered:1});
+    expect(renderer.loadFrame.mock.calls.map(([,n])=>n.id)).toEqual(["cover"]);
+    expect(room.cover().url).toMatch(/cover-1-[a-f0-9]{64}-hi\.webp$/);
+    expect(room.node("unviewed")!.thumbHi).toBeNull();
+    expect(await room.renderThumbnails()).toMatchObject({rendered:0,browserMs:0});
   });
 
   it("accepts image covers using their bounded preview rather than their original upload", async () => {

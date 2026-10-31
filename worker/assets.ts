@@ -1,3 +1,5 @@
+import { thumbnailName } from "../shared/thumbnail-url";
+
 function imageResponse(object: R2ObjectBody) {
   return new Response(object.body, { headers: {
     "content-type": object.httpMetadata?.contentType ?? "application/octet-stream",
@@ -33,7 +35,7 @@ export async function serveAsset(
 }
 
 const FILE_ID = /^[a-f0-9-]{36}$/i;
-const PREVIEW_NAME = /^[a-f0-9-]{36}-\d{1,12}-(?:lo|hi)\.webp$/i;
+const PREVIEW_NAME = thumbnailName;
 const MAX_BATCH_PREVIEWS = 16;
 const MAX_CONCURRENT_PREVIEWS = 8;
 const MAX_BATCH_BYTES = 1024 * 1024;

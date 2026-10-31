@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), works
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, workspaceFor: mocks.workspaceFor, room: () => ({ fetch: mocks.roomFetch }) }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
+vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
 vi.mock("./mcp", async () => ({ mcp: new (await import("hono")).Hono() }));
 
 import app from "./index";

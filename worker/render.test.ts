@@ -58,3 +58,27 @@ describe("background image preview rendering", () => {
     expect(calls.screenshot).toHaveBeenCalledWith(expect.objectContaining({ type: "webp", omitBackground: true }));
   });
 });
+
+describe("single-capture thumbnail tiers", () => {
+  it("captures once and derives the overview raster at the captured aspect ratio", async () => {
+    const { captureThumbnails } = await import("./render");
+    const drawImage = vi.fn();
+    const canvas = {width:0,height:0,getContext:()=>({drawImage,imageSmoothingQuality:""}),toDataURL:()=>"data:image/webp;base64,AQID"};
+    vi.stubGlobal("document",{createElement:()=>canvas});
+    vi.stubGlobal("Image",class {
+      naturalWidth=1280;naturalHeight=5120;onload: (()=>void)|null=null;
+      set src(_value:string) {queueMicrotask(()=>this.onload?.());}
+    });
+    const page = {screenshot:vi.fn(async()=>new Uint8Array([4,5,6])),evaluate:async(fn: (arg:unknown)=>unknown,arg:unknown)=>fn(arg)};
+    const result = await captureThumbnails(page as unknown as Page,2000,8000);
+    expect(page.screenshot).toHaveBeenCalledTimes(1);
+    expect(canvas).toMatchObject({width:256,height:1024});
+    expect(result).toEqual({hi:new Uint8Array([4,5,6]),lo:new Uint8Array([1,2,3])});
+  });
+  it("reuses one raster for both tiers when the frame is already small", async()=>{
+    const { captureThumbnails } = await import("./render");
+    const page={screenshot:vi.fn(async()=>new Uint8Array([4])),evaluate:vi.fn()};
+    const result=await captureThumbnails(page as unknown as Page,200,600);
+    expect(result.lo).toBe(result.hi);expect(page.screenshot).toHaveBeenCalledTimes(1);expect(page.evaluate).not.toHaveBeenCalled();
+  });
+});

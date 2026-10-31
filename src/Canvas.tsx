@@ -911,7 +911,13 @@ export function paintRaster(
     const area = Math.max(0, Math.min(size.w, x + screenW) - Math.max(0, x)) * Math.max(0, Math.min(size.h, y + height) - Math.max(0, y));
     const distance = (x + screenW / 2 - size.w / 2) ** 2 + (y + height / 2 - size.h / 2) ** 2;
     const side = f.kind === "image" ? 400 : 256;
-    return [{ url, pixels: side * side * r.h / Math.max(1, r.w), priority: (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance }];
+    const pixels = side * side * r.h / Math.max(1, r.w);
+    const priority = (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance;
+    // Warm overview pixels only after the shown image is ready. The existing decoded-pixel,
+    // entry and network budgets still apply, and current-theme requests always win admission.
+    const alternatives = upgrades?.enabled && upgrades.settled && area > 0 && thumbnails?.get(url)
+      ? Object.values(f.thumbnails ?? {}).filter((t) => t.rev === f.rev && t.lo !== url).map((t) => ({ url: t.lo, pixels, priority: priority - 2e12 })) : [];
+    return [{ url, pixels, priority }, ...alternatives];
   }));
 
   // Load small previews first. Sharpen visible content in a separate bounded queue, without

@@ -10,6 +10,7 @@ vi.mock("./data", async (original) => ({
   room: () => ({ fetch: mocks.roomFetch, revokeViewers: mocks.revokeViewers }),
 }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
+vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
 vi.mock("./mcp", async () => ({ mcp: new (await import("hono")).Hono() }));
 
 import app from "./index";

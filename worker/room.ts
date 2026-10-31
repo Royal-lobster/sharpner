@@ -2,7 +2,9 @@ import { DurableObject } from "cloudflare:workers";
 import puppeteer from "@cloudflare/puppeteer";
 import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
-import { capture, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { prepareRenderDesign } from "./render-fonts";
+import { capture, captureThumbnails, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
 import { sourceBatches, type SourceItem } from "../shared/source-batches";
 import { layoutHeight, layoutRects } from "../shared/layout";
@@ -11,9 +13,10 @@ import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
+import { THUMBNAIL_POLICY, thumbnailThemes } from "./thumbnail-policy";
 import { effectiveTheme, validateTheme } from "../shared/themes";
 import {
-  componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml,
+  componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml, previewCurrent,
   type Actor, type CanvasNode, type ClientMsg, type DesignSystem, type LibraryInfo, type NodeInput, type NodeKind,
   type Op, type Page, type Peer, type Presence, type ServerMsg, type CommentAnchor, type CommentDetail, type CommentThread,
 } from "../shared/types";
@@ -28,16 +31,19 @@ type Attachment = {
   shareToken?: string;
 };
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
+type NodeRow = Omit<CanvasNode, "thumbnails"> & { thumbnails: string };
 type BrowserTab = Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>;
 
 const MAX_SOURCE = 1_000_000;
-const THUMB_DELAY = 1_200;
+const THUMB_DELAY = THUMBNAIL_POLICY.debounceMs;
 /** Nodes rendered per alarm, and browser tabs used in parallel for them. */
-const THUMB_BATCH = 24;
-const THUMB_TABS = 4;
-const THUMB_MAX_TRIES = 3;
+const THUMB_BATCH = THUMBNAIL_POLICY.batch;
+const THUMB_TABS = THUMBNAIL_POLICY.tabs;
+const THUMB_MAX_TRIES = THUMBNAIL_POLICY.maxTries;
 const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, theme, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
-  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev`;
+  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev, thumb_theme AS thumbTheme,
+  (SELECT json_group_object(t.theme, json_object('rev', t.rev, 'lo', t.thumb_lo, 'hi', t.thumb_hi, 'measuredHeight', t.measured_h))
+   FROM node_thumbnails t WHERE t.node_id = nodes.id AND t.thumb_lo IS NOT NULL) AS thumbnails`;
 /** Node rows with their descriptions (only sections have one). */
 const NODES = `nodes LEFT JOIN descriptions d ON d.id = nodes.id`;
 const KINDS: NodeKind[] = ["frame", "image", "component", "section", "tokens"];
@@ -45,7 +51,7 @@ const DEFAULT_NAME: Record<NodeKind, string> = { frame: "Frame", image: "Image",
 const DEFAULT_WIDTH: Partial<Record<NodeKind, number>> = { tokens: 960 };
 /** Kinds rendered from a source in a browser (and so get thumbnails). */
 const RENDERED = `kind IN ('frame', 'component', 'tokens')`;
-const PENDING_THUMBS = `(${RENDERED} OR kind = 'image') AND thumb_rev < rev AND thumb_tries < ${THUMB_MAX_TRIES}`;
+const PENDING_IMAGES = `kind = 'image' AND thumb_rev < rev AND thumb_tries < ${THUMB_MAX_TRIES}`;
 const isRendered = (k: NodeKind) => k === "frame" || k === "component" || k === "tokens";
 
 /** Schema migrations for each room's SQLite storage. Append only; each runs once per room. */
@@ -84,6 +90,22 @@ const MIGRATIONS = [
       sql.exec(`ALTER TABLE nodes ADD COLUMN theme TEXT`);
     }
   },
+
+  // Preserve legacy URLs and heights. Replay after an older deployment must not relabel them.
+  (sql: SqlStorage) => {
+    if (sql.exec<{ name: string }>(`PRAGMA table_info(nodes)`).toArray().some((column) => column.name === "thumb_theme")) return;
+    sql.exec(`ALTER TABLE nodes ADD COLUMN thumb_theme TEXT NOT NULL DEFAULT '';
+   UPDATE nodes SET thumb_theme = CASE WHEN kind IN ('frame', 'component') THEN coalesce(theme, (SELECT nullif(v, '') FROM meta WHERE k = 'fileTheme'), '') ELSE '' END;
+   CREATE TABLE node_thumbnails (
+     node_id TEXT NOT NULL, theme TEXT NOT NULL, rev INTEGER NOT NULL,
+     thumb_lo TEXT, thumb_hi TEXT, measured_h REAL, tries INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (node_id, theme));
+   INSERT INTO node_thumbnails (node_id, theme, rev, thumb_lo, thumb_hi, measured_h, tries)
+     SELECT id, thumb_theme, thumb_rev, thumb_lo, thumb_hi, measured_h, thumb_tries FROM nodes WHERE kind IN ('frame', 'component', 'tokens');
+   CREATE TABLE used_themes (theme TEXT PRIMARY KEY, used_at INTEGER NOT NULL);
+   INSERT OR IGNORE INTO used_themes SELECT coalesce((SELECT v FROM meta WHERE k = 'fileTheme'), ''), 0 WHERE EXISTS (SELECT 1 FROM nodes WHERE kind = 'frame');
+   INSERT OR IGNORE INTO used_themes SELECT theme, 0 FROM nodes WHERE kind = 'frame' AND theme IS NOT NULL;`);
+  },
 ];
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
@@ -107,6 +129,9 @@ export class FileRoom extends DurableObject<Env> {
   private coverDirty = false;
   /** Cached library info; undefined = not fetched since wake-up. */
   private library: LibraryInfo | null | undefined;
+  /** Explicit screenshots and automatic previews share one browser slot per file. */
+  private browserTask: Promise<unknown> | null = null;
+  private screenshotRequests = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -120,7 +145,7 @@ export class FileRoom extends DurableObject<Env> {
     if (this.sql.exec(`SELECT 1 FROM pages LIMIT 1`).toArray().length === 0) {
       this.sql.exec(`INSERT INTO pages (id, name, sort) VALUES (?, ?, ?)`, crypto.randomUUID(), "Page 1", 0);
     }
-    if (version < MIGRATIONS.length && this.sql.exec(`SELECT 1 FROM nodes WHERE ${PENDING_THUMBS} LIMIT 1`).toArray().length) {
+    if (version < MIGRATIONS.length && this.sql.exec(`SELECT 1 FROM nodes LIMIT 1`).toArray().length) {
       this.ctx.waitUntil(this.scheduleThumbs());
     }
   }
@@ -132,14 +157,19 @@ export class FileRoom extends DurableObject<Env> {
   }
 
   nodes(ids?: string[]): CanvasNode[] {
-    if (!ids) return this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM ${NODES} ORDER BY sort, nodes.id`).toArray().map(meta);
-    return ids.flatMap((id) => this.sql.exec<CanvasNode>(`SELECT ${META_COLS} FROM ${NODES} WHERE nodes.id = ?`, id).toArray().map(meta));
+    if (!ids) return this.sql.exec<NodeRow>(`SELECT ${META_COLS} FROM ${NODES} ORDER BY sort, nodes.id`).toArray().map((n) => this.nodeMeta(n));
+    return ids.flatMap((id) => this.sql.exec<NodeRow>(`SELECT ${META_COLS} FROM ${NODES} WHERE nodes.id = ?`, id).toArray().map((n) => this.nodeMeta(n)));
   }
 
   /** One node including its source. */
   node(id: string): (CanvasNode & { source: string }) | null {
-    const row = this.sql.exec<CanvasNode & { source: string }>(`SELECT ${META_COLS}, source FROM ${NODES} WHERE nodes.id = ?`, id).toArray()[0];
-    return row ? meta(row) : null;
+    const row = this.sql.exec<NodeRow & { source: string }>(`SELECT ${META_COLS}, source FROM ${NODES} WHERE nodes.id = ?`, id).toArray()[0];
+    return row ? this.nodeMeta(row) : null;
+  }
+
+  private nodeMeta<T extends NodeRow>(row: T): Omit<T, "thumbnails"> & CanvasNode {
+    const thumbnails = JSON.parse(row.thumbnails ?? "{}") as ThemeThumbnails;
+    return selectThumbnail(meta({ ...row, thumbnails: isRendered(row.kind) ? thumbnails : undefined, thumbTheme: isRendered(row.kind) ? row.thumbTheme : undefined }), this.theme());
   }
 
   /** Pages with their nodes' metadata (no sources). */
@@ -155,11 +185,13 @@ export class FileRoom extends DurableObject<Env> {
   cover(): { nodeId: string | null; url: string | null } {
     const nodeId = this.meta("coverNodeId") || null;
     const url = this.sql.exec<{ c: string }>(
-      `SELECT CASE WHEN n.kind = 'image' THEN n.thumb_lo ELSE COALESCE(n.thumb_hi, n.thumb_lo) END AS c
+      `SELECT CASE WHEN n.kind = 'image' THEN n.thumb_lo ELSE coalesce(t.thumb_hi, t.thumb_lo, n.thumb_hi, n.thumb_lo) END AS c
        FROM nodes n JOIN pages p ON p.id = n.page_id
-       WHERE n.thumb_lo IS NOT NULL AND n.kind IN ('frame', 'image', 'tokens', 'component')
+       LEFT JOIN node_thumbnails t ON t.node_id = n.id AND t.rev = n.rev
+         AND t.theme = CASE WHEN n.kind = 'tokens' THEN '' ELSE coalesce(n.theme, ?, '') END
+       WHERE coalesce(t.thumb_lo, n.thumb_lo) IS NOT NULL AND n.kind IN ('frame', 'image', 'tokens', 'component')
        ORDER BY CASE WHEN n.id = ? THEN -1 WHEN n.kind = 'frame' THEN 0 WHEN n.kind = 'image' THEN 1 WHEN n.kind = 'tokens' THEN 2 ELSE 3 END,
-         p.sort, p.id, n.sort, n.id LIMIT 1`, nodeId,
+         p.sort, p.id, n.sort, n.id LIMIT 1`, this.theme(), nodeId,
     ).toArray()[0]?.c ?? null;
     return { nodeId, url };
   }
@@ -175,7 +207,9 @@ export class FileRoom extends DurableObject<Env> {
   private viewedPages(): string[] {
     const pages = new Set<string>();
     for (const ws of this.ctx.getWebSockets()) {
-      const pageId = (ws.deserializeAttachment() as Attachment | null)?.presence?.pageId;
+      const att = ws.deserializeAttachment() as Attachment | null;
+      if (ws.readyState !== 1 || !att || att.sessionExpiresAt <= Date.now()) continue;
+      const pageId = att.presence?.pageId;
       if (pageId) pages.add(pageId);
     }
     return [...pages];
@@ -304,10 +338,16 @@ export class FileRoom extends DurableObject<Env> {
               if (!node || (node.kind !== "frame" && node.kind !== "image")) throw new Error("Cover must be a frame or image in this file");
             }
             this.setMeta("coverNodeId", op.id ?? "");
+            const cover = op.id ? this.node(op.id) : null;
+            const needsPreview = cover && (cover.kind === "image" ? !cover.thumbLo : !previewCurrent(cover));
+            this.setMeta("coverRender", needsPreview ? op.id! : "");
+            if (needsPreview) renderChanged = true;
             break;
           }
           case "theme.set": {
-            this.setMeta("fileTheme", validateTheme(op.theme) ?? "");
+            const theme = validateTheme(op.theme) ?? "";
+            this.setMeta("fileTheme", theme);
+            this.sql.exec(`INSERT OR REPLACE INTO used_themes VALUES (?, ?)`, theme, Date.now());
             break;
           }
           default:
@@ -315,16 +355,20 @@ export class FileRoom extends DurableObject<Env> {
         }
       }
       for (const id of this.invalidate(design.tokens, design.tags)) touched.nodes.add(id);
-      if (design.tokens || design.tags.size) renderChanged = true;
+      if (design.tokens || design.tags.size) {
+        this.setMeta("designRev", String(Number(this.meta("designRev") ?? 0) + 1));
+        renderChanged = true;
+      }
       if (this.theme() !== previousFileTheme) {
         // Explicit screen overrides and token comparison sheets keep their current appearance.
         // The previous measurement stays as the layout height until the new rendering replaces it.
         // Component theme overrides always render in their own theme.
         const inherited = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind IN ('component', 'frame') AND theme IS NULL`).toArray();
-        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('component', 'frame') AND theme IS NULL`);
+        // Theme is a cache selection, independent of the content revision.
         for (const { id } of inherited) touched.nodes.add(id);
         if (inherited.length) renderChanged = true;
       }
+      if (renderChanged) this.reconcileThumbnails(staleThumbs);
       for (const id of touched.nodeDels) touched.nodes.delete(id);
       const coverNodeId = this.meta("coverNodeId");
       if (coverNodeId) {
@@ -347,7 +391,7 @@ export class FileRoom extends DurableObject<Env> {
       by,
     });
     if (commentChanges && (commentChanges.threads.length || commentChanges.deleted.length)) this.broadcast({ type: "comments", ...commentChanges });
-    if (staleThumbs.length) this.ctx.waitUntil(this.env.FILES.delete(staleThumbs));
+    if (staleThumbs.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(staleThumbs)]));
     if (renderChanged) await this.scheduleThumbs();
     if (design.tokens || design.tags.size) this.ctx.waitUntil(this.notifyDependents(fileId, design.tokens, [...design.tags]));
     this.updateCover(fileId);
@@ -437,7 +481,9 @@ export class FileRoom extends DurableObject<Env> {
     }
 
     const themeChanged = next.theme !== (cur?.theme ?? null);
-    const changed = !cur || next.source !== cur.source || next.width !== cur.width || next.height !== cur.height || next.src !== cur.src || themeChanged;
+    const specimenChanged = (kind === "component" || kind === "tokens") && next.name !== cur?.name;
+    const changed = !cur || next.source !== cur.source || next.width !== cur.width || next.height !== cur.height || next.src !== cur.src
+      || kind === "component" && themeChanged || specimenChanged;
     const rev = changed ? (cur?.rev ?? 0) + 1 : cur!.rev;
     if (kind === "component" && (changed || next.name !== cur?.name)) {
       design.tags.add(componentTag(next.name));
@@ -453,10 +499,12 @@ export class FileRoom extends DurableObject<Env> {
       `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
-      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
+      next.src, thumbLo, thumbHi, rev, isRendered(kind) ? cur?.thumbRev ?? 0 : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
     );
+    if (cur?.thumbTheme !== undefined) this.sql.exec(`UPDATE nodes SET thumb_theme = ? WHERE id = ?`, cur.thumbTheme, id);
+    if (kind === "frame" && (!cur || themeChanged)) this.sql.exec(`INSERT OR REPLACE INTO used_themes VALUES (?, ?)`, theme ?? this.theme() ?? "", Date.now());
     if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);
-    return changed && (isRendered(kind) || kind === "image" && !thumbLo);
+    return (changed || themeChanged) && (isRendered(kind) || kind === "image" && !thumbLo);
   }
 
   /** Materializes computed positions before a node changes its page, parent or layout mode. */
@@ -527,10 +575,16 @@ export class FileRoom extends DurableObject<Env> {
   private deleteNode(id: string, staleThumbs: string[], design: { tags: Set<string>; tokens: boolean }, deleted: Set<string>) {
     const n = this.node(id);
     if (!n) return;
+    const raw = this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, id).toArray()[0];
+    if (raw) staleThumbs.push(...thumbKeys(raw));
     this.sql.exec(`DELETE FROM nodes WHERE id = ?`, id);
     this.describe(id, "");
     deleted.add(id);
-    if (isRendered(n.kind)) staleThumbs.push(...thumbKeys(n));
+    if (isRendered(n.kind)) {
+      for (const row of this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM node_thumbnails WHERE node_id = ?`, id)) staleThumbs.push(...thumbKeys(row));
+      staleThumbs.push(...thumbKeys(n));
+      this.sql.exec(`DELETE FROM node_thumbnails WHERE node_id = ?`, id);
+    }
     if (n.kind === "component") design.tags.add(componentTag(n.name));
     if (n.kind === "tokens") design.tokens = true;
   }
@@ -574,10 +628,14 @@ export class FileRoom extends DurableObject<Env> {
   }
 
   private async refreshLibrary(tokens: boolean, tags: string[]) {
+    this.setMeta("designRev", String(Number(this.meta("designRev") ?? 0) + 1));
     this.library = undefined;
     const library = await this.libraryInfo();
     this.broadcast({ type: "library", library });
     const bumped = this.invalidate(tokens, new Set(tags));
+    const stale: string[] = [];
+    this.reconcileThumbnails(stale);
+    if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
     if (bumped.size) {
       this.broadcast({ type: "sync", nodes: this.nodes([...bumped]), by: null });
       await this.scheduleThumbs();
@@ -592,63 +650,206 @@ export class FileRoom extends DurableObject<Env> {
 
   // ---- thumbnails ----------------------------------------------------------
 
-  private async scheduleThumbs() {
-    if (!this.env.BROWSER) return;
-    if ((await this.ctx.storage.getAlarm()) == null) await this.ctx.storage.setAlarm(Date.now() + THUMB_DELAY);
+  /** Keep one revision per eligible theme, retaining the last selected raster until its replacement lands. */
+  private reconcileThumbnails(stale: string[]) {
+    const design = mergeDesignSystems(this.library?.design, this.ownDesignSystem());
+    this.sql.exec(`DELETE FROM used_themes WHERE theme NOT IN (SELECT theme FROM used_themes ORDER BY used_at DESC, theme LIMIT 32)`);
+    const used = this.sql.exec<{ theme: string }>(`SELECT theme FROM used_themes ORDER BY used_at DESC, theme`).toArray().map((r) => r.theme);
+    for (const node of this.nodes().filter((n) => isRendered(n.kind))) {
+      // Persist the selected cache hit as the one fallback retained across future content edits.
+      const raw = this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, node.id).toArray()[0]!;
+      const retained = new Set(Object.values(node.thumbnails ?? {}).flatMap((t) => thumbKeys({ thumbLo: t.lo, thumbHi: t.hi })));
+      stale.push(...thumbKeys(raw).filter((key) => !retained.has(key) && !thumbKeys(node).includes(key)));
+      this.sql.exec(`UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_theme = ?, measured_h = ? WHERE id = ?`,
+        node.thumbLo, node.thumbHi, node.thumbRev ?? 0, node.thumbTheme ?? "", node.measuredHeight, node.id);
+      const themes = thumbnailThemes(node, this.theme(), used, design.tokens);
+      const rows = this.sql.exec<{ theme: string; rev: number; thumbLo: string | null; thumbHi: string | null }>(
+        `SELECT theme, rev, thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM node_thumbnails WHERE node_id = ?`, node.id,
+      ).toArray();
+      for (const row of rows) {
+        if (!themes.includes(row.theme) || row.rev !== node.rev) {
+          // The selected fallback owns its URLs until a replacement is ready.
+          stale.push(...thumbKeys(row).filter((key) => !thumbKeys(node).includes(key)));
+          this.sql.exec(`DELETE FROM node_thumbnails WHERE node_id = ? AND theme = ?`, node.id, row.theme);
+        }
+      }
+      for (const theme of themes) this.sql.exec(`INSERT OR IGNORE INTO node_thumbnails (node_id, theme, rev) VALUES (?, ?, ?)`, node.id, theme, node.rev);
+    }
   }
 
-  /** Renders stale nodes to lo/hi WebP thumbnails in R2, a batch at a time. */
-  async alarm() {
+  private async scheduleThumbs(debounce = true) {
+    if (!this.env.BROWSER || !this.env.THUMBNAIL_QUEUE || !this.hasRenderAudience()) return;
     const fileId = this.meta("fileId");
-    const base = this.meta("origin") ?? "";
-    if (!this.env.BROWSER || !fileId) return;
-    const dirty = this.sql.exec<{ id: string; kind: NodeKind; name: string; source: string; src: string | null; width: number; height: number | null; rev: number; theme: string | null }>(
-      // Pages people are looking at refresh first, so a file-wide change reaches the visible canvas quickly.
-      `SELECT id, kind, name, source, src, width, height, rev, theme FROM nodes WHERE ${PENDING_THUMBS}
-       ORDER BY page_id IN (SELECT value FROM json_each(?)) DESC, thumb_tries LIMIT ${THUMB_BATCH}`,
-      JSON.stringify(this.viewedPages()),
-    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source), theme: effectiveTheme(n, this.theme()) }));
-    if (!dirty.length) return;
-    const design = await this.designSystem();
+    if (!fileId || !this.hasPendingThumbnails()) return;
+    const readyAt = debounce ? Date.now() + THUMB_DELAY : Number(this.meta("thumbAfter") ?? 0);
+    if (debounce) this.setMeta("thumbAfter", String(readyAt));
+    await this.env.THUMBNAIL_QUEUE.get(this.env.THUMBNAIL_QUEUE.idFromName("global")).enqueue(fileId, readyAt);
+  }
 
-    let browser;
+  /** Old room alarms only enqueue work; all browser access now goes through the global scheduler. */
+  async alarm() { await this.scheduleThumbs(false); }
+
+  private coverRequest() {
+    const requested = this.meta("coverRender");
+    return requested && requested === this.meta("coverNodeId") ? requested : null;
+  }
+
+  private hasRenderAudience() { return this.viewedPages().length > 0 || this.coverRequest() !== null; }
+
+  private pendingThumbnails(limit: number = THUMB_BATCH) {
+    return this.sql.exec<{
+      id: string; kind: NodeKind; name: string; source: string; src: string | null;
+      width: number; height: number | null; rev: number; theme: string | null; renderTheme: string;
+    }>(
+      `SELECT n.id, n.kind, n.name, n.source, n.src, n.width, n.height, n.rev, n.theme, t.theme AS renderTheme
+       FROM nodes n JOIN node_thumbnails t ON t.node_id = n.id AND t.rev = n.rev
+       WHERE t.thumb_lo IS NULL AND t.tries < ${THUMB_MAX_TRIES}
+         AND (? OR (n.id = ? AND t.theme = CASE WHEN n.kind = 'tokens' THEN '' ELSE coalesce(n.theme, ?, '') END))
+       ORDER BY (t.theme = CASE WHEN n.kind = 'tokens' THEN '' ELSE coalesce(n.theme, ?, '') END) DESC,
+         n.page_id IN (SELECT value FROM json_each(?)) DESC, t.tries, n.sort, n.id, t.theme LIMIT ?`,
+      Number(this.viewedPages().length > 0), this.coverRequest(), this.theme(),
+      this.theme(), JSON.stringify(this.viewedPages()), limit,
+    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source), theme: n.renderTheme || undefined }));
+  }
+
+  private pendingImages(limit: number) {
+    return this.sql.exec<{ id: string; src: string; width: number; height: number | null; rev: number }>(
+      `SELECT id, src, width, height, rev FROM nodes WHERE ${PENDING_IMAGES} AND (? OR id = ?) LIMIT ?`,
+      Number(this.viewedPages().length > 0), this.coverRequest(), limit,
+    ).toArray().map((n) => ({ ...n, kind: "image" as const, html: "", theme: undefined, renderTheme: "" }));
+  }
+
+  private hasPendingThumbnails() { return !!this.pendingThumbnails(1).length || !!this.pendingImages(1).length; }
+
+  /** One bounded fair turn, one browser for the file's entire queue. Called only by ThumbnailQueue. */
+  async renderThumbnails(notAfter = Date.now() + 20_000): Promise<{ more: boolean; browserMs: number; rendered: number; retryAt?: number }> {
+    if (this.browserTask) return { more: true, browserMs: 0, rendered: 0 };
+    return this.withFileBrowser(() => this.renderThumbnailsNow(notAfter));
+  }
+
+  private async withFileBrowser<T>(run: () => Promise<T>): Promise<T> {
+    while (this.browserTask) await this.browserTask.catch(() => {});
+    const task = run();
+    this.browserTask = task;
+    try { return await task; }
+    finally { if (this.browserTask === task) this.browserTask = null; }
+  }
+
+  /** Explicit agent requests remain available without viewers or automatic preview budget. */
+  async screenshotNodes(ids: string[], origin: string) {
+    if (!this.env.BROWSER) throw new Error("Browser Rendering is unavailable");
+    if (!ids.length || ids.length > 4) throw new Error("Request between one and four nodes");
+    if (this.screenshotRequests >= 4) throw new Error("Too many pending screenshots for this file; retry shortly");
+    this.screenshotRequests++;
     try {
-      browser = await puppeteer.launch(this.env.BROWSER, { keep_alive: 60_000 });
-    } catch (err) {
-      console.warn("thumbnail browser unavailable, retrying", String(err));
-      await this.ctx.storage.setAlarm(Date.now() + 30_000);
-      return;
-    }
+      return await this.withFileBrowser(async () => {
+        const nodes = this.nodes(ids).filter((n) => isRendered(n.kind));
+        if (!nodes.length) throw new Error("No matching frames, components or token sheets");
+        const design = await prepareRenderDesign(await this.designSystem());
+        const coordinator = this.env.THUMBNAIL_QUEUE?.get(this.env.THUMBNAIL_QUEUE.idFromName("global"));
+        let lease: string | null = null;
+        const waiting = Date.now();
+        if (coordinator) {
+          while (!(lease = await coordinator.acquireScreenshot())) {
+            if (Date.now() - waiting > 30_000) throw new Error("The shared browser is busy; retry the screenshot shortly");
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+        const started = Date.now();
+        let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+        let stopped = false;
+        try {
+          const run = async () => {
+            browser = await puppeteer.launch(this.env.BROWSER!, { keep_alive: 10_000 });
+            if (stopped) { await browser.close(); return { content: [] }; }
+            const tab = await browser.newPage();
+            const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
+            for (const n of nodes) {
+              if (stopped) break;
+              const size = await loadFrame(tab, { ...n, html: renderedHtml(n, this.node(n.id)!.source), theme: effectiveTheme(n, this.theme()) }, origin, design);
+              const scale = Math.min(1, 1600 / Math.max(size.width, size.height));
+              const bytes = await capture(tab, size.width, size.height, { type: "jpeg", scale });
+              let binary = "";
+              for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+              content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: btoa(binary), mimeType: "image/jpeg" });
+            }
+            return { content };
+          };
+          return await withTimeout(run(), THUMBNAIL_POLICY.screenshotSessionMs, "screenshot session");
+        } finally {
+          stopped = true;
+          if (browser) await withTimeout(browser.close(), 5000, "browser close");
+          if (coordinator && lease) await coordinator.releaseScreenshot(lease);
+          console.log("screenshot-browser", JSON.stringify({ fileId: this.meta("fileId"), screens: nodes.length, browserMs: Date.now() - started }));
+        }
+      });
+    } finally { this.screenshotRequests--; }
+  }
+
+  private async renderThumbnailsNow(notAfter: number): Promise<{ more: boolean; browserMs: number; rendered: number; retryAt?: number }> {
+    const fileId = this.meta("fileId"), base = this.meta("origin") ?? "";
+    if (!this.env.BROWSER || !fileId || !this.hasRenderAudience()) return { more: false, browserMs: 0, rendered: 0 };
+    const readyAt = Number(this.meta("thumbAfter") ?? 0);
+    if (Date.now() < readyAt) return { more: true, browserMs: 0, rendered: 0 };
+    const designRev = this.meta("designRev");
+    const design = await prepareRenderDesign(await this.designSystem());
+    if (Date.now() > notAfter || this.meta("designRev") !== designRev) return { more: true, browserMs: 0, rendered: 0 };
+    const stale: string[] = [];
+    this.reconcileThumbnails(stale);
+    if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
+    if (!this.hasPendingThumbnails()) return { more: false, browserMs: 0, rendered: 0 };
+    const tabCount = Math.min(THUMB_TABS, this.pendingThumbnails(THUMB_TABS).length + this.pendingImages(THUMB_TABS).length);
+    const started = Date.now();
+    let rendered = 0;
+    let retryAt: number | undefined;
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+    let stopped = false;
     try {
-      const queue = [...dirty];
-      const worker = async () => {
-        const tab = await withTimeout(browser.newPage(), 15_000, "newPage");
-        for (let n = queue.shift(); n; n = queue.shift()) {
-          // A raced timeout does not cancel the underlying browser operation. Never reuse that
-          // page: closing the batch's browser below cancels its remaining protocol work safely.
-          if (!(await this.renderThumb(tab, n, fileId, base, design))) break;
-          // Publish each preview as it lands: a file-wide theme change then fills in screen by
-          // screen instead of waiting for the whole batch.
-          this.broadcast({ type: "sync", nodes: this.nodes([n.id]), by: null });
+      const run = async () => {
+        browser = await puppeteer.launch(this.env.BROWSER!, { keep_alive: 10_000 });
+        if (stopped) { await browser.close(); return; }
+        const tabs = await Promise.all(Array.from({ length: Math.max(1, tabCount) }, () => browser!.newPage()));
+        // Re-query between batches so edits and theme toggles supersede queued work.
+        while (!stopped && Date.now() - started < THUMBNAIL_POLICY.quantumMs && this.hasRenderAudience() && this.meta("designRev") === designRev) {
+          const queue = this.pendingThumbnails();
+          const jobs = [...queue, ...this.pendingImages(THUMB_BATCH - queue.length)];
+          if (!jobs.length) break;
+          await Promise.all(tabs.map(async (tab) => {
+            for (let n = jobs.shift(); n && !stopped; n = jobs.shift()) {
+              if (!this.hasRenderAudience() || Date.now() < Number(this.meta("thumbAfter") ?? 0) || Date.now() - started >= THUMBNAIL_POLICY.quantumMs) break;
+              // A timed-out tab is never reused; close the whole session before retrying.
+              if (!await this.renderThumb(tab, n, fileId, base, design, () => !stopped && this.meta("designRev") === designRev)) { stopped = true; break; }
+              rendered++;
+              this.broadcast({ type: "sync", nodes: this.nodes([n.id]), by: null });
+            }
+          }));
         }
       };
-      await Promise.allSettled(Array.from({ length: Math.min(THUMB_TABS, dirty.length) }, worker));
+      await withTimeout(run(), THUMBNAIL_POLICY.sessionMs, "thumbnail session");
+    } catch (err) {
+      retryAt = Date.now() + 30_000;
+      console.warn("thumbnail session failed", String(err));
     } finally {
-      await browser.close();
+      stopped = true;
+      if (browser) await withTimeout(browser.close(), 5000, "browser close");
     }
+    const browserMs = Date.now() - started;
+    console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, browserMs }));
     this.updateCover(fileId);
-    const more = this.sql.exec(`SELECT 1 FROM nodes WHERE ${PENDING_THUMBS} LIMIT 1`).toArray().length;
-    if (more) await this.ctx.storage.setAlarm(Date.now() + 500);
+    const more = this.hasPendingThumbnails();
+    return { more: more && this.hasRenderAudience(), browserMs, rendered, retryAt };
   }
 
   /** Renders one node's lo/hi thumbnails into R2 and records them. Returns false if it failed or the node is gone. */
   private async renderThumb(
     tab: BrowserTab,
-    n: { id: string; kind: NodeKind; src: string | null; html: string; width: number; height: number | null; rev: number; theme?: string },
+    n: { id: string; kind: NodeKind; src: string | null; html: string; width: number; height: number | null; rev: number; theme?: string; renderTheme: string },
     fileId: string,
     base: string,
     design: DesignSystem,
+    valid: () => boolean,
   ) {
+    let uploaded: string[] = [];
     try {
       const { measured, lo, hi } = await withTimeout((async () => {
         if (n.kind === "image") {
@@ -656,30 +857,50 @@ export class FileRoom extends DurableObject<Env> {
           return { measured: null, lo: await capture(tab, size.width, size.height, { type: "webp", scale: 1, quality: 70, transparent: true }), hi: null };
         }
         const size = await loadFrame(tab, n, base, design);
-        const lo = await capture(tab, size.width, size.height, { type: "webp", scale: Math.min(1, 256 / size.width), quality: 70 });
-        const hi = await capture(tab, size.width, size.height, { type: "webp", scale: Math.min(1, 1280 / size.width) });
-        return { ...size, lo, hi };
+        return { ...size, ...await captureThumbnails(tab, size.width, size.height) };
       })(), 30_000, "render");
-      const key = `${fileId}/t/${n.id}-${n.rev}`;
+      if (!valid()) return false;
+      // Attempt-specific immutable keys keep a timed-out upload from overwriting/deleting a retry.
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${n.renderTheme}\0${crypto.randomUUID()}`));
+      const themeKey = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const key = `${fileId}/t/${n.id}-${n.rev}${n.kind === "image" ? "" : `-${themeKey}`}`;
       const meta = { httpMetadata: { contentType: "image/webp" } };
-      await this.env.FILES.put(`${key}-lo.webp`, lo, meta);
-      if (hi) await this.env.FILES.put(`${key}-hi.webp`, hi, meta);
+      const distinctHi = hi && hi !== lo;
+      const hiUrl = fileUrl(`${key}-${distinctHi ? "hi" : "lo"}.webp`);
+      uploaded = distinctHi ? [`${key}-lo.webp`, `${key}-hi.webp`] : [`${key}-lo.webp`];
+      const puts = [this.env.FILES.put(uploaded[0]!, lo, meta)];
+      if (distinctHi) puts.push(this.env.FILES.put(uploaded[1]!, hi, meta));
+      const results = await Promise.allSettled(puts);
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
       const cur = this.node(n.id);
-      if (!cur || cur.rev !== n.rev) {
-        await this.env.FILES.delete(hi ? [`${key}-lo.webp`, `${key}-hi.webp`] : [`${key}-lo.webp`]);
+      if (!valid() || !cur || cur.rev !== n.rev || n.kind !== "image" && !this.sql.exec(`SELECT 1 FROM node_thumbnails WHERE node_id = ? AND theme = ? AND rev = ?`, n.id, n.renderTheme, n.rev).toArray().length) {
+        await this.env.FILES.delete(uploaded);
         return false;
       }
-      const old = thumbKeys(cur);
-      this.sql.exec(
-        `UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_tries = 0, measured_h = ? WHERE id = ?`,
-        fileUrl(`${key}-lo.webp`), hi ? fileUrl(`${key}-hi.webp`) : n.src, n.rev, measured, n.id,
-      );
-      if (old.length) this.ctx.waitUntil(this.env.FILES.delete(old));
+      if (n.kind === "image") {
+        const old = thumbKeys(cur);
+        this.sql.exec(`UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_tries = 0 WHERE id = ?`, fileUrl(`${key}-lo.webp`), n.src, n.rev, n.id);
+        if (old.length) this.ctx.waitUntil(this.env.FILES.delete(old));
+      } else {
+        this.sql.exec(`UPDATE node_thumbnails SET thumb_lo = ?, thumb_hi = ?, measured_h = ?, tries = 0 WHERE node_id = ? AND theme = ? AND rev = ?`,
+          fileUrl(`${key}-lo.webp`), hiUrl, measured, n.id, n.renderTheme, n.rev);
+        // Background warming never changes the current node's dimensions or cover.
+        if ((effectiveTheme(cur, this.theme()) ?? "") === n.renderTheme) {
+          const old = thumbKeys(cur).filter((key) => !Object.values(cur.thumbnails ?? {}).some((t) => thumbKeys({ thumbLo: t.lo, thumbHi: t.hi }).includes(key)));
+          this.sql.exec(`UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_theme = ?, measured_h = ? WHERE id = ?`,
+            fileUrl(`${key}-lo.webp`), hiUrl, n.rev, n.renderTheme, measured, n.id);
+          if (old.length) this.ctx.waitUntil(this.env.FILES.delete(old));
+        }
+      }
+      if (n.id === this.coverRequest() && (n.kind === "image" || (effectiveTheme(cur, this.theme()) ?? "") === n.renderTheme)) this.setMeta("coverRender", "");
       return true;
     } catch (err) {
+      if (uploaded.length) this.ctx.waitUntil(this.env.FILES.delete(uploaded));
       console.warn("thumbnail failed", n.id, String(err));
       // Retried on later alarms, up to THUMB_MAX_TRIES per revision.
-      this.sql.exec(`UPDATE nodes SET thumb_tries = thumb_tries + 1 WHERE id = ? AND rev = ?`, n.id, n.rev);
+      if (n.kind === "image") this.sql.exec(`UPDATE nodes SET thumb_tries = thumb_tries + 1 WHERE id = ? AND rev = ?`, n.id, n.rev);
+      else this.sql.exec(`UPDATE node_thumbnails SET tries = tries + 1 WHERE node_id = ? AND theme = ? AND rev = ?`, n.id, n.renderTheme, n.rev);
       return false;
     }
   }
@@ -765,8 +986,10 @@ export class FileRoom extends DurableObject<Env> {
     } else if (msg.type === "presence") {
       const parsed = presenceMessage.safeParse(msg.presence);
       if (!parsed.success) return;
+      const pageChanged = att.presence.pageId !== parsed.data.pageId;
       att.presence = parsed.data;
       ws.serializeAttachment(att);
+      if (pageChanged) await this.scheduleThumbs(false);
       this.broadcast({ type: "peer", peer: toPeer(att) }, ws);
     }
   }
