@@ -10,6 +10,43 @@ export function themeNames(css: string): string[] {
   return [...themes];
 }
 
+/** A theme's look in two colors, taken from its token values (named themes override the default). */
+export type ThemeSwatch = { background?: string; accent?: string; vars: Record<string, string> };
+
+const SWATCH_BACKGROUND = ["background", "bg", "surface", "canvas", "base", "card"];
+const SWATCH_ACCENT = ["primary", "accent", "brand"];
+
+/**
+ * Color tokens per theme, for previewing a theme without rendering a screen. Themes can be any
+ * named variant, so a swatch comes from the theme's own values rather than from its name.
+ * Values stay CSS: `var()` references resolve where the swatch's custom properties are applied.
+ */
+export function themeSwatches(css: string): Map<string, ThemeSwatch> {
+  const declarations = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const scopes = new Map<string, Record<string, string>>([["light", {}]]);
+  const base: Record<string, string> = {};
+  // Innermost blocks only, so wrappers such as @layer or @media still reveal their selectors.
+  for (const [, selector, body] of declarations.matchAll(/([^{};]*)\{([^{}]*)\}/g)) {
+    const values = Object.fromEntries([...body!.matchAll(/(--color-[\w-]+)\s*:\s*([^;]+)/g)].map(([, name, value]) => [name!, value!.trim()]));
+    if (!Object.keys(values).length) continue;
+    for (const part of selector!.split(",").map((text) => text.trim())) {
+      const named = /\[data-theme\s*=\s*(?:"([^"\\]+)"|'([^'\\]+)'|([\w-]+))\s*\]/.exec(part);
+      const theme = named ? named[1] ?? named[2] ?? named[3]! : /\.dark(?![\w-])/.test(part) ? "dark" : /\.light(?![\w-])/.test(part) ? "light"
+        : /@theme|:root|^html$|^body$/.test(part) ? null : undefined;
+      if (theme === undefined) continue;
+      if (theme === null) Object.assign(base, values);
+      else scopes.set(theme, { ...scopes.get(theme), ...values });
+    }
+  }
+  const pick = (vars: Record<string, string>, names: string[]) => names.map((name) => `--color-${name}`).find((name) => vars[name]);
+  return new Map([...scopes].map(([theme, own]) => {
+    const vars = { ...base, ...own };
+    // What a theme declares itself is what distinguishes it, even under another token name.
+    const background = pick(own, SWATCH_BACKGROUND) ?? pick(vars, SWATCH_BACKGROUND), accent = pick(own, SWATCH_ACCENT) ?? pick(vars, SWATCH_ACCENT);
+    return [theme, { vars, background: background && `var(${background})`, accent: accent && `var(${accent})` }];
+  }));
+}
+
 export const themeLabel = (theme: string) => theme.charAt(0).toUpperCase() + theme.slice(1);
 
 /** null preserves authored HTML at file level, or inherits the file at frame level. */

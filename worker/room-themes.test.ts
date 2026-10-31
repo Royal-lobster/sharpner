@@ -19,7 +19,7 @@ beforeEach(() => {
 });
 const member: Actor = { id: "alice", name: "Alice", avatar: null };
 
-function fixture(browser = false) {
+function fixture(browser = false, sockets: { deserializeAttachment(): unknown }[] = []) {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
   const sql = { exec(query: string, ...args: (string | number | null)[]) {
@@ -38,7 +38,7 @@ function fixture(browser = false) {
     catch (error) { db.exec("ROLLBACK TO write; RELEASE write"); throw error; }
   } };
   const pending = new Set<Promise<unknown>>();
-  const ctx = { storage, getWebSockets: () => [], waitUntil(promise: Promise<unknown>) {
+  const ctx = { storage, getWebSockets: () => sockets, waitUntil(promise: Promise<unknown>) {
     const settled = promise.catch(() => {});
     pending.add(settled);
     void settled.finally(() => pending.delete(settled));
@@ -94,7 +94,8 @@ describe("file and screen themes", () => {
     storage.setAlarm.mockClear();
     await apply([{ t: "theme.set", theme: "dark" }]);
     for (const id of ["screen", "component"]) {
-      expect(room.node(id)).toMatchObject({ rev: before.get(id)! + 1, measuredHeight: null });
+      // The previous measurement holds the layout until the restyled thumbnail measures again.
+      expect(room.node(id)).toMatchObject({ rev: before.get(id)! + 1, thumbRev: before.get(id), measuredHeight: 400 });
       expect(db.prepare("SELECT thumb_tries FROM nodes WHERE id = ?").get(id)).toEqual({ thumb_tries: 0 });
     }
     for (const id of ["tokens", "override", "section", "image"]) {
@@ -107,6 +108,21 @@ describe("file and screen themes", () => {
     expect(room.node("screen")!.rev).toBe(rev);
   });
 
+  it("refreshes thumbnails on pages people are viewing before the rest of the file", async () => {
+    const viewer = { presence: { pageId: "viewed", selection: [], cursor: null } };
+    const { room, apply, create, cached } = fixture(true, [{ deserializeAttachment: () => viewer }]);
+    for (let i = 0; i < 30; i++) await create(`elsewhere-${i}`);
+    await apply([{ t: "page.put", page: { id: "viewed", name: "Viewed", sort: 2 } }]);
+    await apply(["a", "b"].map((id) => ({ t: "node.put", id: `viewed-${id}`, node: { pageId: "viewed", width: 400, height: 600, source: `<p>${id}</p>` } })));
+    cached();
+    await apply([{ t: "theme.set", theme: "dark" }]);
+    renderer.loadFrame.mockClear();
+    await room.alarm();
+    const rendered = renderer.loadFrame.mock.calls.map(([, node]) => (node as { id: string }).id);
+    expect(rendered.slice(0, 2).sort()).toEqual(["viewed-a", "viewed-b"]);
+    expect(room.node("viewed-a")).toMatchObject({ thumbRev: room.node("viewed-a")!.rev });
+  });
+
   it("keeps an override through unrelated edits and resumes inheritance when cleared", async () => {
     const { room, apply, create, cached } = fixture();
     await create("screen");
@@ -114,7 +130,7 @@ describe("file and screen themes", () => {
     cached();
     const original = room.node("screen")!;
     await apply([{ t: "node.put", id: "screen", node: { theme: " light " } }]);
-    expect(room.node("screen")).toMatchObject({ theme: "light", rev: original.rev + 1, measuredHeight: null, source: original.source });
+    expect(room.node("screen")).toMatchObject({ theme: "light", rev: original.rev + 1, measuredHeight: 400, source: original.source });
     await apply([{ t: "node.put", id: "screen", node: { name: "Renamed" } }, { t: "theme.set", theme: "uwu" }]);
     expect(room.node("screen")).toMatchObject({ theme: "light", rev: original.rev + 1 });
     await apply([{ t: "node.put", id: "screen", node: { theme: null } }]);

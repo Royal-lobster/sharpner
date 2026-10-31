@@ -117,7 +117,7 @@ characters, each tool description to 300 characters, and the full catalog to
 
 Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
 
-Use `set_theme` for the file default and a frame's `theme` field in `create_nodes` or `update_nodes` for an override (`null` restores inheritance). `get_design_system` reports theme names from the token CSS; `get_file` and `read_nodes` report each frame's choice and effective theme. Members have File theme and selected Screen theme menus. With no file choice, As authored preserves existing HTML theme contexts. Compare themes in neighboring frames with explicit theme overrides so a file change keeps the comparison intact. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. A shared screen component is optional, and substantial structural alternatives can use separate frames.
+Use `set_theme` for the file default and a frame's `theme` field in `create_nodes` or `update_nodes` for an override (`null` restores inheritance). `get_design_system` reports theme names from the token CSS; `get_file` and `read_nodes` report each frame's choice and effective theme. Members choose the file theme in the navigation dock and a selected screen's theme in the selection bar. With no file choice, As authored preserves existing HTML theme contexts. Compare themes in neighboring frames with explicit theme overrides so a file change keeps the comparison intact. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. A shared screen component is optional, and substantial structural alternatives can use separate frames.
 
 Finish a new product file with a designed 1600 × 900 HTML frame on a described
 Cover page. Use the file's identity and design system, keep its name readable at
@@ -129,7 +129,7 @@ The saved choice follows edits and preview regeneration; deleting its node,
 section or page restores automatic selection. Pass `nodeId: null` to reset it
 explicitly. The screen guide includes cover composition guidance.
 
-Members can select a frame or image and choose **File → Use selection as cover**.
+Members can select a frame or image and choose **Use as file cover** in the selection bar.
 **File → Use automatic cover** clears that choice.
 
 Create screens inside sections without coordinates to use automatic layout.

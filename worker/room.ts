@@ -37,7 +37,7 @@ const THUMB_BATCH = 24;
 const THUMB_TABS = 4;
 const THUMB_MAX_TRIES = 3;
 const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, theme, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
-  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev`;
+  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev`;
 /** Node rows with their descriptions (only sections have one). */
 const NODES = `nodes LEFT JOIN descriptions d ON d.id = nodes.id`;
 const KINDS: NodeKind[] = ["frame", "image", "component", "section", "tokens"];
@@ -169,6 +169,16 @@ export class FileRoom extends DurableObject<Env> {
       const att = ws.deserializeAttachment() as Attachment;
       return this.currentSession(ws, att) && !att.shareToken ? [toPeer(att)] : [];
     });
+  }
+
+  /** Pages open in connected editors and view links. */
+  private viewedPages(): string[] {
+    const pages = new Set<string>();
+    for (const ws of this.ctx.getWebSockets()) {
+      const pageId = (ws.deserializeAttachment() as Attachment | null)?.presence?.pageId;
+      if (pageId) pages.add(pageId);
+    }
+    return [...pages];
   }
 
   comments(): CommentThread[] { return this.commentStore.list(); }
@@ -308,8 +318,9 @@ export class FileRoom extends DurableObject<Env> {
       if (design.tokens || design.tags.size) renderChanged = true;
       if (this.theme() !== previousFileTheme) {
         // Explicit screen overrides and token comparison sheets keep their current appearance.
+        // The previous measurement stays as the layout height until the new rendering replaces it.
         const inherited = this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`).toArray();
-        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0, measured_h = NULL WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`);
+        this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'component' OR (kind = 'frame' AND theme IS NULL)`);
         for (const { id } of inherited) touched.nodes.add(id);
         if (inherited.length) renderChanged = true;
       }
@@ -435,7 +446,7 @@ export class FileRoom extends DurableObject<Env> {
     this.sql.exec(
       `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, themeChanged ? null : cur?.measuredHeight ?? null,
+      str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
       next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
     );
     if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);
@@ -586,7 +597,10 @@ export class FileRoom extends DurableObject<Env> {
     const base = this.meta("origin") ?? "";
     if (!this.env.BROWSER || !fileId) return;
     const dirty = this.sql.exec<{ id: string; kind: NodeKind; name: string; source: string; src: string | null; width: number; height: number | null; rev: number; theme: string | null }>(
-      `SELECT id, kind, name, source, src, width, height, rev, theme FROM nodes WHERE ${PENDING_THUMBS} ORDER BY thumb_tries LIMIT ${THUMB_BATCH}`,
+      // Pages people are looking at refresh first, so a file-wide change reaches the visible canvas quickly.
+      `SELECT id, kind, name, source, src, width, height, rev, theme FROM nodes WHERE ${PENDING_THUMBS}
+       ORDER BY page_id IN (SELECT value FROM json_each(?)) DESC, thumb_tries LIMIT ${THUMB_BATCH}`,
+      JSON.stringify(this.viewedPages()),
     ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source), theme: effectiveTheme(n, this.theme()) }));
     if (!dirty.length) return;
     const design = await this.designSystem();

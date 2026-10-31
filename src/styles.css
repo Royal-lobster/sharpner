@@ -231,8 +231,16 @@ body:has(.editor) { --toast-offset: 84px; }
 .dock-button > span:first-of-type { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .dock-chevron { flex: none; transition: transform 0.16s var(--ease); }
 .dock-page-button[aria-expanded=true] .dock-chevron { transform: rotate(180deg); }
-.dock-theme-button { max-width: 190px; }
-.theme-trigger > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dock-theme-button { gap: 6px; max-width: 150px; }
+.dock-theme-button > .theme-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+/* A theme in its own colors; the custom properties it carries resolve its token references. */
+.theme-swatch { position: relative; flex: none; width: 14px; height: 14px; border-radius: 4px; background: var(--swatch-bg, var(--muted)); box-shadow: inset 0 0 0 1px rgb(255 240 215 / 0.22); }
+.theme-swatch::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--swatch-accent, transparent); }
+.theme-menu-head, .file-menu-head { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 6px; }
+.theme-menu-head strong, .file-menu-head strong { color: var(--foreground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.theme-menu-head span, .file-menu-head span { line-height: 1.4; }
+.theme-menu-note { flex-direction: column; align-items: flex-start; gap: 2px; color: var(--muted-foreground); }
+.theme-menu-action { color: var(--primary); font-weight: 500; }
 .dock-divider { flex: none; align-self: center; height: 18px !important; margin-inline: 3px; }
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
@@ -280,9 +288,22 @@ body:has(.editor) { --toast-offset: 84px; }
 .share-on-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
 .share-actions { display: flex; gap: 8px; }
 .share-url { min-width: 0; font-family: var(--font-mono); text-overflow: ellipsis; }
-.selection-pill { position: absolute; top: calc(64px + var(--safe-top)); left: calc(16px + var(--safe-left)); max-width: min(600px, calc(100% - 32px - var(--safe-left) - var(--safe-right))); height: auto; gap: 6px; padding: 7px 12px; pointer-events: none; }
-.selection-pill b { color: var(--primary); font-weight: 500; }
-.selection-pill > .screen-theme-button { pointer-events: auto; min-width: 0; max-width: 210px; flex-shrink: 1; }
+/* Centered in the free space right of the navigation dock (and on its center line); it never overlaps the dock as it grows. */
+.selection-bar {
+  position: absolute; z-index: 15; top: calc(19px + var(--safe-top)); left: calc(var(--nav-end, 16px) + 12px); right: calc(16px + var(--safe-right));
+  display: flex; align-items: center; gap: 2px; width: fit-content; max-width: calc(100% - var(--nav-end, 16px) - 28px - var(--safe-right)); height: 32px; margin-inline: auto;
+  padding: 0 4px 0 12px; border-radius: var(--radius-lg); font-size: 12px; animation: fade 0.16s var(--ease) both;
+}
+.selection-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.selection-agents { flex: none; margin-left: 6px; color: var(--primary); font-size: 11px; }
+.selection-agents::before { content: "·"; margin-right: 6px; color: var(--muted-foreground); }
+.selection-bar:not(:has(.selection-action, .selection-cover-on)) { padding-right: 12px; }
+.selection-divider { flex: none; height: 16px !important; margin-inline: 6px 2px; }
+.selection-action { flex: none; max-width: 150px; color: var(--foreground); }
+.selection-action > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-action.inherits { color: var(--muted-foreground); }
+.selection-cover-on { display: grid; flex: none; place-items: center; width: 24px; height: 24px; color: var(--primary); }
+.selection-cover-on svg { width: 14px; height: 14px; }
 .zoom { position: absolute; z-index: 20; right: calc(16px + var(--safe-right)); bottom: calc(16px + var(--safe-bottom)); }
 .zoom-pct { min-width: 52px; font-variant-numeric: tabular-nums; }
 @media (hover: none), (pointer: coarse) {
@@ -298,8 +319,9 @@ body:has(.editor) { --toast-offset: 84px; }
   .dock-share-button { position: relative; flex: none; }
   .dock-share-button .share-on-dot { position: absolute; top: 7px; right: 7px; }
   .dock-people-button > .presence-dot { display: none; }
-  .selection-pill { top: calc(64px + var(--safe-top)); left: calc(10px + var(--safe-left)); transform: none; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
-  .selection-pill b { display: none; }
+  .selection-bar { top: calc(64px + var(--safe-top)); left: calc(10px + var(--safe-left)); right: auto; margin: 0; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
+  .selection-agents { display: none; }
+  .dock-theme-button > .theme-label { display: none; }
   .zoom { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); }
   .zoom .zoom-step, .zoom-divider { display: none; }
 }
@@ -408,10 +430,12 @@ body:has(.editor) { --toast-offset: 84px; }
   .comment-placement { left: calc(10px + var(--safe-left)); right: calc(10px + var(--safe-right)); top: calc(68px + var(--safe-top)); transform: none; max-width: none; justify-content: space-between; }
 }
 @media (min-width: 701px) and (max-width: 1000px) {
-  .selection-pill, .comment-placement { top: calc(76px + var(--safe-top)); }
+  .comment-placement { top: calc(76px + var(--safe-top)); }
+  .selection-bar { top: calc(68px + var(--safe-top)); left: calc(16px + var(--safe-left)); right: auto; margin: 0; max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right)); }
 }
 @media (min-width: 701px) {
   .editor:has(.comments-open) .editor-navigation { max-width: calc(100% - 390px - var(--safe-left) - var(--safe-right)); }
+  .editor:has(.comments-open) .selection-bar { right: calc(390px + var(--safe-right)); max-width: calc(100% - var(--nav-end, 16px) - 402px - var(--safe-right)); }
 }
 @media (max-width: 360px) {
   .dock-comments-count { display: none; }

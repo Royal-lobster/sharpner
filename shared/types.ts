@@ -49,9 +49,15 @@ export type CanvasNode = {
   /** Raster previews used when the node is small on screen (lo ≈ 256px wide for the canvas layer, hi ≈ 1280px wide). */
   thumbLo: string | null;
   thumbHi: string | null;
-  /** Bumps whenever what the node renders changes (its source, size, or the design system it uses). */
+  /** Bumps whenever what the node renders changes (its source, size, theme, or the design system it uses). */
   rev: number;
+  /** Revision the current thumbnails show. Behind `rev` while the renderer catches up. */
+  thumbRev?: number;
 };
+
+/** Whether the node's raster previews show its current revision (missing on older clients' metadata). */
+export const previewCurrent = (node: Pick<CanvasNode, "rev" | "thumbRev" | "thumbHi">) =>
+  !!node.thumbHi && (node.thumbRev === undefined || node.thumbRev >= node.rev);
 
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
 export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "theme" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {

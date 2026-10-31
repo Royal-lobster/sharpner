@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto } from "@tabler/icons-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
 import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
-import { themeNames } from "../shared/themes";
-import { ThemeMenu } from "./components/theme-menu";
+import { themeNames, themeSwatches } from "../shared/themes";
+import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
@@ -134,6 +134,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   room: Room; meta: FileMeta; user: User; onChange: (f: Partial<FileInfo>) => void; onShare?: (token: string | null) => void; readOnly?: boolean;
 }) {
   useSyncExternalStore(room.subscribe, room.getVersion);
+  const tokens = room.design().tokens;
+  const swatches = useMemo(() => themeSwatches(tokens), [tokens]);
   const desktop = useDesktop();
   const { file, workspace } = meta;
   const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes } = useCanvasLocation(file.id, room);
@@ -213,8 +215,16 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
   const coverCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "image") ? selected[0]! : null;
   const themeScreen = selected.length === 1 && selected[0]!.kind === "frame" ? selected[0]! : null;
-  const themes = themeNames(room.design().tokens);
-  const hasThemes = themes.length > 1 || room.fileTheme !== null || [...room.nodes.values()].some((node) => !!node.theme);
+  const themes = themeNames(tokens);
+  const overriding = [...room.nodes.values()].filter((node) => node.kind === "frame" && !!node.theme);
+  const hasThemes = themes.length > 1 || room.fileTheme !== null || overriding.length > 0;
+  const followFileTheme = async () => {
+    const ok = await askConfirm({
+      title: overriding.length === 1 ? "Make 1 screen follow the file theme?" : `Make ${overriding.length} screens follow the file theme?`,
+      message: "They drop their own theme and use the file theme from now on.", confirm: "Follow file theme",
+    });
+    if (ok) room.send(overriding.map((node) => ({ t: "node.put", id: node.id, node: { theme: null } })));
+  };
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
   const describePage = async (p: Page) => {
     const description = await askText({
@@ -242,19 +252,27 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
         ) : (
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
-        {!readOnly && selected.length > 0 && (
-          <Badge variant="secondary" className="selection-pill canvas-glass" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
-            <span className="truncate">{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span><b>· visible to agents</b>
-            {hasThemes && themeScreen && <ThemeMenu scope="Screen" themes={themes} value={themeScreen.theme ?? null} fileTheme={room.fileTheme}
+        {!readOnly && !commentMode && selected.length > 0 && (
+          <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
+            <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
+            <span className="selection-agents">visible to agents</span>
+            {(themeScreen && hasThemes || coverCandidate) && <Separator orientation="vertical" className="selection-divider" />}
+            {hasThemes && themeScreen && <ScreenThemeMenu themes={themes} swatches={swatches} value={themeScreen.theme ?? null} fileTheme={room.fileTheme}
               disabled={room.status !== "open"} onChange={(theme) => room.send([{ t: "node.put", id: themeScreen.id, node: { theme } }])} />}
-          </Badge>
+            {coverCandidate && (room.coverNodeId === coverCandidate.id
+              ? <Tooltip><TooltipTrigger asChild><span className="selection-cover-on" role="img" aria-label="File cover"><IconPhotoCheck aria-hidden /></span></TooltipTrigger><TooltipContent side="bottom">This is the file cover</TooltipContent></Tooltip>
+              : <Tooltip><TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" className="selection-action" aria-label="Use as file cover" disabled={room.status !== "open"}
+                    onClick={() => room.send([{ t: "cover.set", id: coverCandidate.id }])}><IconPhoto aria-hidden /></Button>
+                </TooltipTrigger><TooltipContent side="bottom">Use as file cover</TooltipContent></Tooltip>)}
+          </div>
         )}
         {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
         {!readOnly && <CommentsPanel room={room} open={commentsOpen && !commentMode} activeId={activeCommentId} draft={draftComment}
           onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       </main>
       {/* Keyboard interaction with the dock and its panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
-      <div className="editor-dock editor-navigation" onKeyDown={(e) => e.stopPropagation()}>
+      <div className="editor-dock editor-navigation" ref={trackNavigationEnd} onKeyDown={(e) => e.stopPropagation()}>
         <nav aria-label="File and pages"><ButtonGroup className="dock-bar canvas-glass">
           {readOnly ? (
             <Button variant="ghost" size="icon" asChild className="back"><a href="/" aria-label="Sharpner"><img src="/mark.svg" width={24} height={24} alt="" /></a></Button>
@@ -279,13 +297,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 fileTrigger.current?.focus();
                 action();
               }}>
-              {readOnly ? <DropdownMenuLabel>View only</DropdownMenuLabel> : <>
+              <DropdownMenuLabel className="file-menu-head"><strong>{file.name}</strong><span>{readOnly ? `View only · ${status}` : `${workspace.name} · ${status}`}</span></DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {!readOnly && <>
                 <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => void renameFile(); }}><Pencil aria-hidden />Rename file…</DropdownMenuItem>
                 {(meta.files.length > 0 || file.library_id) && <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("library"); }}><IconLibrary aria-hidden />Design system…</DropdownMenuItem>}
-                <DropdownMenuItem disabled={!coverCandidate || room.status !== "open" || room.coverNodeId === coverCandidate.id}
-                  onSelect={() => { if (coverCandidate) room.send([{ t: "cover.set", id: coverCandidate.id }]); }}>
-                  <IconPhoto aria-hidden />{coverCandidate && room.coverNodeId === coverCandidate.id ? "Current file cover" : "Use selection as cover"}
-                </DropdownMenuItem>
                 {room.coverNodeId && <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => room.send([{ t: "cover.set", id: null }])}><IconPhoto aria-hidden />Use automatic cover</DropdownMenuItem>}
                 <DropdownMenuSeparator />
               </>}
@@ -335,8 +351,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               ))}
             </ItemGroup>
           </DockPanel>
-          {!readOnly && hasThemes && <ThemeMenu scope="File" themes={themes} value={room.fileTheme} disabled={room.status !== "open"}
-            onChange={(theme) => room.send([{ t: "theme.set", theme }])} />}
+          {!readOnly && hasThemes && <>
+            <Separator orientation="vertical" className="dock-divider dock-theme-divider" />
+            <FileThemeMenu themes={themes} swatches={swatches} value={room.fileTheme} overrides={overriding.length} disabled={room.status !== "open"}
+              onChange={(theme) => room.send([{ t: "theme.set", theme }])} onFollowAll={() => void followFileTheme()} />
+          </>}
         </ButtonGroup></nav>
       </div>
       {!readOnly && <div className="editor-dock editor-collaboration" onKeyDown={(e) => e.stopPropagation()}>
@@ -514,6 +533,18 @@ function trackKeyboardInset(el: HTMLElement | null) {
   vv.addEventListener("resize", update);
   vv.addEventListener("scroll", update);
   return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
+}
+
+/** Publishes where the navigation dock ends as `--nav-end`, so the selection bar centers in the space beside it. */
+function trackNavigationEnd(el: HTMLElement | null) {
+  const editor = el?.closest<HTMLElement>(".editor");
+  if (!el || !editor) return;
+  const update = () => editor.style.setProperty("--nav-end", `${Math.ceil(el.getBoundingClientRect().right - editor.getBoundingClientRect().left)}px`);
+  const observer = new ResizeObserver(update);
+  observer.observe(el);
+  addEventListener("resize", update);
+  update();
+  return () => { observer.disconnect(); removeEventListener("resize", update); };
 }
 
 /** View-only link sharing for a file: off, or one link anyone can open to watch. */

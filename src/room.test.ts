@@ -188,9 +188,10 @@ describe("file and screen themes", () => {
     expect(effectiveTheme(room.nodes.get("inherit")!, room.fileTheme)).toBe("dark");
     expect(effectiveTheme(room.nodes.get("fixed")!, room.fileTheme)).toBe("light");
     expect(effectiveTheme(room.nodes.get("foundations")!, room.fileTheme)).toBeUndefined();
-    expect(room.heights.has("inherit")).toBe(false);
-    expect(room.heights.has("primitive")).toBe(false);
-    expect(room.nodes.get("inherit")!.measuredHeight).toBeNull();
+    // Heights hold until restyled previews measure themselves, so the layout doesn't jump.
+    expect(room.heights.get("inherit")).toBe(1000);
+    expect(room.heights.get("primitive")).toBe(1000);
+    expect(room.nodes.get("inherit")!.measuredHeight).toBe(900);
     expect(room.heights.get("fixed")).toBe(1000);
     expect(room.heights.get("foundations")).toBe(1000);
     expect(room.sources.get("inherit")).toBe(source);
@@ -208,15 +209,18 @@ describe("file and screen themes", () => {
     room.send([{ t: "node.put", id: "screen", node: { theme: null } }]);
     expect(room.nodes.get("screen")!.theme).toBeNull();
     expect(effectiveTheme(room.nodes.get("screen")!, room.fileTheme)).toBe("dark");
-    expect(room.heights.has("screen")).toBe(false);
-    expect(room.nodes.get("screen")!.measuredHeight).toBeNull();
+    expect(room.heights.get("screen")).toBe(800);
+    expect(room.nodes.get("screen")!.measuredHeight).toBe(800);
 
     room.send([{ t: "node.put", id: "new", node: { pageId: "page_one", theme: "uwu" } }]);
     expect(room.nodes.get("new")!.theme).toBe("uwu");
     supply(socket, "screen");
     socket.receive({ type: "sync", nodes: [{ ...room.nodes.get("screen")!, theme: "uwu", rev: 2 }], by: null });
     expect(room.nodes.get("screen")!.theme).toBe("uwu");
-    expect(room.sources.has("screen")).toBe(false);
+    // The previous revision stays on screen while the new one loads.
+    expect(room.sources.get("screen")?.rev).toBe(1);
+    supply(socket, "screen", "<p>restyled</p>", 2);
+    expect(room.sources.get("screen")).toEqual({ rev: 2, source: "<p>restyled</p>" });
   });
 });
 

@@ -298,7 +298,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       const h = (e.data as { sharpnerHeight?: number } | null)?.sharpnerHeight;
       if (typeof h !== "number") return;
       for (const iframe of rootRef.current?.querySelectorAll("iframe") ?? []) {
-        if (iframe.contentWindow === e.source) room.setHeight(iframe.dataset.id!, h);
+        if (iframe.dataset.id && iframe.contentWindow === e.source) room.setHeight(iframe.dataset.id, h);
       }
     };
     addEventListener("message", onMessage);
@@ -758,6 +758,20 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
   const settling = doneAt !== undefined;
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
+  const top = tier === "hi" && hi && hi !== lo ? hi : lo;
+  // Leaving live rendering (often because a restyled thumbnail just arrived) keeps the live view
+  // until the thumbnail that replaces it has loaded; an <img> whose src changes keeps painting its old image meanwhile.
+  const [handoff, setHandoff] = useState(false);
+  const [wasLive, setWasLive] = useState(live);
+  if (wasLive !== live) { setWasLive(live); setHandoff(!live); }
+  const topImage = useRef<HTMLImageElement>(null);
+  useLayoutEffect(() => {
+    if (!handoff) return;
+    if (!top || topImage.current?.complete) { setHandoff(false); return; }
+    const fallback = setTimeout(() => setHandoff(false), 4000);
+    return () => clearTimeout(fallback);
+  }, [handoff, top]);
+  const showLive = (live || handoff) && html !== undefined;
   const cls = ["frame", f.kind, f.parentId && "nested", catalog && "catalog-item", selected && "selected", agent && "working", settling && "settle", fresh && "fresh"].filter(Boolean).join(" ");
   return (
     <div
@@ -768,10 +782,10 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
       <div className="frame-label">{label}</div>
       {agent && <div className="agent-chip"><span className="aperture" />{agent}</div>}
       <div className="frame-body">
-        {lo && <img src={lo} alt="" draggable={false} decoding="async" />}
-        {tier === "hi" && hi && hi !== lo && <img src={hi} alt="" draggable={false} decoding="async" />}
-        {!lo && !live && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {live && html !== undefined && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} />}
+        {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
+        {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
+        {!lo && !showLive && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
+        {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} />}
         {(agent || settling) && <AgentSheen />}
       </div>
       {(agent || settling) && <Trace doneAt={doneAt} />}
@@ -802,21 +816,44 @@ function Trace({ doneAt }: { doneAt: number | undefined }) {
   );
 }
 
+type LiveLayer = { doc: string; key: number; ready: boolean; swap: boolean };
+
+/**
+ * A live preview that swaps documents without blinking: the shown iframe stays until its
+ * replacement has loaded and styled, so a theme or source change never reveals the outdated
+ * thumbnail underneath. Only the newest document reports heights.
+ */
 function LiveFrame({ id, html, design, theme, width, height }: { id: string; html: string; design: DesignSystem; theme: string | undefined; width: number; height: number }) {
-  const [ready, setReady] = useState(false);
   const doc = useMemo(() => frameDocument(html, { measure: true, base: location.origin, design, theme }), [html, design, theme]);
-  useEffect(() => setReady(false), [doc]);
-  return (
-    <iframe
-      data-id={id}
-      title={id}
-      sandbox="allow-scripts"
-      srcDoc={doc}
-      style={{ width, height, opacity: ready ? 1 : 0 }}
-      // Give Tailwind a beat to generate styles before swapping the thumbnail out.
-      onLoad={() => setTimeout(() => setReady(true), 120)}
-    />
-  );
+  const [layers, setLayers] = useState<LiveLayer[]>(() => [{ doc, key: 0, ready: false, swap: false }]);
+  const newest = layers[layers.length - 1]!;
+  if (newest.doc !== doc) {
+    // Replace a still-loading document; keep the one on screen as the backdrop.
+    const shown = layers.find((layer) => layer.ready);
+    setLayers([...(shown ? [shown] : []), { doc, key: newest.key + 1, ready: false, swap: !!shown }]);
+  }
+  const reveal = (key: number) => setLayers((current) => {
+    const at = current.findIndex((layer) => layer.key === key);
+    return at < 0 ? current : [{ ...current[at]!, ready: true }, ...current.slice(at + 1)];
+  });
+  return layers.map((layer) => {
+    const latest = layer === newest;
+    return (
+      <iframe
+        key={layer.key}
+        data-id={latest ? id : undefined}
+        title={id}
+        aria-hidden={latest ? undefined : true}
+        tabIndex={latest ? undefined : -1}
+        sandbox="allow-scripts"
+        srcDoc={layer.doc}
+        // A first preview fades in over its thumbnail; a replacement swaps in one frame, with nothing between.
+        style={{ width, height, opacity: layer.ready ? 1 : 0, zIndex: latest ? 1 : 0, transition: layer.swap ? "none" : undefined }}
+        // Give Tailwind a beat to generate styles before swapping the previous view out.
+        onLoad={() => setTimeout(() => reveal(layer.key), 120)}
+      />
+    );
+  });
 }
 
 // ---- raster layer -------------------------------------------------------------
@@ -832,6 +869,9 @@ const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", 
 function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
   return KIND_PREFIX[f.kind] + (catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name);
 }
+
+/** Per canvas, the preview last painted for each node: it stays up while a replacement loads. */
+const lastPainted = new WeakMap<HTMLCanvasElement, Map<string, HTMLImageElement>>();
 
 export function paintRaster(
   canvas: HTMLCanvasElement,
@@ -898,12 +938,19 @@ export function paintRaster(
 
   ctx.font = LABEL_FONT.node;
   const nodeBaseline = labelBaseline(ctx);
+  let painted = lastPainted.get(canvas);
+  if (!painted) lastPainted.set(canvas, painted = new Map());
+  const paintedNow = new Map<string, HTMLImageElement>();
   for (const { node: f, rect: r, screenWidth: screenW } of items) {
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y, sw = screenW, sh = r.h * cam.z;
     const url = thumbnailSource(f);
     const sharper = f.kind !== "image" && f.thumbHi ? highPreviews?.get(f.thumbHi) : null;
     const box = !sharper && Boolean(url && thumbnails && !thumbnails.has(url));
-    const img = sharper ?? (!box && url ? thumbnails?.get(url) ?? null : null);
+    const current = sharper ?? (!box && url ? thumbnails?.get(url) ?? null : null);
+    // A new revision's preview (after a theme or source change) replaces the old one only once loaded,
+    // instead of blanking the frame in between.
+    const img = current ?? (!box && url ? painted.get(f.id) ?? null : null);
+    if (img) paintedNow.set(f.id, img);
     const born = fx.appeared.get(f.id);
     const fresh = fx.reducedMotion || born === undefined ? 1 : Math.min(1, (fx.now - born) / MATERIALIZE_MS);
     ctx.globalAlpha = 1 - (1 - fresh) ** 3;
@@ -933,6 +980,8 @@ export function paintRaster(
       ctx.fillText(fitLabel(ctx, nodeLabel(f, catalogs), sw), x, y - nodeBaseline);
     }
   }
+
+  lastPainted.set(canvas, paintedNow);
 
   // Family names head their catalog row in the gutter, on the same line as the variant labels beside them.
   const gutter = (CATALOG_GUTTER - 24) * cam.z;

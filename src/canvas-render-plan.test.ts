@@ -52,6 +52,15 @@ describe("canvas render plan", () => {
     expect(result.liveIds.size).toBe(18);
   });
 
+  it("renders screens live while their previews still show an earlier revision, such as the previous theme", () => {
+    const result = plan([
+      node("restyled", { width: 200, rev: 3, thumbRev: 2 }),
+      node("current", { width: 200, rev: 3, thumbRev: 3 }),
+      node("legacy", { width: 200, rev: 3 }),
+    ]);
+    expect([...result.liveIds]).toEqual(["restyled"]);
+  });
+
   it("allows compact component specimens and missing previews to become live earlier", () => {
     const result = plan([
       node("component", { kind: "component", width: 220 }),
