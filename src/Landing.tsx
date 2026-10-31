@@ -1,4 +1,4 @@
-import { IconArrowRight, IconMessageCircle, IconPlugConnected, IconSparkles } from "@tabler/icons-react";
+import { IconArrowRight } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -36,13 +36,12 @@ export function Landing({ onSignIn }: { onSignIn: () => Promise<unknown> }) {
     <div className="landing">
       <header className="landing-bar">
         <span className="landing-brand"><img src="/mark.svg" width={24} height={24} alt="" />Sharpner</span>
-        <Button variant="ghost" className="landing-bar-sign-in" onClick={signIn} disabled={busy}>Sign in</Button>
+        <Button variant="ghost" onClick={signIn} disabled={busy}>Sign in</Button>
       </header>
       <main className="landing-main">
         <section className="landing-hero">
           <div className="landing-copy">
-            <span className="landing-eyebrow"><span className="aperture" />A live canvas your agents can draw on</span>
-            <h1>Your team and your agents, <em>on one canvas.</em></h1>
+            <h1>Your team and your agents, <span>on one canvas.</span></h1>
             <p>
               Sharpner is a shared infinite canvas for designing product UI. People and AI agents work on the same
               frames, drawing on your design system's tokens and components.
@@ -61,13 +60,13 @@ export function Landing({ onSignIn }: { onSignIn: () => Promise<unknown> }) {
         <section className="landing-steps" aria-labelledby="landing-steps-title">
           <h2 id="landing-steps-title">How it works</h2>
           <ol>
-            <Step n="01" icon={<IconPlugConnected />} title="Connect your agent">
+            <Step n="01" title="Connect your agent">
               Add Sharpner as an MCP server. Your agent signs in as you and works in the files you can open.
             </Step>
-            <Step n="02" icon={<IconSparkles />} title="Watch it draw">
+            <Step n="02" title="Watch it draw">
               Frames appear on the canvas as your agent writes them, built from your workspace's tokens and components.
             </Step>
-            <Step n="03" icon={<IconMessageCircle />} title="Point and sharpen">
+            <Step n="03" title="Point and sharpen">
               Pin feedback anywhere on the canvas, then ask your agent to address it when you're ready.
             </Step>
           </ol>
@@ -81,10 +80,9 @@ export function Landing({ onSignIn }: { onSignIn: () => Promise<unknown> }) {
   );
 }
 
-function Step({ n, icon, title, children }: { n: string; icon: ReactNode; title: string; children: ReactNode }) {
+function Step({ n, title, children }: { n: string; title: string; children: ReactNode }) {
   return (
     <li className="landing-step">
-      <span className="landing-step-icon" aria-hidden>{icon}</span>
       <span className="landing-step-n" aria-hidden>{n}</span>
       <h3>{title}</h3>
       <p>{children}</p>
