@@ -619,7 +619,6 @@ export class FileRoom extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(Date.now() + 30_000);
       return;
     }
-    const done: string[] = [];
     try {
       const queue = [...dirty];
       const worker = async () => {
@@ -628,14 +627,15 @@ export class FileRoom extends DurableObject<Env> {
           // A raced timeout does not cancel the underlying browser operation. Never reuse that
           // page: closing the batch's browser below cancels its remaining protocol work safely.
           if (!(await this.renderThumb(tab, n, fileId, base, design))) break;
-          done.push(n.id);
+          // Publish each preview as it lands: a file-wide theme change then fills in screen by
+          // screen instead of waiting for the whole batch.
+          this.broadcast({ type: "sync", nodes: this.nodes([n.id]), by: null });
         }
       };
       await Promise.allSettled(Array.from({ length: Math.min(THUMB_TABS, dirty.length) }, worker));
     } finally {
       await browser.close();
     }
-    if (done.length) this.broadcast({ type: "sync", nodes: this.nodes(done), by: null });
     this.updateCover(fileId);
     const more = this.sql.exec(`SELECT 1 FROM nodes WHERE ${PENDING_THUMBS} LIMIT 1`).toArray().length;
     if (more) await this.ctx.storage.setAlarm(Date.now() + 500);

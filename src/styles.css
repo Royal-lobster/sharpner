@@ -447,6 +447,9 @@ body:has(.editor) { --toast-offset: 84px; }
 .frame-body { position: absolute; inset: 0; overflow: hidden; background: #1e1b18; box-shadow: 0 0 0 calc(1px * var(--inv)) rgb(255 240 215 / 0.08), 0 calc(10px * var(--inv)) calc(30px * var(--inv)) rgb(0 0 0 / 0.35); }
 .frame.image .frame-body { background: none; }
 .frame-body img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: top; pointer-events: none; }
+/* Matches the raster layer: an outdated preview stays visible, dimmed, until its re-render arrives. */
+.frame-body img { transition: opacity 0.2s var(--ease); }
+.frame.outdated .frame-body img { opacity: 0.45; }
 .frame-body iframe { position: absolute; left: 0; top: 0; border: 0; background: #fff; pointer-events: none; transition: opacity 0.15s; }
 .frame-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--faint); font-size: calc(12px * var(--inv)); background: repeating-linear-gradient(45deg, #171412 0 10px, #1e1b18 10px 20px); }
 /* Mirrors LABEL_LINE, LABEL_GAP and LABEL_FONT.node in canvas-labels.ts, which the raster layer draws with. */

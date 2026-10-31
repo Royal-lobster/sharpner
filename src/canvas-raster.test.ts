@@ -47,7 +47,7 @@ function fixture(options: ConstructorParameters<typeof ThumbnailCache>[1] = {}) 
     }, cache, { cache: highCache, ...upgrades });
     return plan;
   };
-  return { paint, cache, images, highCache, highImages, drawImage, fillText: ctx.fillText,
+  return { paint, cache, images, highCache, highImages, drawImage, ctx: ctx as { globalAlpha?: number }, fillText: ctx.fillText,
     finish: () => images.forEach(image => image.onload?.()),
     finishHigh: () => highImages.forEach(image => image.onload?.()),
   };
@@ -105,6 +105,19 @@ describe("raster previews while zoomed out", () => {
     f.paint(0.5, [restyled], upgrades);
     expect(f.images.at(-1)!.src).toBe(restyled.thumbLo);
     expect(f.drawImage.mock.lastCall?.[0]).toBe(f.images.at(-1));
+    f.cache.dispose(); f.highCache.dispose();
+  });
+
+  it("dims a preview that trails its node's revision until the re-render arrives", () => {
+    const f = fixture();
+    const upgrades = { enabled: false, settled: true };
+    const alphas: number[] = [];
+    f.drawImage.mockImplementation(() => { alphas.push(f.ctx.globalAlpha ?? 1); });
+    f.paint(0.5, [component], upgrades);
+    f.finish();
+    f.paint(0.5, [{ ...component, rev: 2, thumbRev: 1 }], upgrades);
+    f.paint(0.5, [{ ...component, rev: 2, thumbRev: 2 }], upgrades);
+    expect(alphas).toEqual([0.45, 1]);
     f.cache.dispose(); f.highCache.dispose();
   });
 
