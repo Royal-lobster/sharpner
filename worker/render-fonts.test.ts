@@ -7,8 +7,10 @@ describe("shared web-font preparation",()=>{
     vi.stubGlobal("fetch",fetcher);
     const design={tokens:'@import url("https://fonts.googleapis.com/css2?family=Inter-test"); @theme {--font-sans:Inter}',components:[]};
     const prepared=await prepareRenderDesign(design);
-    expect(prepared.tokens).toContain("data:font/woff2;base64,AQID");
-    expect(prepared.tokens).toContain("font-weight:100 900");
+    expect(prepared.fonts).toContain("data:font/woff2;base64,AQID");
+    expect(prepared.fonts).toContain("font-weight:100 900");
+    // Font bytes stay out of the Tailwind source, and the remote link is no longer needed.
+    expect(prepared.tokens).toBe(' @theme {--font-sans:Inter}');
     expect(await prepareRenderDesign(design)).toEqual(prepared);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });

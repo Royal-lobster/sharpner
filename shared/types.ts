@@ -179,7 +179,7 @@ this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(th
 };
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
-export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; themeChannel?: FrameThemeChannel } = {}): string {
+export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; fontCss?: string; themeChannel?: FrameThemeChannel } = {}): string {
   // Remote @imports (web fonts) become <link>s; the rest is Tailwind CSS that defines the token utilities.
   const imports: string[] = [];
   const css = (opts.design?.tokens ?? "").replace(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g, (_, href: string) => {
@@ -195,6 +195,8 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
     `<meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
     (opts.compiledTailwind ? `<style data-sharpner-css>${(opts.tailwindCss ?? "").replace(/<\//g, "<\\/")}</style>` : `<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>`) +
     `<style>html,body{margin:0}body{-webkit-font-smoothing:antialiased}</style>` +
+    // Prepared @font-face rules (thumbnails) replace the web-font links they were fetched from.
+    (opts.fontCss ? `<style data-sharpner-fonts>${opts.fontCss.replace(/<\//g, "<\\/")}</style>` : "") +
     tokens;
   // Reports content height to the canvas so auto-height frames can size themselves.
   const probe = opts.measure && !opts.themeChannel

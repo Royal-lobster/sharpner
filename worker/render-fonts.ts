@@ -31,8 +31,11 @@ async function fontSheet(href: string) {
   return css.replace(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/g, (_, url: string) => `url(${embedded.get(url)!})`);
 }
 
+/** Design plus embedded @font-face rules, kept out of the Tailwind source so megabytes of font data never reach the compiler. */
+export type RenderDesign = DesignSystem & { fonts?: string };
+
 /** Fetch shared public web fonts before launching the paid browser, once per cached stylesheet. */
-export async function prepareRenderDesign(design: DesignSystem): Promise<DesignSystem> {
+export async function prepareRenderDesign(design: DesignSystem): Promise<RenderDesign> {
   let tokens = design.tokens;
   const imports = [...tokens.matchAll(/@import\s+(?:url\()?\s*["']?(https:\/\/fonts\.googleapis\.com\/[^"')\s]+)["']?\s*\)?\s*;/g)];
   // A file may import many families. Prepare at most four in parallel; the rest retain links.
@@ -47,6 +50,7 @@ export async function prepareRenderDesign(design: DesignSystem): Promise<DesignS
     try { return { declaration, css: await sheet }; }
     catch { return null; } // Keep the original link on transient upstream failures.
   }));
-  for (const result of prepared) if (result) tokens = tokens.replace(result.declaration, result.css);
-  return tokens === design.tokens ? design : { ...design, tokens };
+  let fonts = "";
+  for (const result of prepared) if (result) { tokens = tokens.replace(result.declaration, ""); fonts += result.css; }
+  return fonts ? { ...design, tokens, fonts } : design;
 }

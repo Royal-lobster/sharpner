@@ -316,6 +316,7 @@ export class FileRoom extends DurableObject<Env> {
     const previousCoverNodeId = this.meta("coverNodeId") || null;
     const previousFileTheme = this.theme();
     const previousBrand = JSON.stringify(this.brand());
+    const previousUsedThemes = this.usedThemes().join("\0");
     const catalogChanged = ops.some((op) => op.t === "brand.set" || op.t === "page.put" || op.t === "page.del" || op.t === "node.del" || op.t === "node.put" && op.node.pageId !== undefined);
 
     this.ctx.storage.transactionSync(() => {
@@ -395,7 +396,9 @@ export class FileRoom extends DurableObject<Env> {
         for (const { id } of inherited) touched.nodes.add(id);
         if (inherited.length) renderChanged = true;
       }
-      if (renderChanged) this.reconcileThumbnails(staleThumbs);
+      // Theme sets depend on tokens, the file theme and recently used themes; otherwise only touched nodes change.
+      const everyNode = design.tokens || this.theme() !== previousFileTheme || this.usedThemes().join("\0") !== previousUsedThemes;
+      if (renderChanged) this.reconcileThumbnails(staleThumbs, everyNode ? undefined : [...touched.nodes]);
       for (const id of touched.nodeDels) touched.nodes.delete(id);
       const coverNodeId = this.meta("coverNodeId");
       if (coverNodeId) {
@@ -683,19 +686,27 @@ export class FileRoom extends DurableObject<Env> {
 
   // ---- thumbnails ----------------------------------------------------------
 
-  /** Keep one revision per eligible theme, retaining the last selected raster until its replacement lands. */
-  private reconcileThumbnails(stale: string[]) {
+  private usedThemes() {
+    return this.sql.exec<{ theme: string }>(`SELECT theme FROM used_themes ORDER BY used_at DESC, theme`).toArray().map((r) => r.theme);
+  }
+
+  /**
+   * Keep one revision per eligible theme, retaining the last selected raster until its replacement lands.
+   * Pass `ids` when nothing file-wide (tokens, file theme, used themes) changed, so edits cost O(touched nodes).
+   */
+  private reconcileThumbnails(stale: string[], ids?: string[]) {
     const design = mergeDesignSystems(this.library?.design, this.ownDesignSystem());
     this.sql.exec(`DELETE FROM used_themes WHERE theme NOT IN (SELECT theme FROM used_themes ORDER BY used_at DESC, theme LIMIT 32)`);
-    const used = this.sql.exec<{ theme: string }>(`SELECT theme FROM used_themes ORDER BY used_at DESC, theme`).toArray().map((r) => r.theme);
-    for (const node of this.nodes().filter((n) => isRendered(n.kind))) {
+    const used = this.usedThemes();
+    const fileTheme = this.theme();
+    for (const node of this.nodes(ids).filter((n) => isRendered(n.kind))) {
       // Persist the selected cache hit as the one fallback retained across future content edits.
       const raw = this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, node.id).toArray()[0]!;
       const retained = new Set(Object.values(node.thumbnails ?? {}).flatMap((t) => thumbKeys({ thumbLo: t.lo, thumbHi: t.hi })));
       stale.push(...thumbKeys(raw).filter((key) => !retained.has(key) && !thumbKeys(node).includes(key)));
       this.sql.exec(`UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_theme = ?, measured_h = ? WHERE id = ?`,
         node.thumbLo, node.thumbHi, node.thumbRev ?? 0, node.thumbTheme ?? "", node.measuredHeight, node.id);
-      const themes = thumbnailThemes(node, this.theme(), used, design.tokens);
+      const themes = thumbnailThemes(node, fileTheme, used, design.tokens);
       const rows = this.sql.exec<{ theme: string; rev: number; thumbLo: string | null; thumbHi: string | null }>(
         `SELECT theme, rev, thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM node_thumbnails WHERE node_id = ?`, node.id,
       ).toArray();
@@ -710,18 +721,21 @@ export class FileRoom extends DurableObject<Env> {
     }
   }
 
+  /** Migrated rows hold only their old revision; create current-revision work once. Needs the library loaded. */
+  private reconcileMigrated() {
+    if (!this.meta("thumbReconcile")) return;
+    const stale: string[] = [];
+    this.reconcileThumbnails(stale);
+    this.setMeta("thumbReconcile", "");
+    if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
+  }
+
   private async scheduleThumbs(debounce = true) {
     if (!this.env.BROWSER || !this.env.THUMBNAIL_QUEUE || !this.hasRenderAudience()) return;
     const fileId = this.meta("fileId");
     if (!fileId) return;
-    if (this.meta("thumbReconcile")) {
-      // Migrated rows hold only their old revision; create current-revision work once, with the library's themes.
-      await this.libraryInfo();
-      const stale: string[] = [];
-      this.reconcileThumbnails(stale);
-      this.setMeta("thumbReconcile", "");
-      if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
-    }
+    await this.libraryInfo();
+    this.reconcileMigrated();
     if (!this.hasPendingThumbnails()) return;
     const readyAt = debounce ? Date.now() + THUMB_DELAY : Number(this.meta("thumbAfter") ?? 0);
     if (debounce) this.setMeta("thumbAfter", String(readyAt));
@@ -834,9 +848,8 @@ export class FileRoom extends DurableObject<Env> {
     const designRev = this.meta("designRev");
     const design = await prepareRenderDesign(await this.designSystem());
     if (Date.now() > notAfter || this.meta("designRev") !== designRev) return { more: true, browserMs: 0, rendered: 0 };
-    const stale: string[] = [];
-    this.reconcileThumbnails(stale);
-    if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
+    // Edits, theme changes and library refreshes reconcile when they happen; only the migration backfill remains.
+    this.reconcileMigrated();
     if (!this.hasPendingThumbnails()) return { more: false, browserMs: 0, rendered: 0 };
     const tabCount = Math.min(THUMB_TABS, this.pendingThumbnails(THUMB_TABS).length + this.pendingImages(THUMB_TABS).length);
     const started = Date.now();

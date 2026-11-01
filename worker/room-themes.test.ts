@@ -23,7 +23,9 @@ const member: Actor = { id: "alice", name: "Alice", avatar: null };
 function fixture(browser = false, sockets: { deserializeAttachment(): unknown }[] = []) {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
+  const statements = { count: 0 };
   const sql = { exec(query: string, ...args: (string | number | null)[]) {
+    statements.count++;
     let rows: unknown[] = [];
     if (!args.length && query.includes(";")) db.exec(query);
     else {
@@ -68,7 +70,7 @@ function fixture(browser = false, sockets: { deserializeAttachment(): unknown }[
       WHERE theme = CASE WHEN (SELECT kind FROM nodes WHERE id = node_id) = 'tokens' THEN '' ELSE coalesce((SELECT theme FROM nodes WHERE id = node_id), (SELECT nullif(v, '') FROM meta WHERE k = 'fileTheme'), '') END`);
   };
   const render = async () => { db.exec("DELETE FROM meta WHERE k = 'thumbAfter'"); const result = await room.renderThumbnails(); await flush(); return result; };
-  return { db, room, wake, flush, apply, create, cached, broadcasts, storage, render, enqueue, env, stopViewing: () => { viewing = false; } };
+  return { db, statements, room, wake, flush, apply, create, cached, broadcasts, storage, render, enqueue, env, stopViewing: () => { viewing = false; } };
 }
 
 describe("file and screen themes", () => {
@@ -313,6 +315,28 @@ describe("content/theme thumbnail pairs", () => {
     await create("photo",{kind:"image",src:"/a/other-file/t/photo-1-hi.webp",thumbLo:"/a/other-file/t/photo-1-lo.webp"});
     await apply([{t:"node.del",ids:["photo"]}]);
     expect((env.FILES.delete as ReturnType<typeof vi.fn>).mock.calls.flat(2)).not.toContain("other-file/t/photo-1-lo.webp");
+  });
+
+  it("reconciles only edited screens, so an edit costs the same in small and large files", async () => {
+    const editCost = async (screens: number) => {
+      const {create,apply,statements} = fixture();
+      for (let i = 0; i < screens; i++) await create(`screen-${i}`);
+      statements.count = 0;
+      await apply([{t:"node.put",id:"screen-0",node:{source:"<p>Edited</p>"}}]);
+      return statements.count;
+    };
+    expect(await editCost(60)).toBe(await editCost(5));
+  });
+
+  it("still reconciles every screen when the file theme or a new override theme changes", async () => {
+    const {create,apply,db} = fixture();
+    const themes = (id: string) => db.prepare("SELECT theme FROM node_thumbnails WHERE node_id = ? ORDER BY theme").all(id).map((r) => r.theme);
+    await create("a"); await create("b");
+    await apply([{t:"theme.set",theme:"dark"}]);
+    expect(themes("b")).toEqual(["", "dark"]);
+    db.exec("DELETE FROM node_thumbnails WHERE node_id = 'b'");
+    await create("c",{theme:"light"});
+    expect(themes("b")).toEqual(["", "dark", "light"]);
   });
 
   it("does no automatic work while nobody is viewing, and coalesces rapid edits and toggles", async () => {
