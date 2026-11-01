@@ -10,6 +10,7 @@ import { themeNames, themeSwatches } from "../shared/themes";
 import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
+import { MotionCanvasPrototype } from "./Motion-canvas.prototype";
 import { canInteract } from "./canvas-render-plan";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { Room } from "./room";
@@ -256,11 +257,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     });
     if (ok) room.send([{ t: "page.del", id: p.id }]);
   };
+  const CanvasSurface = import.meta.env.VITE_MOTION_EXPERIMENT === "1" && new URLSearchParams(location.search).get("prototype") === "motion" ? MotionCanvasPrototype : Canvas;
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
+          <CanvasSurface key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
             interactionId={interactionId} onInteract={setInteractionId}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />

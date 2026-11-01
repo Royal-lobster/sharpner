@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { motionPrototypeCss } from "./motion.prototype";
 import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
@@ -67,6 +68,11 @@ api.use(async (c, next) => {
 });
 
 api.onError((err, c) => c.json({ error: err.message }, authErrorStatus(err) ?? 400));
+
+if (import.meta.env.VITE_MOTION_EXPERIMENT === "1") api.post("/motion-prototype/css", async c => {
+  if (new URL(c.req.url).hostname !== "localhost") return c.notFound();
+  return c.json(await motionPrototypeCss(await c.req.json()));
+});
 
 api.get("/me", async (c) => {
   const { user, workspaces, organizationId } = c.get("identity");
