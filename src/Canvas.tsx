@@ -24,6 +24,7 @@ import { CanvasLayout } from "./canvas-layout";
 import { LiveFrame } from "./live-frame";
 import { InteractionFrame } from "./InteractionFrame";
 import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
+import { overviewInstrumentation, type OverviewDraw } from "./overview-instrumentation.prototype";
 
 type Tier = "lo" | "hi";
 
@@ -274,6 +275,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   highImages.current = renderPlan.imageIds;
   const { sections: visibleSections, domFrames, rasterFrames } = renderPlan;
   const liveIds = [...renderPlan.liveIds];
+  useLayoutEffect(()=>{if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"){overviewInstrumentation.canvas={cam,size,live:liveIds.length,fit:()=>fitTo([],1,false),setCam};overviewInstrumentation.cameraObserver?.(cam,size);}});
   useEffect(() => {
     room.needSources(liveIds);
     return () => room.needSources([]);
@@ -913,6 +915,7 @@ export function paintRaster(
   thumbnails: ThumbnailCache | null,
   upgrades?: { cache: ThumbnailCache | null; enabled: boolean; settled: boolean },
 ) {
+  if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"&&overviewInstrumentation.sharedActive){canvas.getContext("2d")?.clearRect(0,0,canvas.width,canvas.height);return;}
   const dpr = devicePixelRatio;
   const w = Math.round(size.w * dpr), h = Math.round(size.h * dpr);
   if (canvas.width !== w || canvas.height !== h) {
@@ -973,6 +976,7 @@ export function paintRaster(
   let painted = lastPainted.get(canvas);
   if (!painted) lastPainted.set(canvas, painted = new Map());
   const paintedNow = new Map<string, HTMLImageElement>();
+  const overviewRows:OverviewDraw[]=[];
   for (const { node: f, rect: r, screenWidth: screenW } of items) {
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y, sw = screenW, sh = r.h * cam.z;
     const url = thumbnailSource(f);
@@ -995,6 +999,7 @@ export function paintRaster(
       const srcH = Math.min(img.naturalHeight, sh / scale);
       ctx.drawImage(img, 0, 0, img.naturalWidth, srcH, x, y, sw, srcH * scale);
     }
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"&&overviewInstrumentation.draw)overviewRows.push({id:f.id,kind:f.kind,rev:f.rev,theme:f.thumbTheme,current:!!current&&previewCurrent(f),painted:!!img,x,y,w:sw,h:sh});
     ctx.globalAlpha = 1;
     const ring = selected.has(f.id) ? COLORS.select : peers.get(f.id);
     if (ring || !box) {
@@ -1015,6 +1020,7 @@ export function paintRaster(
   }
 
   lastPainted.set(canvas, paintedNow);
+  if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1")overviewInstrumentation.draw?.(overviewRows,size);
 
   // Family names head their catalog row in the gutter, on the same line as the variant labels beside them.
   const gutter = (CATALOG_GUTTER - 24) * cam.z;

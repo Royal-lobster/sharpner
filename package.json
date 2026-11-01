@@ -10,6 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "prototype:overview": "VITE_OVERVIEW_EXPERIMENT=1 vite build && vite preview --port 5200 --strictPort",
     "deploy": "vite build && wrangler d1 migrations apply sharpner --remote && wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply sharpner --local",
     "typecheck": "pnpm cf-typegen && tsc --noEmit",

@@ -137,6 +137,42 @@ export class FileRoom extends DurableObject<Env> {
   private library: LibraryInfo | null | undefined;
   /** Explicit screenshots and automatic previews share one browser slot per file. */
   private browserTask: Promise<unknown> | null = null;
+  private overviewTurns:{at:number;rendered:number;browserMs:number}[]=[];
+  private overviewRenders:Record<string,unknown>[]=[];
+
+  /** THROWAWAY local benchmark controls. Reachable only through the guarded experiment route. */
+  async overviewPrototype(input:{mode?:string;hold?:boolean;resetMetrics?:boolean}){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1")throw new Error("Experiment disabled");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS overview_metrics (id INTEGER PRIMARY KEY,kind TEXT,payload TEXT)`);
+    if(input.mode)this.setMeta("overviewMode",input.mode);
+    if(input.hold!==undefined)this.setMeta("overviewHold",input.hold?"1":"0");
+    if(input.hold)await this.browserTask?.catch(()=>{});
+    if(input.resetMetrics){this.overviewTurns=[];this.overviewRenders=[];this.sql.exec(`DELETE FROM overview_metrics`);}
+    if(input.hold===false)await this.scheduleThumbs(false);
+    return {mode:this.meta("overviewMode"),hold:this.meta("overviewHold"),turns:this.sql.exec<{payload:string}>(`SELECT payload FROM overview_metrics WHERE kind='turn' ORDER BY id`).toArray().map(r=>JSON.parse(r.payload)),renders:this.sql.exec<{payload:string}>(`SELECT payload FROM overview_metrics WHERE kind='render' ORDER BY id`).toArray().map(r=>JSON.parse(r.payload)),
+      pairs:this.sql.exec(`SELECT theme, count(*) AS n, sum(thumb_lo IS NOT NULL) AS ready, sum(tries) AS tries FROM node_thumbnails GROUP BY theme`).toArray(),pending:this.pendingThumbnails(400).length};
+  }
+
+  /** Experimental checkpoints: validate current tuple, deduplicate, then use the normal sync path. */
+  async overviewCheckpoint(input:{items:{id:string;rev:number;theme:string;dataUrl:string;height:number}[]}){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1")throw new Error("Experiment disabled");
+    if(!Array.isArray(input.items)||input.items.length>8)throw new Error("At most eight checkpoints");
+    let puts=0,bytes=0;const nodes:string[]=[];
+    for(const item of input.items){
+      const node=this.node(item.id);if(!node||node.rev!==item.rev||node.kind!=="frame")continue;
+      const pair=this.sql.exec<{thumb_lo:string|null}>(`SELECT thumb_lo FROM node_thumbnails WHERE node_id=? AND rev=? AND theme=?`,item.id,item.rev,item.theme).toArray()[0];
+      if(!pair||pair.thumb_lo)continue;
+      if(!item.dataUrl.startsWith("data:image/webp;base64,")||item.dataUrl.length>512_000)throw new Error("Invalid checkpoint image");
+      const data=Uint8Array.from(atob(item.dataUrl.split(",")[1]!),c=>c.charCodeAt(0));
+      const key=`${this.meta("fileId")}/t/${item.id}-${item.rev}-local-${crypto.randomUUID()}-lo.webp`,url=fileUrl(key);
+      await this.env.FILES.put(key,data,{httpMetadata:{contentType:"image/webp"}});puts++;bytes+=data.byteLength;
+      this.sql.exec(`UPDATE node_thumbnails SET thumb_lo=?,thumb_hi=?,measured_h=?,tries=0 WHERE node_id=? AND rev=? AND theme=?`,url,url,item.height,item.id,item.rev,item.theme);
+      if((effectiveTheme(node,this.theme())??"")===item.theme)this.sql.exec(`UPDATE nodes SET thumb_lo=?,thumb_hi=?,thumb_rev=?,thumb_theme=?,measured_h=? WHERE id=?`,url,url,item.rev,item.theme,item.height,item.id);
+      nodes.push(item.id);
+    }
+    if(nodes.length)this.broadcast({type:"sync",nodes:this.nodes(nodes),by:null});
+    return {puts,bytes};
+  }
   private screenshotRequests = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -703,7 +739,7 @@ export class FileRoom extends DurableObject<Env> {
     return requested && requested === this.meta("coverNodeId") ? requested : null;
   }
 
-  private hasRenderAudience() { return this.viewedPages().length > 0 || this.coverRequest() !== null; }
+  private hasRenderAudience() { return !(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"&&this.meta("overviewHold")==="1") && (this.viewedPages().length > 0 || this.coverRequest() !== null); }
 
   private pendingThumbnails(limit: number = THUMB_BATCH) {
     return this.sql.exec<{
@@ -844,6 +880,7 @@ export class FileRoom extends DurableObject<Env> {
     }
     const browserMs = Date.now() - started;
     console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, browserMs }));
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1")this.sql.exec(`INSERT INTO overview_metrics(kind,payload) VALUES ('turn',?)`,JSON.stringify({at:Date.now(),rendered,browserMs}));
     this.updateCover(fileId);
     const more = this.hasPendingThumbnails();
     return { more: more && this.hasRenderAudience(), browserMs, rendered, retryAt };
@@ -859,6 +896,7 @@ export class FileRoom extends DurableObject<Env> {
     valid: () => boolean,
   ) {
     let uploaded: string[] = [];
+    const prototypeStarted=performance.now();let prototypeLoaded=prototypeStarted;
     try {
       const { measured, lo, hi } = await withTimeout((async () => {
         if (n.kind === "image") {
@@ -866,6 +904,12 @@ export class FileRoom extends DurableObject<Env> {
           return { measured: null, lo: await capture(tab, size.width, size.height, { type: "webp", scale: 1, quality: 70, transparent: true }), hi: null };
         }
         const size = await loadFrame(tab, n, base, design);
+        prototypeLoaded=performance.now();
+        if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"&&this.meta("overviewMode")?.startsWith("overview")&&n.kind==="frame"&&n.id!==this.meta("coverNodeId")){
+          const side=this.meta("overviewMode")==="overview128"?128:256;
+          const lo=await capture(tab,size.width,size.height,{type:"webp",scale:Math.min(1,side/size.width),quality:70});
+          return {...size,lo,hi:lo};
+        }
         return { ...size, ...await captureThumbnails(tab, size.width, size.height) };
       })(), 30_000, "render");
       if (!valid()) return false;
@@ -903,6 +947,11 @@ export class FileRoom extends DurableObject<Env> {
         }
       }
       if (n.id === this.coverRequest() && (n.kind === "image" || (effectiveTheme(cur, this.theme()) ?? "") === n.renderTheme)) this.setMeta("coverRender", "");
+      if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"){
+        this.overviewRenders.push({id:n.id,kind:n.kind,theme:n.renderTheme,loadMs:prototypeLoaded-prototypeStarted,ms:performance.now()-prototypeStarted,loBytes:lo.byteLength,hiBytes:hi?.byteLength??0,objects:distinctHi?2:1});
+        this.sql.exec(`INSERT INTO overview_metrics(kind,payload) VALUES ('render',?)`,JSON.stringify(this.overviewRenders.at(-1)));
+        if(this.overviewRenders.length>4000)this.overviewRenders.shift();
+      }
       return true;
     } catch (err) {
       if (uploaded.length) this.ctx.waitUntil(this.env.FILES.delete(uploaded));

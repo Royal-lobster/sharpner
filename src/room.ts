@@ -121,6 +121,18 @@ export class Room {
     return () => this.listeners.delete(fn);
   };
   getVersion = () => this.version;
+  /** THROWAWAY: immediately display a local checkpoint while its immutable upload is queued. */
+  overviewLocalPreview(id:string,theme:string,rev:number,url:string,height:number){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1")return;
+    const node=this.nodes.get(id);if(!node||node.rev!==rev)return;
+    this.nodes.set(id,selectThumbnail({...node,thumbnails:{...node.thumbnails,[theme]:{rev,lo:url,hi:url,measuredHeight:height}}},this.fileTheme));
+    this.heights.delete(id);this.changedData();this.emit();
+  }
+  overviewHeights(entries:{id:string;measuredHeight:number}[]){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1")return;
+    let changed=false;for(const n of entries)if(this.nodes.get(n.id)?.height===null&&this.heights.get(n.id)!==n.measuredHeight){this.heights.set(n.id,n.measuredHeight);changed=true;}
+    if(changed){this.changedData();this.emit();}
+  }
   private emit() {
     this.version++;
     for (const fn of this.listeners) fn();

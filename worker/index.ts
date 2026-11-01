@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { overviewSheets, prepareOverview } from "./overview.prototype";
 import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
@@ -10,6 +11,11 @@ export { FileRoom } from "./room";
 export { ThumbnailQueue } from "./thumbnail-queue";
 
 const app = new Hono<AppEnv>();
+
+if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1")app.get("/api/overview-prototype-css/:key",c=>{
+  if(new URL(c.req.url).hostname!=="localhost")return c.notFound();
+  const css=overviewSheets.get(c.req.param("key"));return css?c.body(css,200,{"content-type":"text/css","cache-control":"public,max-age=86400"}):c.notFound();
+});
 
 app.route("/auth", auth);
 app.route("/mcp", mcp);
@@ -67,6 +73,24 @@ api.use(async (c, next) => {
 });
 
 api.onError((err, c) => c.json({ error: err.message }, authErrorStatus(err) ?? 400));
+
+if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"){
+  api.post("/files/:id/overview-prototype/:action",async c=>{
+    if(new URL(c.req.url).hostname!=="localhost")return c.notFound();
+    const file=await fileFor(c.env,c.get("user").id,c.req.param("id"));
+    if(!file||!file.name.startsWith("PROTOTYPE · overview"))return c.notFound();
+    const input=await c.req.json(),stub=room(c.env,file.id),action=c.req.param("action");
+    if(action==="prepare")return c.json(await prepareOverview(input.design,input.html));
+    if(action==="config")return c.json(await stub.overviewPrototype(input));
+    if(action==="queue")return c.json(await c.env.THUMBNAIL_QUEUE!.get(c.env.THUMBNAIL_QUEUE!.idFromName("global")).overviewPrototype());
+    if(action==="checkpoint")return c.json(await stub.overviewCheckpoint(input));
+    if(action==="seed"){
+      const user=c.get("user");await stub.apply(file.id,new URL(c.req.url).origin,input.ops,{id:user.id,name:user.name,avatar:user.avatar_url});
+      return c.json({ok:true});
+    }
+    return c.notFound();
+  });
+}
 
 api.get("/me", async (c) => {
   const { user, workspaces, organizationId } = c.get("identity");

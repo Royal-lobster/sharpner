@@ -10,6 +10,7 @@ import { themeNames, themeSwatches } from "../shared/themes";
 import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
+import { OverviewPrototype } from "./Overview.prototype";
 import { canInteract } from "./canvas-render-plan";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { Room } from "./room";
@@ -259,6 +260,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
+        {import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"&&new URLSearchParams(location.search).get("prototype")==="overview"&&<OverviewPrototype room={room} fileId={file.id} workspaceId={workspace.id}/>}
         {page ? (
           <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
             interactionId={interactionId} onInteract={setInteractionId}

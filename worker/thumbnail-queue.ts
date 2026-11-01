@@ -8,6 +8,10 @@ const DAY_MS = 86_400_000;
 /** A single automatic browser across the deployment, with round-robin team/file turns and daily budgets. */
 export class ThumbnailQueue extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
+  overviewPrototype(){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1")throw new Error("Experiment disabled");
+    return {at:Date.now(),queue:this.sql.exec(`SELECT * FROM queue`).toArray(),budgets:this.sql.exec(`SELECT * FROM budgets`).toArray(),lease:this.sql.exec(`SELECT * FROM lease`).toArray()};
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
