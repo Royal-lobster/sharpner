@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { room } from "./data";
-import { THUMBNAIL_POLICY as policy } from "./thumbnail-policy";
+import { backfilling, THUMBNAIL_POLICY as policy } from "./thumbnail-policy";
 
 type Job = { fileId: string; teamId: string; readyAt: number };
 const DAY_MS = 86_400_000;
@@ -68,7 +68,9 @@ export class ThumbnailQueue extends DurableObject<Env> {
     for (const job of jobs) {
       if (job.readyAt > now) { next = Math.min(next, job.readyAt); continue; }
       const limits = [["global", policy.globalDailyMs], [`team:${job.teamId}`, policy.teamDailyMs], [`file:${job.fileId}`, policy.fileDailyMs]] as const;
-      const budget = limits.map(([id, limit]) => ({ id, limit, spent: this.sql.exec<{ spent: number }>(`SELECT spent FROM budgets WHERE id = ?`, id).toArray()[0]?.spent ?? 0 }));
+      // A backfilling file is charged to the global budget only.
+      const charged = backfilling(job.fileId, now) ? limits.slice(0, 1) : limits;
+      const budget = charged.map(([id, limit]) => ({ id, limit, spent: this.sql.exec<{ spent: number }>(`SELECT spent FROM budgets WHERE id = ?`, id).toArray()[0]?.spent ?? 0 }));
       if (budget.some((b) => b.spent + policy.reservationMs > b.limit)) continue;
       // Persist the reservation before yielding. A restart charges the whole reservation and the
       // lease prevents another automatic session until the abandoned session's keep-alive expires.

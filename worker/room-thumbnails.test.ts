@@ -324,7 +324,7 @@ describe("dark-only migration", () => {
   const FRAXNET = "2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a";
   /** Replays the migration as an existing room would see it on its next wake-up. */
   const replay = (db: DatabaseSync, fileId: string) => {
-    db.exec(`DELETE FROM meta WHERE k = 'darkSpecimens'; UPDATE meta SET v = '${fileId}' WHERE k = 'fileId'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'darkSpecimens'; UPDATE meta SET v = '${fileId}' WHERE k = 'fileId'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
   };
 
   it("darkens every screen of a dark-only file and re-renders all its previews", async () => {
@@ -344,7 +344,7 @@ describe("dark-only migration", () => {
       expect(db.prepare("SELECT rev, thumb_lo, tries FROM node_thumbnails WHERE node_id = ? AND theme = ''").get(id)).toEqual({ rev: rev + 1, thumb_lo: null, tries: 0 });
     }
     // Runs once: a later replay of the recorded schema leaves the room alone.
-    db.exec("UPDATE meta SET v = v - 1 WHERE k = 'schema'");
+    db.exec("UPDATE meta SET v = v - 2 WHERE k = 'schema'");
     expect(wake().node("button")!.rev).toBe(revs.get("button")! + 1);
   });
 
@@ -365,6 +365,42 @@ describe("dark-only migration", () => {
     expect(darken(`<div data-theme="lightish" data-label="light"><p data-theme=light>a</p></div>`)).toBe(
       `<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark"><div data-theme="lightish" data-label="light"><p data-theme="dark">a</p></div></body></html>`);
     expect(darken(darken("<p>a</p>"))).toBe(darken("<p>a</p>"));
+  });
+});
+
+describe("backfill", () => {
+  const FRAXNET = "2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a";
+
+  it("renders a backfill file's previews on every page without a viewer, then stops", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(Date.UTC(2026, 10, 2));
+    try {
+      const { room, db, wake, apply, create, flush, stopViewing, render } = fixture(true);
+      await create("one");
+      await apply([{ t: "page.put", page: { id: "other", name: "Other", sort: 2 } }]);
+      await apply([{ t: "node.put", id: "two", node: { pageId: "other", width: 400, height: 600, source: "<p>two</p>" } }]);
+      stopViewing();
+      db.exec(`UPDATE meta SET v = '${FRAXNET}' WHERE k = 'fileId'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+      const migrated = wake(); await flush();
+      expect(db.prepare("SELECT v FROM meta WHERE k = 'backfill'").get()).toEqual({ v: "1" });
+      renderer.loadFrame.mockClear();
+      db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+      expect(await migrated.renderThumbnails()).toMatchObject({ rendered: 2, more: false });
+      expect(renderer.loadFrame.mock.calls.map(([, n]) => (n as { id: string }).id).sort()).toEqual(["one", "two"]);
+      expect(db.prepare("SELECT v FROM meta WHERE k = 'backfill'").get()).toEqual({ v: "" });
+      // Finished: no viewer means no automatic work again.
+      void room; void render;
+      await apply([{ t: "node.put", id: "one", node: { source: "<p>edited</p>" } }]);
+      db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+      expect(await migrated.renderThumbnails()).toMatchObject({ rendered: 0, more: false });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not mark other files", async () => {
+    const { db, wake, create, flush } = fixture(true);
+    await create("one");
+    db.exec("UPDATE meta SET v = v - 1 WHERE k = 'schema'");
+    wake(); await flush();
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'backfill'").get()).toBeUndefined();
   });
 });
 
