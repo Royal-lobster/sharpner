@@ -1,10 +1,7 @@
-import { componentName, componentProps } from "./specimens";
 import { themeNames } from "./themes";
-import { componentTag, type Brand, type CanvasNode, type DesignSystem, type LibraryInfo } from "./types";
+import type { Brand } from "./types";
 
-export const RECOMMENDED_FAMILIES = ["Button", "Badge", "Input", "Textarea", "Label", "Field", "Select", "Checkbox", "Radio Group", "Switch", "Slider", "Toggle Group", "Tabs", "Card", "Alert", "Dialog", "Sheet", "Drawer", "Popover", "Tooltip", "Dropdown Menu", "Avatar", "Separator", "Skeleton", "Spinner", "Progress", "Table", "Toast", "Breadcrumb", "Pagination", "Accordion", "Empty"];
 export const COLOR_SLOTS = ["background", "foreground", "card", "popover", "primary", "primary-foreground", "secondary", "muted", "muted-foreground", "accent", "destructive", "border", "input", "ring", "card-foreground", "popover-foreground", "secondary-foreground", "accent-foreground", "destructive-foreground"];
-export const COLLAPSED_VARIANTS = 6;
 
 /** Patch individual fields, so independent member/agent changes do not erase the other brand fields. */
 export function patchBrand(current: Brand, patch: Partial<Brand>): Brand {
@@ -109,44 +106,4 @@ export function foundations(css: string, localCss = css, themes = themeNames(css
   const slotOrder = (name: string) => { const i = COLOR_SLOTS.indexOf(name.slice(8)); return i < 0 ? COLOR_SLOTS.length : i; };
   const colors = tokens.filter((t) => t.name.startsWith("--color-")).sort((a, b) => slotOrder(a.name) - slotOrder(b.name) || a.name.localeCompare(b.name));
   return { themes, vars, colors, type: tokens.filter((t) => /^--(?:font-|text-)/.test(t.name)), spacing: tokens.filter((t) => /^--spacing(?:-|$)/.test(t.name)), radii: tokens.filter((t) => /^--radius(?:-|$)/.test(t.name)), shadows: tokens.filter((t) => /^--shadow(?:-|$)/.test(t.name)) };
-}
-
-/** Preserve the library's original read-only values alongside local additions/overrides. Rendering uses merged values. */
-export function documentFoundations(libraryCss: string, localCss: string) {
-  const effective = foundations([libraryCss, localCss].filter(Boolean).join("\n"), localCss);
-  const inherited = foundations(libraryCss, "", effective.themes);
-  const libraryVars = Object.fromEntries(effective.themes.map((t) => [t, {
-    ...Object.fromEntries(Object.keys(effective.vars[t]!).map((name) => [name, "initial"])), ...inherited.vars[t],
-  }]));
-  const rows = (group: "colors" | "type" | "spacing" | "radii" | "shadows") => [...inherited[group], ...effective[group].filter((t) => t.local)];
-  const order = new Map(effective.colors.map((t, index) => [t.name, index]));
-  return { ...effective, libraryVars, colors: rows("colors").sort((a, b) => (order.get(a.name) ?? Infinity) - (order.get(b.name) ?? Infinity)), type: rows("type"), spacing: rows("spacing"), radii: rows("radii"), shadows: rows("shadows") };
-}
-
-const familyKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
-export function canonicalFamily(name: string) {
-  const key = familyKey(name), alias = ({ radio: "Radio Group", tab: "Tabs", toggle: "Toggle Group" } as Record<string, string>)[key];
-  return alias ?? RECOMMENDED_FAMILIES.find((f) => familyKey(f) === key) ?? name;
-}
-export type Primitive = { node: CanvasNode; tag: string; variant: string; source: string; props: ReturnType<typeof componentProps>; slot: boolean; library: boolean };
-export type PrimitiveFamily = { name: string; variants: { tag: string; name: string; definitions: Primitive[] }[] };
-
-/** Placement registers primitives; local ownership of a tag replaces every library definition of it. */
-export function primitiveFamilies(nodes: CanvasNode[], pageId: string, design: DesignSystem, library: LibraryInfo | null): PrimitiveFamily[] {
-  const ownTags = new Set(nodes.filter((n) => n.kind === "component").map((n) => componentTag(n.name)));
-  const candidates = [...(library?.catalog?.primitives ?? []).filter((n) => !ownTags.has(componentTag(n.name))).map((node) => ({ node, library: true })), ...nodes.filter((n) => n.kind === "component" && n.pageId === pageId).map((node) => ({ node, library: false }))];
-  const families = new Map<string, PrimitiveFamily>();
-  for (const candidate of candidates) {
-    const { node } = candidate, tag = componentTag(node.name), parts = componentName(node.name), name = canonicalFamily(parts.family);
-    const source = design.components.find((c) => c.tag === tag && (c.theme ?? null) === (node.theme ?? null))?.html;
-    if (source === undefined) continue;
-    const family = families.get(name) ?? { name, variants: [] };
-    families.set(name, family);
-    let variant = family.variants.find((v) => v.tag === tag);
-    if (!variant) { variant = { tag, name: parts.variant, definitions: [] }; family.variants.push(variant); }
-    variant.definitions.push({ ...candidate, tag, variant: parts.variant, source, props: componentProps(source), slot: /<slot[\s/>]/i.test(source) });
-  }
-  const rank = (name: string) => { const i = RECOMMENDED_FAMILIES.indexOf(name); return i < 0 ? RECOMMENDED_FAMILIES.length : i; };
-  for (const f of families.values()) for (const v of f.variants) v.definitions.sort((a, b) => Number(!!a.node.theme) - Number(!!b.node.theme) || (a.node.theme ?? "").localeCompare(b.node.theme ?? ""));
-  return [...families.values()].sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
 }

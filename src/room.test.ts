@@ -620,8 +620,8 @@ describe("canvas source working set", () => {
 });
 
 
-describe("document page and Brand synchronization", () => {
-  it("keeps partial Brand edits and restores the previous page to canvas when selecting another document", () => {
+describe("Design System page and Brand synchronization", () => {
+  it("keeps partial Brand edits and restores the previous page to canvas when selecting another Design System page", () => {
     const socket = start([]);
     const page = room.pages[0]!;
     room.send([{ t: "brand.set", brand: { name: "FraxNet", voice: ["Direct"] } }]);

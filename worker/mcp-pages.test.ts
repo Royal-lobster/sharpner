@@ -179,8 +179,8 @@ describe("moving nodes between pages", () => {
 
 
 
-describe("agent Design System documents and Brand", () => {
-  it("creates and converts document pages without changing nodes", async () => {
+describe("agent Design System canvas pages and Brand", () => {
+  it("marks Design System canvas pages without changing nodes", async () => {
     await call("create_page", { fileId: "file", name: "Design System", kind: "design-system" });
     await call("update_page", { fileId: "file", pageId: "ds", kind: "design-system" });
     await call("update_page", { fileId: "file", pageId: "ds", kind: "canvas" });
@@ -192,13 +192,13 @@ describe("agent Design System documents and Brand", () => {
     expect((await call("update_page", { fileId: "file", pageId: "ds", kind: "other" })).isError).toBe(true);
   });
 
-  it("reports document kind, Brand and primitive locations and patches only requested fields", async () => {
+  it("reports canvas arrangement, Brand and primitive locations and patches only requested fields", async () => {
     mocks.outline.mockResolvedValue([{ ...outline[0]!, kind: "design-system" }, outline[1]!]);
     mocks.brand.mockReturnValue({ ...emptyBrand(), name: "FraxNet", voice: ["Plain verbs"] });
     const system = (await call("get_design_system", { fileId: "file" })).value;
     expect(system).toMatchObject({ brand: { name: "FraxNet", voice: ["Plain verbs"] }, designSystemPageId: "ds", components: [{ primitive: true, pageId: "ds" }, { primitive: true, pageId: "ds" }] });
-    expect((await call("list_pages", { fileId: "file" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "document" });
-    expect((await call("get_file", { fileId: "file", pageId: "ds" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "document" });
+    expect((await call("list_pages", { fileId: "file" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "tiled" });
+    expect((await call("get_file", { fileId: "file", pageId: "ds" })).value.pages[0]).toMatchObject({ kind: "design-system", arrangement: "tiled" });
     await call("set_brand", { fileId: "file", guidelines: "Paper and ink." });
     expect(applied()).toEqual([{ t: "brand.set", brand: { guidelines: "Paper and ink." } }]);
     await call("create_nodes", { fileId: "file", pageId: "ds", nodes: [{ kind: "component", name: "Button/Default", source: "<button>Go</button>" }] });

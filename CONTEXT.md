@@ -37,7 +37,7 @@ One canvas document in a workspace, made of pages. A file may be a one-off or th
 _Avoid_: Project, document, board
 
 **Page**:
-A canvas or Design System document inside a file. Its description says what it holds and when to look at it, so agents can navigate the file.
+A canvas inside a file. Its description says what it holds and when to look at it, so agents can navigate the file.
 _Avoid_: Tab, board, sheet
 
 **Node**:
@@ -87,10 +87,10 @@ A reusable piece of UI, defined once as a node and used inside frames. Generic p
 _Avoid_: Symbol, widget, partial, template
 
 **Primitive**:
-A component defined on the Design System page. Families from the recommended shadcn/ui list lead the document, followed by the file’s own. Placement registers a primitive.
+A component defined on the Design System page. Agents order recommended shadcn/ui families first in its automatic catalog, followed by the file’s own. Placement registers a primitive.
 
 **Brand**:
-The file’s authored name, image logo, short guidelines paragraph and voice bullets. Members edit it in place; agents patch it with `set_brand`. Inherited Brand is edited in the library file.
+The file’s authored name, image logo, short guidelines paragraph and voice bullets. An editable HTML frame shows it on the canvas; agents keep that frame and `set_brand` metadata aligned. Inherited Brand is edited in the library file.
 
 **Instance**:
 One use of a component inside a frame or another component.
@@ -113,7 +113,7 @@ A file whose design system other files in the same workspace use. A file uses at
 _Avoid_: Shared design system, package, kit
 
 **Design system page**:
-The file’s optional single document page (`kind: "design-system"`), with Brand, generated Foundations and generated Primitive components in that order. Components placed on it are primitives. Conversion preserves nodes; feature-specific components stay on feature pages. A linked library’s Brand and catalog appear read-only alongside local additions.
+The file’s optional marked canvas page (`kind: "design-system"`), organized into ordinary Brand, Foundations and Primitive components sections in that order. Brand is a guideline frame, Foundations contains token sheets, and Primitive components is an automatic catalog. Components placed on it are primitives. Changing the marker preserves nodes; feature-specific components stay on feature pages. A Brand-frame link opens the linked library’s own system.
 _Avoid_: Components page, styles page
 
 ## Relationships

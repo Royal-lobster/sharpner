@@ -8,17 +8,19 @@ A single graphic, exploration, or slide can use one token sheet or skip the syst
 
 ## Organize the file
 
-Choose one document page per file with `create_page({ fileId, name: "Design System", kind: "design-system" })`, or convert an existing page with `update_page({ fileId, pageId, kind: "design-system" })`. Members choose **Use as Design System page** from page options. Choosing another page restores the previous one to canvas; conversion preserves all nodes. `kind: "canvas"` restores canvas explicitly. Existing pages stay canvas until chosen.
+Keep the Design System on the ordinary canvas. Use one page named **Design System**, marked with `create_page({ fileId, name: "Design System", kind: "design-system" })` or `update_page({ fileId, pageId, kind: "design-system" })`. The marker identifies primitives; it does not change the canvas view. Changing it preserves every node. Members choose **Use as Design System page** from page options.
 
-The document always has these three sections, with a theme switcher for interactive previews and token samples. The Sharpner document keeps its own theme:
+Use the same three ordinary sections across files, in this order. Create them with `layout: "auto"`, add nodes with `sectionId`, and omit x/y. Use section `order` values 0, 1 and 2. Keep the names consistent; let the file's brand determine their visual content.
 
-1. **Brand:** name, image logo, a short guidelines paragraph, and voice bullets. Store these per file with `set_brand({ fileId, name, logoUrl, guidelines, voice })`; omitted fields stay unchanged and empty strings/arrays clear them. Use `upload_image` for a permanent logo URL. Members edit Brand in place. `get_design_system` returns Brand and the Design System page ID.
-2. **Foundations:** generated from every token sheet in the file and its library. Colors appear in theme columns, recommended shadcn/ui slots first, then other colors behind **Show all**. Type, spacing, radii and shadows follow. Add short CSS comments to token declarations for descriptions; otherwise the document shows their utility class. Undeclared tokens have no rows.
-3. **Primitive components:** generated from component nodes on the Design System page. Placement registers a primitive: use `create_nodes` with that `pageId`, or move a definition there with `update_nodes`. Families from the recommended list come first, then the file's own. Aliases such as `Radio/*` and `Tab/*` take the Radio Group and Tabs positions. Theme overrides appear alongside their default. More than six variants collapse behind **Show all**. The grid uses existing saved previews; click a preview to expand it inline for real hover, focus, pressed and disabled states. The complete control fits without inner scrollbars. Only one on-screen preview runs live; leaving it pauses interaction, and scrolling back never starts it automatically. Saved thumbnails keep their authored appearance; The live preview uses the selected theme.
+1. **01 · Brand:** one editable HTML frame with the brand name, image logo, one short guidelines paragraph and a few voice bullets. Use the file's tokens and keep it readable at a useful canvas zoom. Keep the corresponding file metadata in `set_brand({ fileId, name, logoUrl, guidelines, voice })` aligned with the frame; changing metadata does not rewrite the frame. Omitted metadata fields stay unchanged; empty strings/arrays clear them. Use `upload_image` for a permanent logo URL. `get_design_system` returns Brand and the marked page ID.
+2. **02 · Foundations:** place the file's token sheets here. Their existing canvas previews show colors by theme, then typography, spacing, radii and shadows. Recommended semantic color slots come first, with CSS comments as descriptions or utility classes as fallbacks. Show only defined tokens. Preserve existing brand-specific token names; alias recommended slots to their brand values with `var(...)`. Do not duplicate token values in hand-written swatch boards.
+3. **03 · Primitive components:** keep only component definitions in this automatic section. The existing canvas layout makes a grid with one row and label per family, wrapping long rows. Name variants `Family/Variant`; keep each family's variants contiguous using `order`. Follow the recommended family list below first, then the file's own families. Treat `Radio/*` as Radio Group and `Tab/*` as Tabs when ordering; do not rename existing tags just to match the list. Put each structural theme override beside its default. Give previews useful widths and omit fixed height so content and captions fit. Keep guidelines, token sheets and product compositions out of this catalog.
 
-If the file uses a library, the same document includes its Brand, Foundations and registered primitives, marked read-only with **From library: <name> · Open**. Edit those in the library file. Local tokens and primitives appear alongside, marked **This file**. A local token override keeps the original library value visible in its read-only row. Any local definition of a tag replaces all library definitions of that tag under the existing merge rule. Libraries export their own catalog only, not a linked library's catalog. Non-component designs preserved by conversion are listed compactly at the end with a move option; token sheets feed Foundations and sections retain grouping metadata. There is no canvas, extra panel, per-row comments UI or phone-specific tabs in this document.
+Components on the marked Design System page are registered primitives. Agents add them with `create_nodes` on that page or move definitions there with `update_nodes`. The canvas keeps its normal pan, zoom, selection, comments and preview behavior; no separate document view or interaction controls are needed. File/frame themes affect design previews while Sharpner keeps its own app theme.
 
-Keep anything else, such as product compositions and explorations, on feature pages.
+If the file uses a library, read its system with `get_design_system`, and put a short **From library: <name> · Open** link in the Brand guideline frame. Open the library's Design System canvas to edit inherited Brand, token sheets or primitive definitions. Keep this file's additions in its own three sections and label them as local where needed. Do not copy or register duplicate inherited definitions merely to display them: library tokens and components already work in local frames. A local definition with the same tag replaces the library's definitions. Libraries export only their own definitions.
+
+Keep product compositions, explorations and screens on feature pages. Reorganize existing sections and move nodes rather than deleting designs. Inspect existing sources and instance counts before changing component interfaces.
 
 Use the shadcn/ui component set as the recommended list of primitive components. It is a recommendation, not a requirement: build the families the product needs, which may be only a Button and an Input, and register any component the app's screens are built around. Where a family matches the list, use its component and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`.
 
@@ -30,9 +32,9 @@ Give each large feature a page for its screens, states, and reused components. K
 
 ```text
 Design System
-├─ Brand: name, logo, guidelines, voice
-├─ Foundations: tokens and themes
-└─ Primitive components: Button/*, Input/*, … (recommended ones first, then the file's own)
+├─ 01 · Brand: editable guideline frame
+├─ 02 · Foundations: token sheets and themes
+└─ 03 · Primitive components: Button/*, Input/*, … (recommended ones first, then the file's own)
 Trade
 ├─ Screens: sections for each flow
 └─ Components: Trade/OrderForm, Trade/MarketHeader
@@ -166,8 +168,8 @@ When a theme changes a component's structure, such as extra decoration elements,
 
 ## Build and maintain
 
-1. Read the existing system or link a library; choose the Design System document page for the file.
-2. Set Brand with `set_brand`, then create token sheets and the primitives needed now on the Design System page.
+1. Read the existing system or link a library; mark the file’s Design System canvas page.
+2. Create or update the Brand guideline frame and its `set_brand` metadata. Put token sheets in Foundations and the primitives needed now in the automatic Primitive components catalog.
 3. Check them with `screenshot_nodes` when available.
 4. Read `read_skill({ path: "references/screens.md" })` before building screens.
 5. Extract repeated feature markup on its feature page. Verify each section of work.

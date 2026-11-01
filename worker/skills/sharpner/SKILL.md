@@ -13,7 +13,7 @@ Members see edits live. Re-read content after another member changes it. Preserv
 2. Read page and section descriptions with `list_pages({ fileId })`.
 3. Read the required page with `get_file({ fileId, pageId })`. Use `read_nodes` for sources.
 
-A workspace holds files. Each file has canvas pages and at most one Design System document page (`kind: "design-system"`). Its Brand is stored per file with `set_brand`; Foundations and primitive families are generated. Components on that page are primitives. A linked library’s Brand, tokens and primitives appear read-only alongside marked local additions; edit inherited content in the library. Read the design-system reference for details.
+A workspace holds files, and every page uses the canvas. Mark one page as the file's Design System page (`kind: "design-system"`) to identify its primitives for agents and libraries. Use three ordinary sections in order: **01 · Brand**, **02 · Foundations**, **03 · Primitive components**. Put editable guideline HTML in Brand, token sheets in Foundations, and component definitions in an automatic catalog. Follow the design-system reference so pages across files share this structure. A linked library stays in its own file; reuse its definitions and link to its Design System page rather than copying them.
 
 Pages hold these node kinds:
 

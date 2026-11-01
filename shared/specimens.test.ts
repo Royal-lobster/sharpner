@@ -58,6 +58,24 @@ describe("component specimens", () => {
 });
 
 describe("foundation specimens", () => {
+  it("keeps semantic colors first, descriptions escaped, and theme-only tokens out of other panes", () => {
+    const html = tokenSpecimen(`@theme {
+      --color-z-brand: #123;
+      --color-primary: #456; /* Main <action> */
+      --color-background: white;
+    } .dark { --color-background: black; --color-night: navy; }`);
+    const light = html.split('data-theme="light">')[1]!.split('class="sp-theme dark"')[0]!;
+    const dark = html.split('class="sp-theme dark"')[1]!;
+    expect([...light.matchAll(/data-sp-value="([^"]+)"/g)].map((match) => match[1]))
+      .toEqual(["color-background", "color-primary", "color-z-brand"]);
+    expect(light).toContain('Main &lt;action&gt;');
+    expect(light).toContain('bg-background');
+    expect(light).toContain('data-sp-value="color-background">white');
+    expect(light).not.toContain('data-sp-value="color-night"');
+    expect(dark).toContain('data-sp-value="color-background">black');
+    expect(dark).toContain('data-sp-value="color-night">navy');
+  });
+
   it("groups declared token types and does not confuse typography metadata with fonts or text sizes", () => {
     const css = '@theme { --color-primary: #566b42; --font-sans: Arial; --font-weight-bold: 700; --text-sm: 14px; --text-sm--line-height: 1.5; --spacing: 4px; --radius-card: 16px; --shadow-soft: 0 4px 12px #0001; }';
     const html = tokenSpecimen(css, 'Fieldnotes foundations');

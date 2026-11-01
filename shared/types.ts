@@ -9,7 +9,7 @@ export { tokenNames } from "./specimens";
  * the right page without loading every node. A put without it keeps the current text.
  */
 export type Page = { id: string; name: string; sort: number; description?: string; kind?: "canvas" | "design-system" };
-/** The only authored content in the Design System document. Owned by the file, not the page. */
+/** File-owned Brand metadata, independent of the editable canvas guideline frame. */
 export type Brand = { name: string; logoUrl: string; guidelines: string; voice: string[] };
 export const emptyBrand = (): Brand => ({ name: "", logoUrl: "", guidelines: "", voice: [] });
 export type DesignCatalog = { brand: Brand; pageId: string | null; primitives: CanvasNode[]; tokenSheets: number };

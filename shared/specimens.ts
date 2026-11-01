@@ -1,5 +1,6 @@
 /** Presentation for design-system nodes; component definitions themselves stay untouched. */
-import { themeLabel, themeNames } from "./themes";
+import { themeLabel } from "./themes";
+import { foundations } from "./design-system";
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
@@ -77,6 +78,7 @@ const foundationStyles = `<style>
 .sp-token-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,136px),1fr));gap:18px 14px}
 .sp-token{min-width:0}
 .sp-token-name{display:block;margin-top:9px;overflow-wrap:anywhere;font:550 12px/1.4 ui-monospace,monospace;opacity:.8}
+.sp-token-description{display:block;margin-top:4px;font-size:11px;line-height:1.4;opacity:.6;overflow-wrap:anywhere}
 .sp-token-value{display:block;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px/1.4 ui-monospace,monospace;opacity:.5}
 .sp-color{height:70px;border-radius:9px;box-shadow:inset 0 0 0 1px rgb(128 128 128/.2);background-image:linear-gradient(45deg,#8881 25%,transparent 25%),linear-gradient(-45deg,#8881 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#8881 75%),linear-gradient(-45deg,transparent 75%,#8881 75%);background-size:12px 12px;background-position:0 0,0 6px,6px -6px,-6px 0}
 .sp-color-fill{height:100%;border-radius:inherit}
@@ -103,25 +105,28 @@ const observer=new MutationObserver(update);observer.observe(document.head,{chil
 
 /** The CSS remains the source of truth, including aliases and per-theme overrides. */
 export function tokenSpecimen(css: string, title = "Design tokens") {
-  const declarations = css.replace(/\/\*[\s\S]*?\*\//g, "");
-  const names = tokenNames(declarations);
-  const firstValues = new Map<string, string>();
-  for (const match of declarations.matchAll(/--([\w-]+)\s*:\s*([^;}]+)/g)) if (!firstValues.has(match[1]!)) firstValues.set(match[1]!, match[2]!.trim());
-  const group = (prefix: string) => names.filter((name) => name.startsWith(prefix));
-  const meta = (name: string) => `<code class="sp-token-name">${escape(name)}</code><span class="sp-token-value" data-sp-value="${escape(name)}">${escape(firstValues.get(name) ?? "")}</span>`;
-  const item = (name: string, specimen: string) => `<div class="sp-token">${specimen}${meta(name)}</div>`;
+  const tokens = foundations(css);
+  const all = [...tokens.colors, ...tokens.type, ...tokens.spacing, ...tokens.radii, ...tokens.shadows];
+  const names = tokenNames(css.replace(/\/\*[\s\S]*?\*\//g, ""));
   const row = (heading: string, items: string[], type = "") => items.length ? `<section class="sp-token-section"><h2>${heading}<span class="sp-token-count">${items.length}</span></h2><div class="sp-token-grid ${type}">${items.join("")}</div></section>` : "";
-  const sections = [
-    row("Color", group("color-").map((name) => item(name, `<div class="sp-color"><div class="sp-color-fill" style="background:var(--${name})"></div></div>`))),
-    row("Typography", group("font-").filter((name) => !name.startsWith("font-weight-")).map((name) => item(name, `<div class="sp-type" style="font-family:var(--${name})">The quick<br>brown fox.</div>`)), "sp-type-grid"),
-    row("Type scale", group("text-").filter((name) => !name.includes("--")).map((name) => item(name, `<div class="sp-size" style="font-size:var(--${name})">Aa</div>`))),
-    row("Font weight", group("font-weight-").map((name) => item(name, `<div class="sp-weight" style="font-weight:var(--${name})">Aa Bb</div>`))),
-    row("Spacing", names.filter((name) => name === "spacing" || name.startsWith("spacing-")).map((name) => item(name, `<div class="sp-space-stage"><div class="sp-space" style="width:var(--${name})"></div></div>`))),
-    row("Radius", group("radius-").map((name) => item(name, `<div class="sp-radius-stage"><div class="sp-radius" style="border-radius:var(--${name})"></div></div>`))),
-    row("Shadow", group("shadow-").map((name) => item(name, `<div class="sp-shadow-stage"><div class="sp-shadow" style="box-shadow:var(--${name})"></div></div>`))),
-  ].filter(Boolean);
-  const themes = themeNames(css);
-  const sheet = sections.join("") || '<p class="sp-empty">Give this system its first decisions.<br>Declare named tokens in an <code>@theme { … }</code> block.</p>';
-  const pane = (theme: string) => `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escape(theme)}">${themes.length > 1 ? `<p class="sp-theme-title">${escape(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
-  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escape(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${themes.length > 1 ? ` · ${themes.length} themes` : ""}</span></header><div class="sp-themes">${themes.map(pane).join("")}</div></article>${tokenValueScript}`;
+  const pane = (theme: string) => {
+    const defined = all.filter((token) => token.values[theme]);
+    const group = (prefix: string) => defined.filter((token) => token.name.startsWith(`--${prefix}`)).map((token) => token.name.slice(2));
+    const item = (name: string, specimen: string) => {
+      const token = defined.find((token) => token.name === `--${name}`)!;
+      return `<div class="sp-token">${specimen}<code class="sp-token-name">${escape(name)}</code><span class="sp-token-description">${escape(token.description || token.utility)}</span><span class="sp-token-value" data-sp-value="${escape(name)}">${escape(token.values[theme]!)}</span></div>`;
+    };
+    const sections = [
+      row("Color", group("color-").map((name) => item(name, `<div class="sp-color"><div class="sp-color-fill" style="background:var(--${name})"></div></div>`))),
+      row("Typography", group("font-").filter((name) => !name.startsWith("font-weight-")).map((name) => item(name, `<div class="sp-type" style="font-family:var(--${name})">The quick<br>brown fox.</div>`)), "sp-type-grid"),
+      row("Type scale", group("text-").filter((name) => !name.includes("--")).map((name) => item(name, `<div class="sp-size" style="font-size:var(--${name})">Aa</div>`))),
+      row("Font weight", group("font-weight-").map((name) => item(name, `<div class="sp-weight" style="font-weight:var(--${name})">Aa Bb</div>`))),
+      row("Spacing", defined.filter((token) => /^--spacing(?:-|$)/.test(token.name)).map((token) => item(token.name.slice(2), `<div class="sp-space-stage"><div class="sp-space" style="width:var(${token.name})"></div></div>`))),
+      row("Radius", tokens.radii.filter((token) => token.values[theme]).map((token) => item(token.name.slice(2), `<div class="sp-radius-stage"><div class="sp-radius" style="border-radius:var(${token.name})"></div></div>`))),
+      row("Shadow", tokens.shadows.filter((token) => token.values[theme]).map((token) => item(token.name.slice(2), `<div class="sp-shadow-stage"><div class="sp-shadow" style="box-shadow:var(${token.name})"></div></div>`))),
+    ].filter(Boolean);
+    const sheet = sections.join("") || '<p class="sp-empty">Give this system its first decisions.<br>Declare named tokens in an <code>@theme { … }</code> block.</p>';
+    return `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escape(theme)}">${tokens.themes.length > 1 ? `<p class="sp-theme-title">${escape(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
+  };
+  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escape(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${tokens.themes.length > 1 ? ` · ${tokens.themes.length} themes` : ""}</span></header><div class="sp-themes">${tokens.themes.map(pane).join("")}</div></article>${tokenValueScript}`;
 }
