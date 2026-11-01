@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyBrand, type Actor, type Op, type ServerMsg } from "../shared/types";
+import { foundations } from "../shared/design-system";
 
 vi.mock("cloudflare:workers", () => ({ DurableObject: class { constructor(readonly ctx: DurableObjectState, readonly env: Env) {} } }));
 vi.mock("@cloudflare/puppeteer", () => ({ default: {} }));
@@ -37,7 +38,20 @@ function fixture(id = "file") {
   return { room, page, db, apply, wake, alarm, broadcasts };
 }
 
-describe("Design System document persistence", () => {
+describe("Design System page persistence", () => {
+  it("keeps token cascade order when sheets are regrouped or edited, including after hibernation", async () => {
+    const { room, page, apply, wake } = fixture();
+    await apply([
+      { t: "node.put", id: "base", node: { pageId: page.id, kind: "tokens", name: "Base", source: "@theme { --color-primary: blue; }" } },
+      { t: "node.put", id: "override", node: { pageId: page.id, kind: "tokens", name: "Override", source: "@theme { --color-primary: purple; }" } },
+      { t: "node.put", id: "foundations", node: { pageId: page.id, kind: "section", name: "02 · Foundations", layout: "auto" } },
+    ]);
+    await apply([{ t: "node.put", id: "base", node: { parentId: "foundations", order: 20 } }]);
+    expect(foundations(room.ownDesignSystem().tokens).vars.light!["--color-primary"]).toBe("purple");
+    await apply([{ t: "node.put", id: "base", node: { source: "@theme { --color-primary: green; }" } }]);
+    expect(foundations(wake().ownDesignSystem().tokens).vars.light!["--color-primary"]).toBe("purple");
+  });
+
   it("patches Brand per file, broadcasts it, and preserves it across hibernation and page deletion", async () => {
     const { room, page, apply, wake, alarm, broadcasts } = fixture();
     expect(room.brand()).toEqual(emptyBrand());
@@ -53,7 +67,7 @@ describe("Design System document persistence", () => {
     expect(room.brand()).toMatchObject({ name: "FraxNet", voice: [], logoUrl: "" });
   });
 
-  it("chooses at most one document, keeps nodes on conversion and preserves kind on stale renames", async () => {
+  it("chooses at most one Design System page, keeps nodes on conversion and preserves kind on stale renames", async () => {
     const { room, page, apply, wake } = fixture();
     await apply([{ t: "node.put", id: "screen", node: { pageId: page.id, name: "Existing", source: "<p>Keep me</p>" } }, { t: "page.put", page: { ...page, kind: "design-system" } }]);
     expect(room.pages()[0]!.kind).toBe("design-system");

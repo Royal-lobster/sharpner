@@ -480,10 +480,11 @@ export class FileRoom extends DurableObject<Env> {
     const thumbLo = kind === "image" ? imagePreviewFor(next.src!, input.thumbLo, cur) : cur?.thumbLo ?? null;
     const thumbHi = kind === "image" ? next.src : cur?.thumbHi ?? null;
     const thumb = this.thumbState(id);
+    // Token CSS follows insertion order. REPLACE must retain the rowid when a sheet moves or changes.
     this.sql.exec(
-      `INSERT OR REPLACE INTO nodes (id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
+      `INSERT OR REPLACE INTO nodes (rowid, id, page_id, parent_id, kind, name, x, y, layout, sort, width, height, measured_h, src, thumb_lo, thumb_hi, rev, thumb_rev, thumb_tries, source, theme)
+       VALUES ((SELECT rowid FROM nodes WHERE id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      str(id), str(id), pageId, parentId, kind, next.name, next.x, next.y, next.layout, next.order, next.width, next.height, cur?.measuredHeight ?? null,
       next.src, thumbLo, thumbHi, rev, isRendered(kind) ? thumb.rev : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source, next.theme,
     );
     if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);

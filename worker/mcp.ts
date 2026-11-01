@@ -244,7 +244,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const { file, stub } = await access(fileId);
     const outline = await stub.outline();
     const pages = outline.map((p) => ({
-      id: p.id, name: p.name, description: p.description ?? "", ...(p.kind && { kind: p.kind }), ...(p.kind === "design-system" ? { arrangement: "document" } : arrangementOf(p.nodes)),
+      id: p.id, name: p.name, description: p.description ?? "", ...(p.kind && { kind: p.kind }), ...arrangementOf(p.nodes),
       designs: p.nodes.filter((n) => n.kind !== "section").length,
       sections: p.nodes.filter((n) => n.kind === "section").map((s) => ({
         id: s.id, name: s.name, description: s.description ?? "", parentId: s.parentId,
@@ -272,7 +272,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         name: p.name,
         description: p.description ?? "",
         ...(p.kind && { kind: p.kind }),
-        ...(p.kind === "design-system" ? { arrangement: "document" } : arrangementOf(p.nodes)),
+        ...arrangementOf(p.nodes),
         sections: p.nodes.filter((n) => n.kind === "section").map((n) => ({ id: n.id, name: n.name, description: n.description ?? "", parentId: n.parentId, layout: n.layout ?? "free", order: n.order, ...rects.get(n.id) })),
         nodes: p.nodes.filter((n) => n.kind !== "section").map((n) => ({
           id: n.id, kind: n.kind, name: n.name, sectionId: n.parentId, order: n.order,
@@ -289,7 +289,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("get_design_system", {
-    description: "Read Brand, document page, tokens, themes, component interfaces, overrides, primitive status and uses, including the library.",
+    description: "Read Brand, system page, tokens, themes, components, primitives and uses, including the library.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -366,7 +366,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   });
 
   server.registerTool("create_page", {
-    description: "Add a described page. kind: design-system chooses the document; components there are primitives.",
+    description: "Add a described canvas page. kind: design-system marks primitives for agents and libraries.",
     inputSchema: { fileId: z.string(), name: z.string(), description: pageDescription.optional(), kind: pageKind.optional() },
   }, async ({ fileId, name, description, kind }) => {
     const { stub, apply } = await access(fileId);
@@ -385,7 +385,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   };
 
   server.registerTool("update_page", {
-    description: "Rename, describe, or set kind: design-system (one per file) or canvas. Conversion keeps nodes.",
+    description: "Rename, describe, or mark the Design System canvas page (one per file). Changing kind keeps all nodes.",
     inputSchema: { fileId: z.string(), pageId: z.string(), name: z.string().min(1).optional(), description: pageDescription.optional(), kind: pageKind.optional() },
   }, ({ fileId, pageId, name, description, kind }) => updatePage(fileId, pageId, name, description, kind));
 
