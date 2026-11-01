@@ -55,9 +55,19 @@ describe("component specimens", () => {
       const dark = renderedHtml({ kind: "component", name: "Button" }, "<button>Go</button>", { tokens: `@theme { --color-background: white; } ${tokens}` });
       expect(dark.startsWith('<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark"><style>')).toBe(true);
       expect(dark).toContain("<x-button></x-button>");
-      // A full document still receives the design system's head and component definitions.
-      expect(frameDocument(dark, { design: { tokens, components: [] } })).toMatch(/^<html data-theme="dark"[^>]*><head>/);
+      // A full document still receives the design system's head and component definitions, and a doctype:
+      // without one the thumbnail renderer lays it out in quirks mode, where <body> fills the viewport and
+      // every specimen measures as tall as the page.
+      expect(frameDocument(dark, { design: { tokens, components: [] } })).toMatch(/^<!doctype html><html data-theme="dark"[^>]*><head>/);
     }
+  });
+
+  it("renders full documents in standards mode, as live srcdoc previews do", () => {
+    expect(frameDocument("<html><body><p>Hi</p></body></html>")).toMatch(/^<!doctype html><html><head>/);
+    expect(frameDocument("  <HTML lang=\"en\"><p>Hi</p></HTML>")).toMatch(/^<!doctype html>\s*<HTML lang="en"><head>/);
+    const authored = frameDocument("<!DOCTYPE html><html><body><p>Hi</p></body></html>");
+    expect(authored.match(/<!doctype/gi)).toHaveLength(1);
+    expect(authored.startsWith("<!DOCTYPE html><html><head>")).toBe(true);
   });
 
   it("changes the node presentation while leaving screens and component definitions intact", () => {

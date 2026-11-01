@@ -189,6 +189,9 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
     : "";
   const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
+    // Live previews are srcdoc documents, which never use quirks mode. Without a doctype the thumbnail
+    // renderer would: <body> stretches to the viewport and auto-height nodes measure as tall as the page.
+    if (!/^\s*<!doctype/i.test(html)) html = `<!doctype html>${html}`;
     const withHead = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => m + head)
       : html.replace(/<html[^>]*>/i, (m) => `${m}<head>${head}</head>`);

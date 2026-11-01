@@ -168,6 +168,18 @@ const MIGRATIONS = [
     const fileId = sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k = 'fileId'`).toArray()[0]?.v;
     if (backfilling(fileId)) sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('backfill', '1')`);
   },
+  // Full documents without a doctype were rendered in quirks mode, where <body> fills the viewport, so their
+  // measured heights read as the page height. Dark specimens and baked screens are such documents; frameDocument
+  // now adds the doctype. Specimens and doctype-less screens re-render once to measure their real heights.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'standardsMode'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('standardsMode', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('component', 'tokens')`);
+    for (const f of sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'frame'`).toArray()) {
+      if (/^\s*<html/i.test(f.source)) sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE id = ?`, f.id);
+    }
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose owner asked for every screen in dark; see the migration that uses it. */
