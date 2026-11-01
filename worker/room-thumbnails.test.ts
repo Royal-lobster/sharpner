@@ -324,7 +324,7 @@ describe("dark-only migration", () => {
   const FRAXNET = "2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a";
   /** Replays the migration as an existing room would see it on its next wake-up. */
   const replay = (db: DatabaseSync, fileId: string) => {
-    db.exec(`DELETE FROM meta WHERE k = 'darkSpecimens'; UPDATE meta SET v = '${fileId}' WHERE k = 'fileId'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'darkSpecimens'; UPDATE meta SET v = '${fileId}' WHERE k = 'fileId'; UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
   };
 
   it("darkens every screen of a dark-only file and re-renders all its previews", async () => {
@@ -344,7 +344,7 @@ describe("dark-only migration", () => {
       expect(db.prepare("SELECT rev, thumb_lo, tries FROM node_thumbnails WHERE node_id = ? AND theme = ''").get(id)).toEqual({ rev: rev + 1, thumb_lo: null, tries: 0 });
     }
     // Runs once: a later replay of the recorded schema leaves the room alone.
-    db.exec("UPDATE meta SET v = v - 2 WHERE k = 'schema'");
+    db.exec("UPDATE meta SET v = v - 3 WHERE k = 'schema'");
     expect(wake().node("button")!.rev).toBe(revs.get("button")! + 1);
   });
 
@@ -368,6 +368,35 @@ describe("dark-only migration", () => {
   });
 });
 
+describe("standards-mode migration", () => {
+  /** Replays the migration as an existing room would see it on its next wake-up. */
+  const replay = (db: DatabaseSync) => {
+    db.exec(`DELETE FROM meta WHERE k = 'standardsMode'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+  };
+
+  it("re-renders specimens and doctype-less documents that were measured in quirks mode", async () => {
+    const { room, db, wake, create, cached, flush } = fixture(true);
+    await create("fragment", { source: "<main>Hi</main>" });
+    await create("baked", { source: `<html data-theme="dark" class="dark"><body><main>Hi</main></body></html>` });
+    await create("indented", { source: `\n  <HTML><body>x</body></HTML>` });
+    await create("standards", { source: "<!doctype html><html><body>x</body></html>" });
+    await create("button", { kind: "component", name: "Button" });
+    await create("tokens", { kind: "tokens", source: "@theme { --color-background: white; } .dark { --color-background: black; }" });
+    cached();
+    const revs = new Map(room.nodes().map((n) => [n.id, n.rev]));
+    replay(db);
+    const migrated = wake(); await flush();
+    for (const id of ["baked", "indented", "button", "tokens"]) {
+      expect(migrated.node(id)!.rev).toBe(revs.get(id)! + 1);
+      expect(db.prepare("SELECT rev, thumb_lo, tries FROM node_thumbnails WHERE node_id = ? AND theme = ''").get(id)).toEqual({ rev: revs.get(id)! + 1, thumb_lo: null, tries: 0 });
+    }
+    for (const id of ["fragment", "standards"]) expect(migrated.node(id)!.rev).toBe(revs.get(id));
+    // Runs once: a later replay of the recorded schema leaves the room alone.
+    db.exec("UPDATE meta SET v = v - 1 WHERE k = 'schema'");
+    expect(wake().node("button")!.rev).toBe(revs.get("button")! + 1);
+  });
+});
+
 describe("backfill", () => {
   const FRAXNET = "2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a";
 
@@ -379,7 +408,7 @@ describe("backfill", () => {
       await apply([{ t: "page.put", page: { id: "other", name: "Other", sort: 2 } }]);
       await apply([{ t: "node.put", id: "two", node: { pageId: "other", width: 400, height: 600, source: "<p>two</p>" } }]);
       stopViewing();
-      db.exec(`UPDATE meta SET v = '${FRAXNET}' WHERE k = 'fileId'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+      db.exec(`UPDATE meta SET v = '${FRAXNET}' WHERE k = 'fileId'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
       const migrated = wake(); await flush();
       expect(db.prepare("SELECT v FROM meta WHERE k = 'backfill'").get()).toEqual({ v: "1" });
       renderer.loadFrame.mockClear();
@@ -398,7 +427,7 @@ describe("backfill", () => {
   it("does not mark other files", async () => {
     const { db, wake, create, flush } = fixture(true);
     await create("one");
-    db.exec("UPDATE meta SET v = v - 1 WHERE k = 'schema'");
+    db.exec("UPDATE meta SET v = v - 2 WHERE k = 'schema'");
     wake(); await flush();
     expect(db.prepare("SELECT v FROM meta WHERE k = 'backfill'").get()).toBeUndefined();
   });
