@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AUTO_GAP, AUTO_ROW_GAP, AUTO_ROW_WIDTH, CATALOG_GAP, CATALOG_GUTTER, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, pageArrangement, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
+import { AUTO_GAP, AUTO_ROW_GAP, AUTO_ROW_WIDTH, balancedStarts, CATALOG_COLUMN_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_TALL, CATALOG_PAD, CATALOG_ROW_GAP, catalogFamilyLabels, catalogSectionIds, dropOrders, isManaged, layoutHeight, layoutRects, pageArrangement, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, tileSections } from "./layout";
 import type { CanvasNode } from "./types";
 
 const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
@@ -43,6 +43,47 @@ describe("component catalogs", () => {
     const rects = rectsOf(nodes);
     expect(rects.get("2")).toMatchObject({ x: CATALOG_PAD + CATALOG_GUTTER, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP });
     expect(catalogFamilyLabels(nodes, rects, catalogSectionIds(nodes))).toHaveLength(1);
+  });
+
+  /** `count` families of two 200 × 120 variants each. */
+  const families = (count: number) => [section("chips"), ...Array.from({ length: count }, (_, i) => [
+    component(`f${i}-a`, `Family ${i}/A`, i * 2), component(`f${i}-b`, `Family ${i}/B`, i * 2 + 1),
+  ]).flat()];
+
+  it("keeps a catalog that isn't much taller than wide in one column", () => {
+    // Five rows are 5 × 120 + 4 × 64 = 856 tall against a 160 + 440 = 600 wide column: under the threshold.
+    const rects = rectsOf(families(5));
+    expect(new Set([...rects].filter(([id]) => id.endsWith("-a")).map(([, r]) => r.x))).toEqual(new Set([CATALOG_PAD + CATALOG_GUTTER]));
+    expect(rects.get("chips")!.h - 2 * CATALOG_PAD).toBeLessThanOrEqual((rects.get("chips")!.w - 2 * CATALOG_PAD) * CATALOG_TALL);
+  });
+
+  it("stacks a tall catalog's families in balanced columns, in order, each with its own gutter", () => {
+    const nodes = families(40), rects = rectsOf(nodes);
+    const firsts = Array.from({ length: 40 }, (_, i) => rects.get(`f${i}-a`)!);
+    const columns = [...new Set(firsts.map((r) => r.x))];
+    expect(columns.length).toBeGreaterThan(1);
+    // Order reads down each column, then across: x never decreases and y only resets at a new column.
+    firsts.slice(1).forEach((r, i) => expect(r.x > firsts[i]!.x || r.x === firsts[i]!.x && r.y > firsts[i]!.y).toBe(true));
+    // Columns are as tall as each other within one row, and the second starts past the first's widest row and gutter.
+    const heights = columns.map((x) => firsts.filter((r) => r.x === x).length);
+    expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+    expect(columns[1]! - columns[0]!).toBe(2 * 200 + CATALOG_GAP + CATALOG_COLUMN_GAP + CATALOG_GUTTER);
+    // The catalog is closer to square than one column would be.
+    const box = rects.get("chips")!;
+    expect(box.h / box.w).toBeLessThan(CATALOG_TALL);
+    expect(firsts.every((a, i) => firsts.every((b, j) => i === j || !overlaps(a, b)))).toBe(true);
+    // Each family is labelled once, in the gutter beside its first specimen, in its own column.
+    const labels = catalogFamilyLabels(nodes, rects, catalogSectionIds(nodes));
+    expect(labels).toHaveLength(40);
+    expect(labels[heights[0]!]).toEqual({ family: `Family ${heights[0]}`, x: columns[1]! - CATALOG_GUTTER, y: CATALOG_PAD });
+  });
+
+  it("splits contiguous runs so the tallest is as short as possible", () => {
+    expect(balancedStarts([100, 100, 100, 100], 2, 0)).toEqual([0, 2]);
+    expect(balancedStarts([300, 100, 100, 100], 2, 0)).toEqual([0, 1]);
+    expect(balancedStarts(Array(40).fill(120), 3, 64)).toEqual([0, 14, 27]);
+    expect(balancedStarts([100, 100, 100, 300], 2, 10)).toEqual([0, 3]);
+    expect(balancedStarts([50, 50, 50], 3, 0)).toEqual([0, 1, 2]);
   });
 
   it("drops the gutter when no component names a family, and keeps screen spacing once a frame joins", () => {
