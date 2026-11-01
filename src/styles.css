@@ -534,3 +534,13 @@ body:has(.editor) { --toast-offset: 84px; }
   .agent-sheen, .trace-lead { display: none; }
   .trace-rail { stroke: rgb(255 185 0 / 0.6); }
 }
+
+/* Interaction playback */
+.frame.interacting .frame-body { box-shadow: 0 0 0 calc(2px * var(--inv)) var(--primary); }
+.frame.interacting .frame-body iframe[data-interaction-id] { pointer-events: auto; }
+.frame-play { position: absolute; z-index: 3; top: calc(8px * var(--inv)); right: calc(8px * var(--inv)); transform: scale(var(--inv)); transform-origin: top right; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2); opacity: 0; transition: opacity 0.15s; }
+.frame:hover .frame-play, .frame-play:focus-visible { opacity: 1; }
+@media (hover: none) { .frame-play { opacity: 1; } }
+.interaction-controls { gap: 4px; }
+.interaction-status { color: var(--primary); font-size: 11px; flex: none; margin-left: 4px; }
+.interaction-loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: var(--foreground); background: color-mix(in srgb, var(--background) 80%, transparent); font-size: calc(12px * var(--inv)); }

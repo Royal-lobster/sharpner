@@ -20,6 +20,8 @@ type Viewport = {
   pixelRatio: number;
   ready: boolean;
   settled: boolean;
+  /** The one design this viewer is playing. It stays mounted while panned away, so its input state survives. */
+  interactionId?: string | null;
   previous: { liveIds: ReadonlySet<string>; imageIds: ReadonlySet<string> };
 };
 
@@ -29,17 +31,20 @@ type Viewport = {
  * This policy is independent of React, image loading, and source fetching.
  */
 export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<string, Rect>, viewport: Viewport) {
-  const { camera, size, pixelRatio, ready, settled, previous } = viewport;
+  const { camera, size, pixelRatio, ready, settled, previous, interactionId } = viewport;
   const visible: ProjectedNode[] = [];
   const sections: ProjectedNode[] = [];
+  let playingVisible = false;
   // The default 100% camera is not the opening overview. Wait for the first fitted/restored camera.
   if (ready && size.w && size.h) {
     const view = { x: -camera.x / camera.z, y: -camera.y / camera.z, w: size.w / camera.z, h: size.h / camera.z };
     const margin = Math.max(view.w, view.h) * 0.25;
     for (const node of nodes) {
       const rect = rects.get(node.id)!;
-      if (rect.x > view.x + view.w + margin || rect.y > view.y + view.h + margin ||
-          rect.x + rect.w < view.x - margin || rect.y + rect.h < view.y - margin) continue;
+      const playing = node.id === interactionId && canInteract(node);
+      playingVisible ||= playing;
+      if (!playing && (rect.x > view.x + view.w + margin || rect.y > view.y + view.h + margin ||
+          rect.x + rect.w < view.x - margin || rect.y + rect.h < view.y - margin)) continue;
       const visibleWidth = Math.max(0, Math.min(rect.x + rect.w, view.x + view.w) - Math.max(rect.x, view.x));
       const visibleHeight = Math.max(0, Math.min(rect.y + rect.h, view.y + view.h) - Math.max(rect.y, view.y));
       const projected = { node, rect, screenWidth: rect.w * camera.z, visibleArea: visibleWidth * visibleHeight * camera.z * camera.z };
@@ -60,6 +65,8 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
   } else {
     liveIds = keepEligible(previous.liveIds, liveCandidates);
   }
+  // Playback needs the source, so it counts as live; other live previews keep their budget.
+  if (playingVisible) liveIds.add(interactionId!);
 
   const imageCandidates = visible.filter(({ node, visibleArea, screenWidth }) =>
     node.kind === "image" && visibleArea > 0 && screenWidth * pixelRatio > HI_RES_MIN_PIXELS);
@@ -85,6 +92,11 @@ function canRenderLive({ node, visibleArea, screenWidth }: ProjectedNode) {
     ? LIVE_WITHOUT_PREVIEW_MIN_WIDTH
     : node.kind === "component" ? LIVE_COMPONENT_MIN_WIDTH : LIVE_FRAME_MIN_WIDTH;
   return visibleArea > 0 && screenWidth >= minimumWidth;
+}
+
+/** Viewers can play any frame or component; the session and its input stay local to them. */
+export function canInteract(node: Pick<CanvasNode, "kind"> | null | undefined) {
+  return node?.kind === "frame" || node?.kind === "component";
 }
 
 function keepEligible(previous: ReadonlySet<string>, candidates: ProjectedNode[]) {
