@@ -4,7 +4,6 @@ import { componentTag, type Brand, type CanvasNode, type DesignSystem, type Libr
 
 export const RECOMMENDED_FAMILIES = ["Button", "Badge", "Input", "Textarea", "Label", "Field", "Select", "Checkbox", "Radio Group", "Switch", "Slider", "Toggle Group", "Tabs", "Card", "Alert", "Dialog", "Sheet", "Drawer", "Popover", "Tooltip", "Dropdown Menu", "Avatar", "Separator", "Skeleton", "Spinner", "Progress", "Table", "Toast", "Breadcrumb", "Pagination", "Accordion", "Empty"];
 export const COLOR_SLOTS = ["background", "foreground", "card", "popover", "primary", "primary-foreground", "secondary", "muted", "muted-foreground", "accent", "destructive", "border", "input", "ring", "card-foreground", "popover-foreground", "secondary-foreground", "accent-foreground", "destructive-foreground"];
-export const MAX_LIVE_PREVIEWS = 16;
 export const COLLAPSED_VARIANTS = 6;
 
 /** Patch individual fields, so independent member/agent changes do not erase the other brand fields. */
@@ -151,6 +150,3 @@ export function primitiveFamilies(nodes: CanvasNode[], pageId: string, design: D
   for (const f of families.values()) for (const v of f.variants) v.definitions.sort((a, b) => Number(!!a.node.theme) - Number(!!b.node.theme) || (a.node.theme ?? "").localeCompare(b.node.theme ?? ""));
   return [...families.values()].sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
 }
-
-/** The same bounded selection drives the mounted iframes, regardless of family count. */
-export const livePreviewIds = (ordered: string[], visible: ReadonlySet<string>) => new Set(ordered.filter((id) => visible.has(id)).slice(0, MAX_LIVE_PREVIEWS));
