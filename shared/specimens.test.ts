@@ -47,6 +47,19 @@ describe("component specimens", () => {
     expect(html).toContain('&lt;script&gt;bad()&lt;/script&gt;');
   });
 
+  it("presents components in dark when the design system defines a dark theme", () => {
+    const light = renderedHtml({ kind: "component", name: "Button" }, "<button>Go</button>", { tokens: "@theme { --color-background: white; }" });
+    expect(light.startsWith("<style>")).toBe(true);
+    expect(light).not.toContain('data-theme="dark"');
+    for (const tokens of [".dark { --color-background: black; }", '[data-theme="dark"] { --color-background: black; }']) {
+      const dark = renderedHtml({ kind: "component", name: "Button" }, "<button>Go</button>", { tokens: `@theme { --color-background: white; } ${tokens}` });
+      expect(dark.startsWith('<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark"><style>')).toBe(true);
+      expect(dark).toContain("<x-button></x-button>");
+      // A full document still receives the design system's head and component definitions.
+      expect(frameDocument(dark, { design: { tokens, components: [] } })).toMatch(/^<html data-theme="dark"[^>]*><head>/);
+    }
+  });
+
   it("changes the node presentation while leaving screens and component definitions intact", () => {
     const source = '<main><x-button-primary label="Save"></x-button-primary></main>';
     expect(renderedHtml({ kind: "frame", name: "Screen" }, source)).toBe(source);
@@ -63,17 +76,17 @@ describe("foundation specimens", () => {
       --color-z-brand: #123;
       --color-primary: #456; /* Main <action> */
       --color-background: white;
-    } .dark { --color-background: black; --color-night: navy; }`);
-    const light = html.split('data-theme="light">')[1]!.split('class="sp-theme dark"')[0]!;
-    const dark = html.split('class="sp-theme dark"')[1]!;
+    } [data-theme="brand"] { --color-background: black; --color-night: navy; }`);
+    const light = html.split('data-theme="light">')[1]!.split('data-theme="brand"')[0]!;
+    const brand = html.split('class="sp-theme" data-theme="brand"')[1]!;
     expect([...light.matchAll(/data-sp-value="([^"]+)"/g)].map((match) => match[1]))
       .toEqual(["color-background", "color-primary", "color-z-brand"]);
     expect(light).toContain('Main &lt;action&gt;');
     expect(light).toContain('bg-background');
     expect(light).toContain('data-sp-value="color-background">white');
     expect(light).not.toContain('data-sp-value="color-night"');
-    expect(dark).toContain('data-sp-value="color-background">black');
-    expect(dark).toContain('data-sp-value="color-night">navy');
+    expect(brand).toContain('data-sp-value="color-background">black');
+    expect(brand).toContain('data-sp-value="color-night">navy');
   });
 
   it("groups declared token types and does not confuse typography metadata with fonts or text sizes", () => {
@@ -90,11 +103,16 @@ describe("foundation specimens", () => {
 
   it.each(['.dark { --color-primary: #aabbcc; }', '[data-theme="dark"] { --color-primary: #aabbcc; }', "[data-theme='dark'] { --color-primary: #aabbcc; }"])("renders actual dark overrides with matching class and data-theme context: %s", (dark) => {
     const html = tokenSpecimen(`@theme { --color-primary: #112233; } ${dark}`);
+    // Screens are dark, so a sheet with a dark theme shows only that pane, on dark document roots.
+    expect(html.startsWith('<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark">')).toBe(true);
     expect(html).toContain('class="sp-theme dark" data-theme="dark"');
-    expect(html).toContain('2 themes');
+    expect(html).not.toContain('data-theme="light"');
+    expect(html).not.toContain('themes</span>');
+    expect(html).not.toContain('<p class="sp-theme-title">');
     // Values are read from each pane after CSS resolution, including aliases/overrides.
     expect(html).toContain('getComputedStyle(label).getPropertyValue("--"+name)');
-    expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(2);
+    expect(html).toContain('data-sp-value="color-primary">#aabbcc');
+    expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(1);
   });
 
   it("previews a named theme without treating it as dark or reading commented-out tokens", () => {
@@ -106,7 +124,23 @@ describe("foundation specimens", () => {
     expect((html.match(/data-sp-value="color-primary"/g) ?? [])).toHaveLength(2);
   });
 
-  it("previews light, dark and named themes once each in declaration order", () => {
+  it("previews light and named themes once each in declaration order", () => {
+    const html = tokenSpecimen(`
+      @theme { --color-primary: #112233; --radius-md: 8px; }
+      [data-theme="light"] { --color-primary: #223344; }
+      [data-theme = 'UwU'] { --color-primary: #eeaaff; --radius-md: 24px; }
+      [data-theme="UwU"] { --radius-md: 32px; }
+      @media (min-width: 600px) { [data-theme=high-contrast] { --color-primary: #000; } }
+    `);
+    expect([...html.matchAll(/class="sp-theme(?: dark)?" data-theme="([^"]+)"/g)].map((m) => m[1]))
+      .toEqual(["light", "UwU", "high-contrast"]);
+    expect(html).toContain('3 themes');
+    expect(html).toContain('<p class="sp-theme-title">UwU</p>');
+    expect(html.startsWith("<html")).toBe(false);
+    for (const name of ["color-primary", "radius-md"]) expect((html.match(new RegExp(`data-sp-value="${name}"`, "g")) ?? [])).toHaveLength(3);
+  });
+
+  it("shows only the dark pane once a dark theme is declared among others", () => {
     const html = tokenSpecimen(`
       @theme { --color-primary: #112233; --radius-md: 8px; }
       [data-theme="light"] { --color-primary: #223344; }
@@ -115,12 +149,9 @@ describe("foundation specimens", () => {
       [data-theme="UwU"] { --radius-md: 32px; }
       @media (min-width: 600px) { [data-theme=high-contrast] { --color-primary: #000; } }
     `);
-    expect([...html.matchAll(/class="sp-theme(?: dark)?" data-theme="([^"]+)"/g)].map((m) => m[1]))
-      .toEqual(["light", "UwU", "dark", "high-contrast"]);
-    expect(html).toContain('4 themes');
-    expect(html).toContain('<p class="sp-theme-title">UwU</p>');
-    expect(html).toContain('class="sp-theme dark" data-theme="dark"');
-    for (const name of ["color-primary", "radius-md"]) expect((html.match(new RegExp(`data-sp-value="${name}"`, "g")) ?? [])).toHaveLength(4);
+    expect([...html.matchAll(/class="sp-theme(?: dark)?" data-theme="([^"]+)"/g)].map((m) => m[1])).toEqual(["dark"]);
+    expect(html).not.toContain('themes</span>');
+    for (const name of ["color-primary", "radius-md"]) expect((html.match(new RegExp(`data-sp-value="${name}"`, "g")) ?? [])).toHaveLength(1);
   });
 
   it("does not create theme panes from comments, CSS strings, empty values or lookalike selectors", () => {

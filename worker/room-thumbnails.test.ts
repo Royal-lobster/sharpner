@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { bakeTheme } from "./bake-theme";
+import { bakeTheme } from "../shared/bake-theme";
 import { emptyBrand, type Actor, type NodeInput, type Op, type ServerMsg } from "../shared/types";
 
 vi.mock("cloudflare:workers", () => ({
@@ -9,7 +9,7 @@ vi.mock("cloudflare:workers", () => ({
 const renderer = vi.hoisted(() => ({ launch: vi.fn(), loadFrame: vi.fn(), capture: vi.fn(), captureThumbnails: vi.fn() }));
 vi.mock("@cloudflare/puppeteer", () => ({ default: { launch: renderer.launch } }));
 vi.mock("./render", async (original) => ({ ...await original<typeof import("./render")>(), loadFrame: renderer.loadFrame, capture: renderer.capture, captureThumbnails: renderer.captureThumbnails }));
-import { FileRoom } from "./room";
+import { darken, FileRoom } from "./room";
 
 const databases: DatabaseSync[] = [];
 afterEach(() => { for (const db of databases.splice(0)) db.close(); });
@@ -317,6 +317,54 @@ describe("theme removal migration", () => {
     expect(JSON.stringify([...second.nodes().map((n) => second.node(n.id))])).toBe(snapshot);
     expect(second.node("dark")!.name).toBe("Button (Dark)");
     expect(room.node("screen")!.source).toBe(bakeTheme("<main>Hi</main>", "dark"));
+  });
+});
+
+describe("dark-only migration", () => {
+  const FRAXNET = "2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a";
+  /** Replays the migration as an existing room would see it on its next wake-up. */
+  const replay = (db: DatabaseSync, fileId: string) => {
+    db.exec(`DELETE FROM meta WHERE k = 'darkSpecimens'; UPDATE meta SET v = '${fileId}' WHERE k = 'fileId'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+  };
+
+  it("darkens every screen of a dark-only file and re-renders all its previews", async () => {
+    const { room, db, wake, create, cached, flush } = fixture(true);
+    await create("fragment", { source: "<main>Hi</main>" });
+    await create("baked", { source: `<html data-theme="light" class="light" style="color-scheme:light"><body data-theme="light" class="light"><section data-theme='light'>x</section></body></html>` });
+    await create("button", { kind: "component", name: "Button" });
+    await create("tokens", { kind: "tokens", source: "@theme { --color-background: white; } .dark { --color-background: black; }" });
+    cached();
+    const revs = new Map(room.nodes().map((n) => [n.id, n.rev]));
+    replay(db, FRAXNET);
+    const migrated = wake(); await flush();
+    expect(migrated.node("fragment")!.source).toBe(bakeTheme("<main>Hi</main>", "dark"));
+    expect(migrated.node("baked")!.source).toBe(`<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark"><section data-theme="dark">x</section></body></html>`);
+    for (const [id, rev] of revs) {
+      expect(migrated.node(id)!.rev).toBe(rev + 1);
+      expect(db.prepare("SELECT rev, thumb_lo, tries FROM node_thumbnails WHERE node_id = ? AND theme = ''").get(id)).toEqual({ rev: rev + 1, thumb_lo: null, tries: 0 });
+    }
+    // Runs once: a later replay of the recorded schema leaves the room alone.
+    db.exec("UPDATE meta SET v = v - 1 WHERE k = 'schema'");
+    expect(wake().node("button")!.rev).toBe(revs.get("button")! + 1);
+  });
+
+  it("only refreshes specimen previews in other files and leaves their screens untouched", async () => {
+    const { room, db, wake, create, cached, flush } = fixture(true);
+    const source = `<html data-theme="light"><body><main>Light</main></body></html>`;
+    await create("screen", { source });
+    await create("button", { kind: "component", name: "Button" });
+    cached();
+    const revs = new Map(room.nodes().map((n) => [n.id, n.rev]));
+    replay(db, "file");
+    const migrated = wake(); await flush();
+    expect(migrated.node("screen")).toMatchObject({ source, rev: revs.get("screen") });
+    expect(migrated.node("button")!.rev).toBe(revs.get("button")! + 1);
+  });
+
+  it("switches only light theme attributes when darkening", () => {
+    expect(darken(`<div data-theme="lightish" data-label="light"><p data-theme=light>a</p></div>`)).toBe(
+      `<html data-theme="dark" class="dark" style="color-scheme:dark"><body data-theme="dark" class="dark"><div data-theme="lightish" data-label="light"><p data-theme="dark">a</p></div></body></html>`);
+    expect(darken(darken("<p>a</p>"))).toBe(darken("<p>a</p>"));
   });
 });
 

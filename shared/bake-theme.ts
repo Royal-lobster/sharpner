@@ -24,7 +24,9 @@ function attributes(theme: string, root: boolean, classes: string, style: string
   const named = theme === "dark" || theme === "light";
   const list = [...classes.split(/\s+/).filter((c) => c && c !== "dark" && c !== "light"), ...(named ? [theme] : [])];
   const scheme = root && named ? `color-scheme:${theme}` : "";
-  const styles = [style.trim().replace(/;?\s*$/, ""), scheme].filter(Boolean).join(";");
+  // Replace a color scheme baked earlier, so baking is idempotent.
+  const kept = root && named ? style.split(";").filter((d) => !/^\s*color-scheme\s*:/i.test(d)).join(";") : style;
+  const styles = [kept.trim().replace(/;?\s*$/, ""), scheme].filter(Boolean).join(";");
   return ` data-theme="${escape(theme)}"` + (list.length ? ` class="${escape(list.join(" "))}"` : "") + (styles ? ` style="${escape(styles)}"` : "");
 }
 

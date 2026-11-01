@@ -6,6 +6,12 @@
 > per-theme pairs, theme debounce or cached theme switches describe the earlier
 > design and the measurements taken under it. A migration baked each formerly
 > themed frame's theme into its HTML roots, so existing screens look the same.
+>
+> 2026-11-02, later: design-system specimens present the dark theme when the
+> tokens define one. A token sheet shows only its dark pane, and a component
+> specimen renders on dark document roots. A one-off migration made the IQ
+> Industries files (fraxnet, fraxramp, tupredices) dark-only at the owner's
+> request and re-rendered every preview in them.
 
 Previews are keyed by content revision. `nodes.rev` changes for source, size and
 design-system dependencies, including component definitions.
