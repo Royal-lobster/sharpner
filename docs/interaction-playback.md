@@ -91,3 +91,9 @@ The larger [live canvas architecture](live-canvas-rendering.md) still needs a
 bounded overview hydration policy and a faithful local bitmap handoff. Selective
 playback provides an explicit, small active set without changing fast raster
 opening or promising that all 300 overview frames become live.
+
+The [interaction-first experiments](interaction-first-experiments.md) recommend
+making motion and behavior part of ordinary screen authoring, with execution
+controlled by the render planner. The current flag is a compatibility/rollout
+gate. Named scenarios, cooperative state restoration and bounded automatic motion
+are measured next steps; they are not implemented by this playback capability.
