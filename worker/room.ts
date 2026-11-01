@@ -180,6 +180,12 @@ const MIGRATIONS = [
     }
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // The standards-mode re-renders were queued after the IQ Industries backfill had finished, so pages nobody
+  // opened kept their quirks-mode heights. Backfill files start the backfill once more to render them unviewed.
+  (sql: SqlStorage) => {
+    const fileId = sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k = 'fileId'`).toArray()[0]?.v;
+    if (backfilling(fileId)) sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('backfill', '1')`);
+  },
 ];
 
 /** Files whose owner asked for every screen in dark; see the migration that uses it. */
