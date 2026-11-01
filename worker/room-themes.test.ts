@@ -68,7 +68,7 @@ function fixture(browser = false, sockets: { deserializeAttachment(): unknown }[
       WHERE theme = CASE WHEN (SELECT kind FROM nodes WHERE id = node_id) = 'tokens' THEN '' ELSE coalesce((SELECT theme FROM nodes WHERE id = node_id), (SELECT nullif(v, '') FROM meta WHERE k = 'fileTheme'), '') END`);
   };
   const render = async () => { db.exec("DELETE FROM meta WHERE k = 'thumbAfter'"); const result = await room.renderThumbnails(); await flush(); return result; };
-  return { db, room, wake, apply, create, cached, broadcasts, storage, render, enqueue, env, stopViewing: () => { viewing = false; } };
+  return { db, room, wake, flush, apply, create, cached, broadcasts, storage, render, enqueue, env, stopViewing: () => { viewing = false; } };
 }
 
 describe("file and screen themes", () => {
@@ -268,6 +268,51 @@ describe("content/theme thumbnail pairs", () => {
     expect(migrated.node("screen")!.thumbnails!.dark.rev).toBe(migrated.node("screen")!.rev);
     expect(migrated.node("override")!.thumbRev).toBe(0);
     expect(wake().node("screen")!.thumbnails).toEqual(migrated.node("screen")!.thumbnails);
+  });
+
+  it("queues previews that were outdated before the migration, without waiting for an edit", async () => {
+    const {room, create, db, wake, flush, enqueue, apply} = fixture(true);
+    await create("screen");
+    await apply([{t:"theme.set",theme:"dark"}]);
+    db.exec(`UPDATE nodes SET thumb_lo='/a/file/t/legacy-lo.webp', thumb_hi='/a/file/t/legacy-hi.webp', thumb_rev=rev-1;
+      DROP TABLE node_thumbnails; DROP TABLE used_themes; ALTER TABLE nodes DROP COLUMN thumb_theme;
+      UPDATE meta SET v='8' WHERE k='schema';`);
+    enqueue.mockClear();
+    const migrated = wake(); await flush();
+    expect(enqueue).toHaveBeenCalled();
+    expect(db.prepare("SELECT theme, rev, thumb_lo FROM node_thumbnails WHERE node_id='screen' AND rev=?").all(room.node("screen")!.rev)).toEqual([{theme:"dark",rev:room.node("screen")!.rev,thumb_lo:null}]);
+    expect(migrated.node("screen")!.thumbHi).toBe("/a/file/t/legacy-hi.webp");
+  });
+
+  it("ends the session instead of spinning when an edit restarts the debounce mid-render", async () => {
+    const {room,create,render} = fixture(true);
+    await create("screen");
+    renderer.loadFrame.mockImplementationOnce(async () => {
+      await create("other");
+      return {width:400,height:600,measured:600};
+    });
+    const started = Date.now();
+    expect(await render()).toMatchObject({more:true});
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(room.node("other")!.thumbHi).toBeNull();
+  });
+
+  it("does not charge a retry to renders aborted by the session", async () => {
+    const {create,render,db} = fixture(true);
+    await create("screen");
+    renderer.loadFrame.mockImplementationOnce(async () => {
+      db.exec("INSERT OR REPLACE INTO meta (k, v) VALUES ('designRev', 'changed')");
+      throw new Error("Target closed");
+    });
+    await render();
+    expect(db.prepare("SELECT tries FROM node_thumbnails WHERE node_id='screen' AND theme=''").get()).toEqual({tries:0});
+  });
+
+  it("never deletes client-supplied image URLs, which may belong to another file", async () => {
+    const {create,apply,env} = fixture();
+    await create("photo",{kind:"image",src:"/a/other-file/t/photo-1-hi.webp",thumbLo:"/a/other-file/t/photo-1-lo.webp"});
+    await apply([{t:"node.del",ids:["photo"]}]);
+    expect((env.FILES.delete as ReturnType<typeof vi.fn>).mock.calls.flat(2)).not.toContain("other-file/t/photo-1-lo.webp");
   });
 
   it("does no automatic work while nobody is viewing, and coalesces rapid edits and toggles", async () => {

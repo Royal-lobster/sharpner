@@ -3,7 +3,7 @@ import puppeteer from "@cloudflare/puppeteer";
 import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
 import { prepareRenderDesign } from "./render-fonts";
-import { capture, captureThumbnails, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { bytesToBase64, capture, captureThumbnails, loadFrame, loadImagePreview, withTimeout } from "./render";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
 import { sourceBatches, type SourceItem } from "../shared/source-batches";
@@ -106,7 +106,8 @@ const MIGRATIONS = [
      SELECT id, thumb_theme, thumb_rev, thumb_lo, thumb_hi, measured_h, thumb_tries FROM nodes WHERE kind IN ('frame', 'component', 'tokens');
    CREATE TABLE used_themes (theme TEXT PRIMARY KEY, used_at INTEGER NOT NULL);
    INSERT OR IGNORE INTO used_themes SELECT coalesce((SELECT v FROM meta WHERE k = 'fileTheme'), ''), 0 WHERE EXISTS (SELECT 1 FROM nodes WHERE kind = 'frame');
-   INSERT OR IGNORE INTO used_themes SELECT theme, 0 FROM nodes WHERE kind = 'frame' AND theme IS NOT NULL;`);
+   INSERT OR IGNORE INTO used_themes SELECT theme, 0 FROM nodes WHERE kind = 'frame' AND theme IS NOT NULL;
+   INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1');`);
   },
 ];
 
@@ -606,7 +607,8 @@ export class FileRoom extends DurableObject<Env> {
   private deleteNode(id: string, staleThumbs: string[], design: { tags: Set<string>; tokens: boolean }, deleted: Set<string>) {
     const n = this.node(id);
     if (!n) return;
-    const raw = this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, id).toArray()[0];
+    // Image URLs come from clients, so only rendered kinds own their stored keys.
+    const raw = isRendered(n.kind) ? this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, id).toArray()[0] : undefined;
     if (raw) staleThumbs.push(...thumbKeys(raw));
     this.sql.exec(`DELETE FROM nodes WHERE id = ?`, id);
     this.describe(id, "");
@@ -711,7 +713,16 @@ export class FileRoom extends DurableObject<Env> {
   private async scheduleThumbs(debounce = true) {
     if (!this.env.BROWSER || !this.env.THUMBNAIL_QUEUE || !this.hasRenderAudience()) return;
     const fileId = this.meta("fileId");
-    if (!fileId || !this.hasPendingThumbnails()) return;
+    if (!fileId) return;
+    if (this.meta("thumbReconcile")) {
+      // Migrated rows hold only their old revision; create current-revision work once, with the library's themes.
+      await this.libraryInfo();
+      const stale: string[] = [];
+      this.reconcileThumbnails(stale);
+      this.setMeta("thumbReconcile", "");
+      if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
+    }
+    if (!this.hasPendingThumbnails()) return;
     const readyAt = debounce ? Date.now() + THUMB_DELAY : Number(this.meta("thumbAfter") ?? 0);
     if (debounce) this.setMeta("thumbAfter", String(readyAt));
     await this.env.THUMBNAIL_QUEUE.get(this.env.THUMBNAIL_QUEUE.idFromName("global")).enqueue(fileId, readyAt);
@@ -800,9 +811,7 @@ export class FileRoom extends DurableObject<Env> {
               const size = await loadFrame(tab, { ...n, html: renderedHtml(n, this.node(n.id)!.source), theme: effectiveTheme(n, this.theme()) }, origin, design);
               const scale = Math.min(1, 1600 / Math.max(size.width, size.height));
               const bytes = await capture(tab, size.width, size.height, { type: "jpeg", scale });
-              let binary = "";
-              for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
-              content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: btoa(binary), mimeType: "image/jpeg" });
+              content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: bytesToBase64(bytes), mimeType: "image/jpeg" });
             }
             return { content };
           };
@@ -841,7 +850,9 @@ export class FileRoom extends DurableObject<Env> {
         if (stopped) { await browser.close(); return; }
         const tabs = await Promise.all(Array.from({ length: Math.max(1, tabCount) }, () => browser!.newPage()));
         // Re-query between batches so edits and theme toggles supersede queued work.
-        while (!stopped && Date.now() - started < THUMBNAIL_POLICY.quantumMs && this.hasRenderAudience() && this.meta("designRev") === designRev) {
+        // Stop while an edit's debounce is pending; without I/O, Date.now() cannot advance past it.
+        while (!stopped && Date.now() - started < THUMBNAIL_POLICY.quantumMs && Date.now() >= Number(this.meta("thumbAfter") ?? 0)
+          && this.hasRenderAudience() && this.meta("designRev") === designRev) {
           const queue = this.pendingThumbnails();
           const jobs = [...queue, ...this.pendingImages(THUMB_BATCH - queue.length)];
           if (!jobs.length) break;
@@ -929,6 +940,8 @@ export class FileRoom extends DurableObject<Env> {
     } catch (err) {
       if (uploaded.length) this.ctx.waitUntil(this.env.FILES.delete(uploaded));
       console.warn("thumbnail failed", n.id, String(err));
+      // A session timeout or design change closes the browser under in-flight renders; that is not the node's fault.
+      if (!valid()) return false;
       // Retried on later alarms, up to THUMB_MAX_TRIES per revision.
       if (n.kind === "image") this.sql.exec(`UPDATE nodes SET thumb_tries = thumb_tries + 1 WHERE id = ? AND rev = ?`, n.id, n.rev);
       else this.sql.exec(`UPDATE node_thumbnails SET tries = tries + 1 WHERE node_id = ? AND theme = ? AND rev = ?`, n.id, n.renderTheme, n.rev);

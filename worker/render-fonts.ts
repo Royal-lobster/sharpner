@@ -1,4 +1,5 @@
 import type { DesignSystem } from "../shared/types";
+import { bytesToBase64 } from "./render";
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_SHEETS = 4;
@@ -24,9 +25,7 @@ async function fontSheet(href: string) {
       const data = new Uint8Array(await font.arrayBuffer());
       bytes += data.byteLength;
       if (bytes > MAX_BYTES) throw new Error("Font stylesheet exceeds byte budget");
-      let binary = "";
-      for (let offset = 0; offset < data.length; offset += 8192) binary += String.fromCharCode(...data.subarray(offset, offset + 8192));
-      embedded.set(url, `data:font/woff2;base64,${btoa(binary)}`);
+      embedded.set(url, `data:font/woff2;base64,${bytesToBase64(data)}`);
     }
   }));
   return css.replace(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/g, (_, url: string) => `url(${embedded.get(url)!})`);

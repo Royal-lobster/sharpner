@@ -81,6 +81,18 @@ describe("explicit screenshot admission", () => {
     await queue.releaseScreenshot("different request");
     expect(queue.acquireScreenshot()).toBeNull();
     await queue.releaseScreenshot(lease!); await fire();
+    // The screenshot that just polled keeps priority over the automatic turn for one poll window.
+    expect(calls.render).not.toHaveBeenCalled();
+    expect(queue.acquireScreenshot()).toBeTruthy();
+    expect(calls.render).not.toHaveBeenCalled();
+  });
+  it("resumes automatic turns once no screenshot is waiting", async () => {
+    const {queue,fire} = fixture();
+    const lease = queue.acquireScreenshot();
+    expect(queue.acquireScreenshot()).toBeNull();
+    await queue.enqueue("a-one",Date.now());
+    await queue.releaseScreenshot(lease!);
+    vi.advanceTimersByTime(1001); await fire();
     expect(calls.render).toHaveBeenCalledWith("a-one");
   });
   it("bounds queued files without displacing existing requests", async () => {

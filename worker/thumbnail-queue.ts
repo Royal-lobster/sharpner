@@ -8,6 +8,8 @@ const DAY_MS = 86_400_000;
 /** A single automatic browser across the deployment, with round-robin team/file turns and daily budgets. */
 export class ThumbnailQueue extends DurableObject<Env> {
   private sql = this.ctx.storage.sql;
+  /** Screenshot callers poll every 250ms; while one waits, automatic turns yield the slot. */
+  private screenshotWaitingUntil = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -19,7 +21,11 @@ export class ThumbnailQueue extends DurableObject<Env> {
 
   /** Explicit screenshots share the browser slot, while their usage is reported separately. */
   acquireScreenshot(): string | null {
-    if (this.sql.exec(`SELECT 1 FROM lease WHERE id = 1 AND until_ms > ?`, Date.now()).toArray().length) return null;
+    if (this.sql.exec(`SELECT 1 FROM lease WHERE id = 1 AND until_ms > ?`, Date.now()).toArray().length) {
+      this.screenshotWaitingUntil = Date.now() + 1000;
+      return null;
+    }
+    this.screenshotWaitingUntil = 0;
     const token = crypto.randomUUID();
     this.sql.exec(`INSERT OR REPLACE INTO lease VALUES (1, ?, ?)`, Date.now() + policy.screenshotLeaseMs, token);
     return token;
@@ -32,10 +38,14 @@ export class ThumbnailQueue extends DurableObject<Env> {
 
   async enqueue(fileId: string, readyAt: number): Promise<void> {
     const existing = this.sql.exec(`SELECT 1 FROM queue WHERE file_id = ?`, fileId).toArray().length;
-    if (!existing && this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM queue`).toArray()[0]!.n >= policy.maxQueuedFiles) return;
+    if (existing) {
+      this.sql.exec(`UPDATE queue SET ready_at = max(ready_at, ?) WHERE file_id = ?`, readyAt, fileId);
+      return this.wake(readyAt);
+    }
+    if (this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM queue`).toArray()[0]!.n >= policy.maxQueuedFiles) return;
     const file = await this.env.DB.prepare(`SELECT workspace_id FROM files WHERE id = ?`).bind(fileId).first<{ workspace_id: string }>();
     if (!file) return;
-    if (!existing && this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM queue`).toArray()[0]!.n >= policy.maxQueuedFiles) return;
+    if (this.sql.exec<{ n: number }>(`SELECT count(*) AS n FROM queue`).toArray()[0]!.n >= policy.maxQueuedFiles) return;
     this.sql.exec(`INSERT INTO queue VALUES (?, ?, ?, ?) ON CONFLICT(file_id) DO UPDATE SET ready_at = max(queue.ready_at, excluded.ready_at)`, fileId, file.workspace_id, readyAt, Date.now());
     await this.wake(readyAt);
   }
@@ -49,6 +59,7 @@ export class ThumbnailQueue extends DurableObject<Env> {
     const now = Date.now(), day = Math.floor(now / DAY_MS);
     const lease = this.sql.exec<{ until_ms: number }>(`SELECT until_ms FROM lease WHERE id = 1`).toArray()[0];
     if (lease && lease.until_ms > now) { await this.wake(lease.until_ms); return; }
+    if (this.screenshotWaitingUntil > now) { await this.ctx.storage.setAlarm(this.screenshotWaitingUntil); return; }
     this.sql.exec(`DELETE FROM budgets WHERE day != ?`, day);
     const jobs = this.sql.exec<Job>(`SELECT q.file_id AS fileId, q.team_id AS teamId, q.ready_at AS readyAt FROM queue q
       LEFT JOIN budgets b ON b.id = 'team:' || q.team_id

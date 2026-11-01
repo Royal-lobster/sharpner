@@ -4,6 +4,19 @@ import { frameDocument, type DesignSystem } from "../shared/types";
 
 const MAX_HEIGHT = 8000;
 
+/** Chunked encoding avoids argument/stack limits for large captures. */
+export function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += 8192) binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192));
+  return btoa(binary);
+}
+
+/** Like @tailwindcss/browser, a stylesheet that fails to compile contributes no CSS instead of failing the capture. */
+const tailwindCss = (input: string, candidates: string[]) => thumbnailCss(input, candidates).catch((err) => {
+  console.warn("tailwind compile failed", String(err));
+  return "";
+});
+
 /**
  * Loads HTML into a browser tab at its viewport width and waits for fonts and Tailwind.
  * Returns the height to capture (fixed height, or measured content height for auto frames).
@@ -16,7 +29,7 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
   const cssSource = [...initial.matchAll(/<style\b[^>]*type=["']text\/tailwindcss["'][^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join("\n");
   const sources = [f.html, ...design.components.map((c) => c.html)].join("\n");
   const candidates = [...sources.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].flatMap((match) => (match[1] ?? match[2] ?? match[3]!).split(/\s+/));
-  const seedCss = await thumbnailCss(cssSource, candidates);
+  const seedCss = await tailwindCss(cssSource, candidates);
   // Fresh windows prevent custom element definitions and authored scripts leaking between nodes.
   await page.goto("about:blank");
   const viewportHeight = Math.round(f.height ?? 800), viewport = page.viewport();
@@ -30,7 +43,7 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
     css: [...document.querySelectorAll('style[type="text/tailwindcss"]')].map((style) => style.textContent).join("\n"),
     classes: [...new Set([...document.querySelectorAll("[class]")].flatMap((el) => [...el.classList]))],
   }));
-  const compiled = await thumbnailCss(css, classes);
+  const compiled = await tailwindCss(css, classes);
   const measured = await page.evaluate(async ({ css, changed }) => {
     if (!changed) {
       document.body.getBoundingClientRect();
@@ -111,8 +124,7 @@ export async function captureThumbnails(page: BrowserPage, width: number, height
   const hi = await capture(page, width, height, { type: "webp", scale: Math.min(1, 1280 / width) });
   if (width <= 256) return { lo: hi, hi };
   // Chunk encoding avoids argument/stack limits for tall captures.
-  let encoded = "";
-  for (let offset = 0; offset < hi.length; offset += 8192) encoded += String.fromCharCode(...hi.subarray(offset, offset + 8192));
+  const encoded = bytesToBase64(hi);
   const small = await page.evaluate(async ({ data }) => {
     const image = new Image();
     await new Promise<void>((resolve, reject) => {
@@ -125,6 +137,6 @@ export async function captureThumbnails(page: BrowserPage, width: number, height
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL("image/webp", 0.7).split(",")[1]!;
-  }, { data: btoa(encoded) });
+  }, { data: encoded });
   return { hi, lo: Uint8Array.from(atob(small), (char) => char.charCodeAt(0)) };
 }
