@@ -14,8 +14,11 @@ export function primitivePreviewDocument(tag: string, definition: string | null 
     addEventListener('load',async()=>{
       await document.fonts.ready;
       const main=document.querySelector('main');let previous='';
-      const measure=()=>{const width=Math.ceil(main.getBoundingClientRect().width),height=Math.ceil(main.getBoundingClientRect().height),key=width+':'+height;if(key===previous)return;previous=key;parent.postMessage({sharpnerPreview:{session,width,height}},'*')};
+      // Layout uses an independent viewport. Fit inside it first, then let the parent undo this
+      // scale while fitting the complete control to its stage. Never resize the viewport from content.
+      const measure=()=>{const width=main.offsetWidth,height=main.offsetHeight,scale=Math.min(1,innerWidth/width,innerHeight/height),key=width+':'+height+':'+scale;if(key===previous)return;previous=key;main.style.transformOrigin='top left';main.style.transform='scale('+scale+')';parent.postMessage({sharpnerPreview:{session,width,height,scale}},'*')};
       new ResizeObserver(measure).observe(main);
+      addEventListener('resize',measure);
       requestAnimationFrame(()=>requestAnimationFrame(measure));
     });
   })()</script>`, { base: location.origin, design, theme });

@@ -81,7 +81,7 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
       </section>
 
       <section id="ds-primitives">
-        <SectionHeading number="3" title="Primitive components" meta={`${total} primitives · select Interact to preview a theme and states`} />
+        <SectionHeading number="3" title="Primitive components" meta={`${total} primitives · click a preview to try it`} />
         {shown.map((family, index) => <div className="ds-family" key={family.name}>
           <div className="ds-family-info"><h3><small>{String(index + 1).padStart(2, "0")}</small>{family.name}</h3><code>{family.variants.length === 1 ? family.variants[0]!.tag : family.variants[0]!.tag.replace(/-[^-]+$/, "-*")}</code><p>{[...new Set(family.variants.flatMap((v) => v.definitions.flatMap((p) => [...p.props.map((p) => p.name), ...(p.slot ? ["slot"] : [])])))].join(" · ") || "No props"}</p><small>{family.variants.length} {family.variants.length === 1 ? "variant" : "variants"}</small></div>
           <div className="ds-family-stage"><div className="ds-variant-grid">{family.shown.map((variant) => <div className="ds-variant" key={variant.tag}>{variant.definitions.map((primitive) => <figure className={interaction?.id === previewId(primitive) ? "ds-interacting" : undefined} key={previewId(primitive)}>
@@ -134,7 +134,8 @@ function PrimitivePreview({ primitive, id, active, live, root, design, theme, on
   const interact = useRef<HTMLButtonElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState(640);
-  const [measurement, setMeasurement] = useState({ session: "", width: 640, height: 160 });
+  const [measurement, setMeasurement] = useState({ session: "", width: 640, height: 160, scale: 1 });
+  const viewportHeight = Math.max(160, primitive.node.height ?? 600);
   const document = useMemo(() => {
     if (!live) return null;
     const session = crypto.randomUUID();
@@ -157,7 +158,7 @@ function PrimitivePreview({ primitive, id, active, live, root, design, theme, on
     if (!document) return;
     const measure = (e: MessageEvent) => {
       const value = e.data?.sharpnerPreview;
-      if (e.source !== iframe.current?.contentWindow || value?.session !== document.session || !Number.isFinite(value.width) || !Number.isFinite(value.height) || value.width <= 0 || value.height <= 0) return;
+      if (e.source !== iframe.current?.contentWindow || value?.session !== document.session || !Number.isFinite(value.width) || !Number.isFinite(value.height) || !Number.isFinite(value.scale) || value.width <= 0 || value.height <= 0 || value.scale <= 0 || value.scale > 1) return;
       setMeasurement(value);
     };
     window.addEventListener("message", measure);
@@ -175,8 +176,8 @@ function PrimitivePreview({ primitive, id, active, live, root, design, theme, on
   return <>
     <div className="ds-preview" ref={stage} data-preview-id={id} style={{ height: active ? Math.max(160, fitted.height) : 160 }}>
       {!ready && (still ? <img src={still} loading="lazy" alt={`${primitive.node.name} saved preview`} /> : <span className="ds-preview-still">{primitive.variant}</span>)}
-      {live && <iframe ref={iframe} data-preview-session={document!.session} title={`${primitive.node.name}${primitive.node.theme ? ` ${primitive.node.theme} override` : ""} interactive preview`} sandbox="allow-scripts" scrolling="no" srcDoc={document!.html} style={{ width: ready ? Math.max(available, measurement.width) : available, height: ready ? measurement.height : 160, transform: `scale(${ready ? fitted.scale : 1})`, opacity: ready ? 1 : 0 }} />}
-      {!live && <button ref={interact} className="ds-interact" aria-label={`Interact with ${primitive.node.name}`} onClick={onInteract}><span>Interact</span></button>}
+      {live && <iframe ref={iframe} data-preview-session={document!.session} title={`${primitive.node.name}${primitive.node.theme ? ` ${primitive.node.theme} override` : ""} interactive preview`} sandbox="allow-scripts" scrolling="no" srcDoc={document!.html} style={{ width: available, height: viewportHeight, transform: `scale(${ready ? fitted.scale / measurement.scale : 1})`, opacity: ready ? 1 : 0 }} />}
+      {!live && <button ref={interact} className="ds-interact" aria-label={`Interact with ${primitive.node.name}`} onClick={onInteract}><span>Try preview</span></button>}
       {live && !ready && <span className="ds-preview-loading" role="status">Loading {themeLabel(theme)} preview…</span>}
     </div>
     <div className="ds-preview-caption"><span>{live ? `${ready ? "Live" : "Loading"} · ${themeLabel(theme)}` : "Saved preview"}</span>{active && <button className="ds-action" aria-label={`Close ${primitive.node.name} preview`} onClick={() => { onClose(); requestAnimationFrame(() => interact.current?.focus()); }}>Done</button>}</div>

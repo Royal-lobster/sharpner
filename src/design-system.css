@@ -84,8 +84,10 @@
 .ds-preview iframe{position:absolute;left:0;top:0;border:0;display:block;transform-origin:top left}
 .ds-preview img{width:100%;height:100%;object-fit:contain;display:block}
 .ds-interact{position:absolute;inset:0;width:100%;border:1px solid transparent;border-radius:inherit;background:transparent;color:var(--foreground)}
-.ds-interact:hover{border-color:var(--ring)}
+.ds-interact:hover,.ds-interact:focus-visible{border-color:var(--ring)}
 .ds-interact span,.ds-preview-loading{position:absolute;bottom:8px;right:8px;padding:4px 8px;border:1px solid var(--border);border-radius:5px;background:var(--card);color:var(--foreground);font-size:11px}
+.ds-interact span{opacity:0}
+.ds-interact:hover span,.ds-interact:focus-visible span{opacity:1}
 .ds-preview-loading{pointer-events:none}
 .ds-preview-caption{display:flex;justify-content:space-between;align-items:center;min-height:28px;font-size:10px;color:var(--ds-muted)}
 .ds-preview-caption .ds-action{font-size:11px;padding:3px 0}

@@ -66,7 +66,7 @@ it("retains the saved image until ready, sizes to full content and pauses off sc
   const frame = host.querySelector<HTMLIFrameElement>("iframe")!;
   expect(host.querySelector('[data-preview-id="file:0"] img')).not.toBeNull();
   // A real frame posts its measured content, rather than fitting into a 112px-high crop.
-  await act(async () => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { sharpnerPreview: { session: frame.dataset.previewSession, width: 900, height: 800 } } })));
+  await act(async () => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { sharpnerPreview: { session: frame.dataset.previewSession, width: 900, height: 800, scale: .5 } } })));
   const preview = host.querySelector<HTMLElement>('[data-preview-id="file:0"]')!;
   expect(parseFloat(preview.style.height)).toBeGreaterThan(480);
   const height = preview.style.height;
@@ -93,4 +93,16 @@ it("switches only the interactive document and ignores measurements from the pre
   expect(frame.style.opacity).toBe("0");
   expect(host.querySelector('[data-preview-id="file:0"] img')).not.toBeNull();
   expect(host.querySelector("[role=status]")!.textContent).toContain("Dark");
+});
+
+it("does not feed viewport-relative content measurements back into the iframe viewport", async () => {
+  await render(); await click('[aria-label="Interact with Control 0/Default"]');
+  const frame = host.querySelector<HTMLIFrameElement>("iframe")!;
+  const viewport = { width: frame.style.width, height: frame.style.height };
+  for (let i = 0; i < 4; i++) {
+    // 100vw × 100vh content plus the preview's 24px padding on each edge.
+    const width = parseFloat(frame.style.width), height = parseFloat(frame.style.height);
+    await act(async () => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { sharpnerPreview: { session: frame.dataset.previewSession, width: width + 48, height: height + 48, scale: Math.min(width / (width + 48), height / (height + 48)) } } })));
+    expect({ width: frame.style.width, height: frame.style.height }).toEqual(viewport);
+  }
 });
