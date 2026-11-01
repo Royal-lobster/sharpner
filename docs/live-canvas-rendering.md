@@ -163,6 +163,14 @@ hardening are follow-up product work. This PR keeps pointer input disabled and
 preserves the opaque sandbox. The same document renderer must remain the source
 for live playback, covers and explicitly requested agent screenshots.
 
+The [interaction-first experiments](interaction-first-experiments.md) test
+automatic motion, user-triggered flows and deterministic local scenarios. Four
+dense runtimes retained 16.7 ms p95 frame intervals in a 30-second desktop probe,
+while forty degraded badly. The [overview convergence](unseen-overview-convergence.md)
+and [instant variant documents](instant-variant-documents.md) reports measure
+bounded native documents, shared CSS and server atlases against the three-second
+target for an uncached theme switch.
+
 ### Native HTML in canvas
 
 Chrome's [HTML-in-Canvas announcement](https://developer.chrome.com/blog/html-in-canvas)
