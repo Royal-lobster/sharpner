@@ -37,7 +37,7 @@ One canvas document in a workspace, made of pages. A file may be a one-off or th
 _Avoid_: Project, document, board
 
 **Page**:
-One infinite canvas inside a file. Its description says what it holds and when to look at it, so agents can navigate the file.
+A canvas inside a file. Its description says what it holds and when to look at it, so agents can navigate the file.
 _Avoid_: Tab, board, sheet
 
 **Node**:
@@ -86,6 +86,12 @@ _Avoid_: Mode, skin, variant
 A reusable piece of UI, defined once as a node and used inside frames. Generic primitives belong on the Design System page; feature-specific components belong with their feature's screens.
 _Avoid_: Symbol, widget, partial, template
 
+**Primitive**:
+A component defined on the Design System page. Agents order recommended shadcn/ui families first in its automatic catalog, followed by the file’s own. Placement registers a primitive.
+
+**Brand**:
+The file’s authored name, image logo, short guidelines paragraph and voice bullets. An editable HTML frame shows it on the canvas; agents keep that frame and `set_brand` metadata aligned. Inherited Brand is edited in the library file.
+
 **Instance**:
 One use of a component inside a frame or another component.
 _Avoid_: Ref, copy, clone
@@ -99,7 +105,7 @@ The place in a component where an instance's own content goes.
 _Avoid_: Children area, outlet, placeholder
 
 **Variant**:
-A component representing one appearance or state of a family, such as a primary or ghost button. A theme can apply to every variant.
+A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can apply to every variant.
 _Avoid_: State component, flavor
 
 **Library**:
@@ -107,13 +113,14 @@ A file whose design system other files in the same workspace use. A file uses at
 _Avoid_: Shared design system, package, kit
 
 **Design system page**:
-A page, by convention named "Design System", that holds foundations and generic primitives. Feature-specific components live on their feature pages; one-off files need no Design System page.
+The file’s optional marked canvas page (`kind: "design-system"`), organized into ordinary Brand, Foundations and Primitive components sections in that order. Brand is a guideline frame, Foundations contains token sheets, and Primitive components is an automatic catalog. Components placed on it are primitives. Changing the marker preserves nodes; feature-specific components stay on feature pages. A Brand-frame link opens the linked library’s own system.
 _Avoid_: Components page, styles page
 
 ## Relationships
 
 - A **Workspace** has **Members** and **Files**.
 - A **File** has **Pages**; a **Page** has **Nodes**; a **Section** contains **Nodes**, including other **Sections**.
+- A **File** may choose one **Design system page** and owns its **Brand** independently of page conversion or deletion.
 - A **File** may choose one **Frame** or **Image** as its **Cover**. Deleting it restores automatic selection.
 - A **File** may use one **Library**, which must be a **File** in the same **Workspace**.
 - A **File**'s **Design system** is its **Library**'s **Tokens** and **Components** plus its own; its own win when names collide.

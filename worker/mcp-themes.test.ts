@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { CanvasNode, Op } from "../shared/types";
+import { emptyBrand, type CanvasNode, type Op } from "../shared/types";
 
 const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), apply: vi.fn(), theme: vi.fn(), nodes: vi.fn(), own: vi.fn(), screenshot: vi.fn() }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor,
   room: () => ({
-    apply: mocks.apply, theme: mocks.theme, nodes: mocks.nodes, screenshotNodes: mocks.screenshot,
+    brand: async () => emptyBrand(), catalog: async () => ({ brand: emptyBrand(), pageId: null, primitives: [], tokenSheets: 0 }),
+      apply: mocks.apply, theme: mocks.theme, nodes: mocks.nodes, screenshotNodes: mocks.screenshot,
     node: async (id: string) => (await mocks.nodes()).find((node: CanvasNode) => node.id === id),
     outline: async () => [{ id: "page", name: "Feature", sort: 0, nodes: await mocks.nodes() }],
     pages: async () => [{ id: "page", name: "Feature", sort: 0 }], peers: async () => [],

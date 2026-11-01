@@ -80,9 +80,10 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `set_theme` | Set the file theme inherited by screens; null preserves authored theme contexts. Frames can override with their `theme` field |
 | `list_pages` | A file's table of contents: page and section descriptions with design counts, and whether each page tiles or stacks (and why) |
 | `get_file` | Cover choice, pages, section bounds, and node geometry, without sources; `pageId` limits it to one page |
-| `get_design_system` | Merged token CSS, component tags, props, slots, definition locations, and use counts |
+| `get_design_system` | Brand, Design System page ID, merged token CSS, component tags, props, slots, primitive status, locations, overrides and use counts, including the library |
+| `set_brand` | Patch this file’s name, image logoUrl, guidelines paragraph or voice bullets; omitted fields stay unchanged |
 | `find_instances` | Frames and components using a component, here and in files using this one as a library |
-| `create_page` / `update_page` / `delete_page` | Organize and describe pages; use `update_page` to rename. Deleting a page deletes its nodes |
+| `create_page` / `update_page` / `delete_page` | Organize and describe pages; `kind: "design-system"` marks the file’s single Design System canvas page. Changing kind preserves nodes; deletion removes them |
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images; omitted coordinates auto-place nodes |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
@@ -115,7 +116,13 @@ tool definitions enter context. Discovery tests limit startup text to 400
 characters, each tool description to 300 characters, and the full catalog to
 17,500 UTF-8 bytes, including screenshots. These are size budgets, not token counts.
 
-Keep the Design System page to foundations and generic primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
+Every page uses the canvas, including the page marked `kind: "design-system"`. The marker identifies primitives for agents and libraries. Follow the same three ordinary sections in every file: **01 · Brand**, **02 · Foundations**, **03 · Primitive components**, ordered 0, 1 and 2. Create automatic sections and add nodes with `sectionId`, without coordinates.
+
+Brand holds an editable HTML guideline frame: name, image logo, one short paragraph and voice bullets. Keep file metadata (`set_brand`) aligned with that frame; the two do not automatically rewrite each other. Foundations holds token sheets, whose canvas specimens show defined colors per theme, recommended semantic slots first, then type, spacing, radii and shadows. CSS comments describe tokens, with utility-class fallbacks. Primitive components holds only component definitions so existing automatic layout makes a family grid. Keep `Family/Variant` variants contiguous, recommended shadcn/ui families first (Radio and Tab use the Radio Group and Tabs positions), then custom families. Put theme overrides beside defaults and use automatic preview heights. `create_nodes` on the marked page registers primitives.
+
+For a linked library, add **From library: <name> · Open** in the Brand frame and open its canvas to edit inherited definitions. Reuse its tokens and components directly; do not copy definitions just to make a local catalog. Keep local additions in this file’s sections. Local tag definitions replace the library's definitions under the existing merge rules. Canvas navigation, selection, comments and bounded previews work normally. There is no separate document viewer.
+
+Keep the Design System page to brand guidelines, foundations and primitives. Give each sizable feature a page with its screens, states, and reused feature components; use feature-prefixed component names because tags remain file-wide. Add primitives as needed rather than prebuilding application component catalogs.
 
 Use `set_theme` for the file default and a frame's `theme` field in `create_nodes` or `update_nodes` for an override (`null` restores inheritance). `get_design_system` reports theme names from the token CSS; `get_file` and `read_nodes` report each frame's choice and effective theme. Members choose the file theme in the navigation dock and a selected screen's theme in the selection bar. With no file choice, As authored preserves existing HTML theme contexts. Compare themes in neighboring frames with explicit theme overrides so a file change keeps the comparison intact. Token overrides handle colors, fonts, radii, and shadows; feature components can carry scoped decoration CSS. When a theme needs different component structure, create a component with the same name and a `theme`: instances inside that theme use that definition, and `get_design_system` lists it under `themeOverrides`. A shared screen component is optional, and substantial structural alternatives can use separate frames.
 

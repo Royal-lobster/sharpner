@@ -337,12 +337,15 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                   ) : (
                     <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
                       <span className="page-option-text">
-                        <span className="truncate">{p.name}</span>
+                        <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
                         {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
                       </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
                     </Button>
                   )}
                   {!readOnly && renaming !== p.id && <ItemActions className="page-actions">
+                    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Page options for ${p.name}`}><IconLibrary aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent>
+                      <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => { room.send([{ t: "page.put", page: { id: p.id, name: p.name, sort: p.sort, kind: p.kind === "design-system" ? "canvas" : "design-system" } }]); selectNodes([]); setOpen(null); }}> {p.kind === "design-system" ? "Use as regular page" : "Use as Design System page"}</DropdownMenuItem>
+                    </DropdownMenuContent></DropdownMenu>
                     <IconAction label={`Rename ${p.name}`} onClick={() => setRenaming(p.id)}><Pencil aria-hidden /></IconAction>
                     <IconAction label={`Describe ${p.name}`} onClick={() => void describePage(p)}><IconAlignLeft aria-hidden /></IconAction>
                     {room.pages.length > 1 && <IconAction label={`Delete ${p.name}`} onClick={() => void deletePage(p)}><Trash2 aria-hidden /></IconAction>}

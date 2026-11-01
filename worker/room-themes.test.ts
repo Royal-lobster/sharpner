@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Actor, NodeInput, Op, ServerMsg } from "../shared/types";
+import { emptyBrand, type Actor, type NodeInput, type Op, type ServerMsg } from "../shared/types";
 
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class { constructor(readonly ctx: DurableObjectState, readonly env: Env) {} },
@@ -323,7 +323,7 @@ describe("library thumbnail invalidation", () => {
     const before=room.node("screen")!;
     let tokens='@theme {--color-primary:blue} [data-theme="dark"]{}';
     Object.assign(env,{
-      FILE_ROOM:{idFromName:()=>"library",get:()=>({ownDesignSystem:async()=>({tokens,components:[]})})},
+      FILE_ROOM:{idFromName:()=>"library",get:()=>({ownDesignSystem:async()=>({tokens,components:[]}),catalog:async()=>({brand:emptyBrand(),pageId:null,primitives:[],tokenSheets:0})})},
       DB:{prepare:()=>({bind:()=>({first:async()=>({name:"Library"}),all:async()=>({results:[]}),run:async()=>{}})})},
     });
     await room.setLibrary("file","library");

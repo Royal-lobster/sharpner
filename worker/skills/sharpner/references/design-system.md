@@ -8,14 +8,33 @@ A single graphic, exploration, or slide can use one token sheet or skip the syst
 
 ## Organize the file
 
-Keep foundations and generic primitives on a page named Design System. Add only the controls needed for current screens.
+Keep the Design System on the ordinary canvas. Use one page named **Design System**, marked with `create_page({ fileId, name: "Design System", kind: "design-system" })` or `update_page({ fileId, pageId, kind: "design-system" })`. The marker identifies primitives; it does not change the canvas view. Changing it preserves every node. Members choose **Use as Design System page** from page options.
+
+Use the same three ordinary sections across files, in this order. Create them with `layout: "auto"`, add nodes with `sectionId`, and omit x/y. Use section `order` values 0, 1 and 2. Keep the names consistent; let the file's brand determine their visual content.
+
+1. **01 · Brand:** one editable HTML frame with the brand name, image logo, one short guidelines paragraph and a few voice bullets. Use the file's tokens and keep it readable at a useful canvas zoom. Keep the corresponding file metadata in `set_brand({ fileId, name, logoUrl, guidelines, voice })` aligned with the frame; changing metadata does not rewrite the frame. Omitted metadata fields stay unchanged; empty strings/arrays clear them. Use `upload_image` for a permanent logo URL. `get_design_system` returns Brand and the marked page ID.
+2. **02 · Foundations:** place the file's token sheets here. Their existing canvas previews show colors by theme, then typography, spacing, radii and shadows. Recommended semantic color slots come first, with CSS comments as descriptions or utility classes as fallbacks. Show only defined tokens. Preserve existing brand-specific token names; alias recommended slots to their brand values with `var(...)`. Do not duplicate token values in hand-written swatch boards.
+3. **03 · Primitive components:** keep only component definitions in this automatic section. The existing canvas layout makes a grid with one row and label per family, wrapping long rows. Name variants `Family/Variant`; keep each family's variants contiguous using `order`. Follow the recommended family list below first, then the file's own families. Treat `Radio/*` as Radio Group and `Tab/*` as Tabs when ordering; do not rename existing tags just to match the list. Put each structural theme override beside its default. Give previews useful widths and omit fixed height so content and captions fit. Keep guidelines, token sheets and product compositions out of this catalog.
+
+Components on the marked Design System page are registered primitives. Agents add them with `create_nodes` on that page or move definitions there with `update_nodes`. The canvas keeps its normal pan, zoom, selection, comments and preview behavior; no separate document view or interaction controls are needed. File/frame themes affect design previews while Sharpner keeps its own app theme.
+
+If the file uses a library, read its system with `get_design_system`, and put a short **From library: <name> · Open** link in the Brand guideline frame. Open the library's Design System canvas to edit inherited Brand, token sheets or primitive definitions. Keep this file's additions in its own three sections and label them as local where needed. Do not copy or register duplicate inherited definitions merely to display them: library tokens and components already work in local frames. A local definition with the same tag replaces the library's definitions. Libraries export only their own definitions.
+
+Keep product compositions, explorations and screens on feature pages. Reorganize existing sections and move nodes rather than deleting designs. Inspect existing sources and instance counts before changing component interfaces.
+
+Use the shadcn/ui component set as the recommended list of primitive components. It is a recommendation, not a requirement: build the families the product needs, which may be only a Button and an Input, and register any component the app's screens are built around. Where a family matches the list, use its component and variant names, such as `Button/Default`, `Button/Secondary`, `Button/Outline`, `Button/Ghost`, `Button/Destructive` and `Button/Link`.
+
+- Recommended list: Button, Badge, Input, Textarea, Label, Field, Select, Checkbox, Radio Group, Switch, Slider, Toggle Group, Tabs, Card, Alert, Dialog, Sheet, Drawer, Popover, Tooltip, Dropdown Menu, Avatar, Separator, Skeleton, Spinner, Progress, Table, Toast, Breadcrumb, Pagination, Accordion, and Empty.
+- Further shadcn/ui families when screens need them: Command, Combobox, Calendar, Date Picker, Input OTP, Navigation Menu, Menubar, Sidebar, Carousel, Chart, Hover Card, Context Menu, Resizable, Scroll Area, Collapsible, and Kbd.
+- Name product-specific compositions after their feature, not after shadcn/ui.
 
 Give each large feature a page for its screens, states, and reused components. Keep product-specific compositions, such as an order form, with that feature.
 
 ```text
 Design System
-├─ Foundations: tokens and themes
-└─ Primitives: Button/*, Input/*, Tabs, Badge/*
+├─ 01 · Brand: editable guideline frame
+├─ 02 · Foundations: token sheets and themes
+└─ 03 · Primitive components: Button/*, Input/*, … (recommended ones first, then the file's own)
 Trade
 ├─ Screens: sections for each flow
 └─ Components: Trade/OrderForm, Trade/MarketHeader
@@ -109,13 +128,15 @@ Use token utilities in frames and components. Avoid hardcoded colors, arbitrary 
 
 Create a `kind: "component"` node with HTML in `source`. Its name sets the tag: `Button/Primary` → `<x-button-primary>`.
 
-- Name variants as `Family/Variant`, such as `Button/Ghost` or `Field/Error`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
+- Name variants as `Family/Variant`, such as `Button/Ghost` or `Badge/Secondary`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
 - Use props for content. `{{label|Continue}}` takes the instance's label attribute or the default value.
 - Props also work in attributes: `<img src="{{src|/placeholder.png}}">`.
 - Use `<slot></slot>` for child content in cards, dialogs, sidebars, and lists.
 - Components can contain other component instances.
 - Let the parent control layout. Avoid outer margins and fixed page positions. Size to content or use `w-full`.
-- Add visible states when needed: hover, focus, disabled, selected, and error.
+- Make components dynamic. Express interaction states on the same component with Tailwind variants, such as `hover:`, `focus-visible:`, `active:`, `disabled:`, `aria-invalid:`, `aria-selected:` and `data-[state=open]:`, so instances respond when people use them.
+- Do not create a component per state, such as `Button/Default focus` or `Input/Invalid`. Expose states that callers set as props on real attributes, such as `aria-invalid="{{invalid|false}}"` or `data-state="{{state|closed}}"`, and style them with matching variants.
+- Keep variants separate from states: `Button/Ghost` is a variant; hover, focus, disabled and error are states of every variant.
 - Set a suitable preview width. Omit height so content and captions fit.
 
 ```html
@@ -147,8 +168,8 @@ When a theme changes a component's structure, such as extra decoration elements,
 
 ## Build and maintain
 
-1. Read the existing system or link a library.
-2. Create tokens and the primitives needed now.
+1. Read the existing system or link a library; mark the file’s Design System canvas page.
+2. Create or update the Brand guideline frame and its `set_brand` metadata. Put token sheets in Foundations and the primitives needed now in the automatic Primitive components catalog.
 3. Check them with `screenshot_nodes` when available.
 4. Read `read_skill({ path: "references/screens.md" })` before building screens.
 5. Extract repeated feature markup on its feature page. Verify each section of work.
