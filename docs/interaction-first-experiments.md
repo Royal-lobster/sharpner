@@ -217,6 +217,14 @@ preview surface is worth reconsidering only for a demonstrated constrained
 authoring subset. A native scene renderer would deliberately change the supported
 design language; it does not follow automatically from these results.
 
+The [completed unseen-overview experiments](unseen-overview-convergence.md) now
+test 40/300 distinct designs on the actual canvas. Smaller server output lowers
+cost but still needs about twenty seconds for a new 300-screen structural theme.
+Restricted shared HTML converges under a second with no server rendering, while
+its large frame stalls and incomplete eligibility gate keep it experimental.
+The report includes contention, local capture, containment, explicit overrides
+and Astra's second review; physical target-device validation remains outstanding.
+
 The current PRs remain increments with different acceptance scopes:
 
 - **PR26:** its cache and render-cost improvements stand independently. Uncached
