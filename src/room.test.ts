@@ -3,7 +3,6 @@ import { setApiTokenGetter } from "./api";
 import { Room } from "./room";
 import { CanvasLayout } from "./canvas-layout";
 import type { CanvasNode, ClientMsg, CommentThread, ServerMsg } from "../shared/types";
-import { effectiveTheme } from "../shared/themes";
 
 class Socket {
   static OPEN = 1;
@@ -154,95 +153,6 @@ const start = (nodes: CanvasNode[], socket = Socket.instances.at(-1)!) => {
 const sourceIds = (socket: Socket) => socket.sent.flatMap((message) => message.type === "source" ? message.ids : []);
 const tick = () => vi.advanceTimersByTimeAsync(0);
 const supply = (socket: Socket, id: string, source = `<p>${id}</p>`, rev = 1) => socket.receive({ type: "source", items: [{ id, source, rev }] });
-
-describe("file and screen themes", () => {
-  it("restores the file theme on reconnect and distinguishes an omitted sync field from a reset", () => {
-    const socket = start([node("screen")]);
-    expect(room.fileTheme).toBeNull();
-    socket.receive({ type: "init", pages: room.pages, nodes: [...room.nodes.values()], cid: "viewer", peers: [], library: null, fileTheme: "dark" });
-    expect(room.fileTheme).toBe("dark");
-    socket.receive({ type: "sync", by: null });
-    expect(room.fileTheme).toBe("dark");
-    socket.receive({ type: "sync", fileTheme: "uwu", by: null });
-    expect(room.fileTheme).toBe("uwu");
-    socket.receive({ type: "sync", fileTheme: null, by: null });
-    expect(room.fileTheme).toBeNull();
-    socket.receive({ type: "sync", fileTheme: "dark", by: null });
-    socket.receive({ type: "init", pages: room.pages, nodes: [...room.nodes.values()], cid: "viewer", peers: [], library: null });
-    expect(room.fileTheme).toBeNull();
-  });
-
-  it("changes inheriting screens immediately while preserving overrides, foundation comparisons and sources", () => {
-    const socket = start([
-      node("inherit", { height: null, measuredHeight: 900 }),
-      node("fixed", { theme: "light", height: null, measuredHeight: 800 }),
-      node("primitive", { kind: "component", height: null, measuredHeight: 400 }),
-      node("foundations", { kind: "tokens", height: null, measuredHeight: 1200 }),
-    ]);
-    for (const id of room.nodes.keys()) { room.heights.set(id, 1000); supply(socket, id); }
-    const source = room.sources.get("inherit");
-
-    room.send([{ t: "theme.set", theme: "dark" }]);
-
-    expect(room.fileTheme).toBe("dark");
-    expect(effectiveTheme(room.nodes.get("inherit")!, room.fileTheme)).toBe("dark");
-    expect(effectiveTheme(room.nodes.get("fixed")!, room.fileTheme)).toBe("light");
-    expect(effectiveTheme(room.nodes.get("foundations")!, room.fileTheme)).toBeUndefined();
-    // Heights hold until restyled previews measure themselves, so the layout doesn't jump.
-    expect(room.heights.get("inherit")).toBe(1000);
-    expect(room.heights.get("primitive")).toBe(1000);
-    expect(room.nodes.get("inherit")!.measuredHeight).toBe(900);
-    expect(room.heights.get("fixed")).toBe(1000);
-    expect(room.heights.get("foundations")).toBe(1000);
-    expect(room.sources.get("inherit")).toBe(source);
-    expect(socket.sent.at(-1)).toEqual({ type: "ops", ops: [{ t: "theme.set", theme: "dark" }] });
-  });
-
-  it("selects cached themes optimistically and on remote sync without refetching sources", () => {
-    const preview = (theme: string, measuredHeight: number) => ({rev:1,lo:`${theme}-lo`,hi:`${theme}-hi`,measuredHeight});
-    const screen = node("screen",{height:null,thumbLo:"authored-lo",thumbHi:"authored-hi",thumbTheme:"",thumbRev:1,
-      thumbnails:{"":preview("authored",600),light:preview("light",700),dark:preview("dark",900)}});
-    const socket=start([screen]); supply(socket,"screen"); room.heights.set("screen",650);
-    const source=room.sources.get("screen");
-    room.send([{t:"theme.set",theme:"dark"}]);
-    expect(room.nodes.get("screen")).toMatchObject({rev:1,thumbHi:"dark-hi",thumbRev:1,measuredHeight:900});
-    expect(room.heights.has("screen")).toBe(false);
-    socket.receive({type:"sync",fileTheme:"light",by:null});
-    expect(room.nodes.get("screen")).toMatchObject({thumbHi:"light-hi",thumbRev:1,measuredHeight:700});
-    room.send([{t:"node.put",id:"screen",node:{theme:"dark"}}]);
-    expect(room.nodes.get("screen")!.thumbHi).toBe("dark-hi");
-    expect(room.sources.get("screen")).toBe(source);
-    room.heights.set("screen",950);
-    socket.receive({type:"init",pages:room.pages,nodes:[screen],cid:"viewer",peers:[],library:null,fileTheme:"light"});
-    expect(room.nodes.get("screen")!.thumbHi).toBe("light-hi");
-    expect(room.heights.has("screen")).toBe(false);
-  });
-
-  it("keeps screen overrides through ordinary edits and returns to the file theme when cleared", () => {
-    const socket = start([node("screen", { theme: "light", height: null, measuredHeight: 800 })]);
-    room.send([{ t: "theme.set", theme: "dark" }]);
-    room.heights.set("screen", 800);
-    room.send([{ t: "node.put", id: "screen", node: { name: "Renamed" } }]);
-    expect(room.nodes.get("screen")!.theme).toBe("light");
-    expect(room.heights.get("screen")).toBe(800);
-
-    room.send([{ t: "node.put", id: "screen", node: { theme: null } }]);
-    expect(room.nodes.get("screen")!.theme).toBeNull();
-    expect(effectiveTheme(room.nodes.get("screen")!, room.fileTheme)).toBe("dark");
-    expect(room.heights.get("screen")).toBe(800);
-    expect(room.nodes.get("screen")!.measuredHeight).toBe(800);
-
-    room.send([{ t: "node.put", id: "new", node: { pageId: "page_one", theme: "uwu" } }]);
-    expect(room.nodes.get("new")!.theme).toBe("uwu");
-    supply(socket, "screen");
-    socket.receive({ type: "sync", nodes: [{ ...room.nodes.get("screen")!, theme: "uwu", rev: 2 }], by: null });
-    expect(room.nodes.get("screen")!.theme).toBe("uwu");
-    // The previous revision stays on screen while the new one loads.
-    expect(room.sources.get("screen")?.rev).toBe(1);
-    supply(socket, "screen", "<p>restyled</p>", 2);
-    expect(room.sources.get("screen")).toEqual({ rev: 2, source: "<p>restyled</p>" });
-  });
-});
 
 describe("file cover selection", () => {
   it("syncs cover choices across members and reconnects without invalidating layout", () => {

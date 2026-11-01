@@ -10,11 +10,10 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
       brand: async () => mocks.brand(id), catalog: async () => mocks.catalog(id),
       apply: mocks.apply, outline, peers: async () => [], instances: () => mocks.instances(id),
       cover: async () => ({ nodeId: null, url: null }),
-      theme: async () => null,
       pages: async () => (await outline()).map(({ nodes: _nodes, ...page }) => page),
       nodes: async () => (await outline()).flatMap((p) => p.nodes),
-      designSystem: async () => ({ tokens: "", components: [], library: mocks.library(), fileTheme: null }),
-      ownDesignSystem: async () => ({ tokens: "", components: (await outline()).flatMap((p) => p.nodes).filter((n) => n.kind === "component").map((n) => ({ tag: componentTag(n.name), html: "", theme: n.theme })) }),
+      designSystem: async () => ({ tokens: "", components: [], library: mocks.library() }),
+      ownDesignSystem: async () => ({ tokens: "", components: (await outline()).flatMap((p) => p.nodes).filter((n) => n.kind === "component").map((n) => ({ tag: componentTag(n.name), html: "" })) }),
     };
   },
 }));

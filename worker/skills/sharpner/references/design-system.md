@@ -14,9 +14,9 @@ Use the same three ordinary sections across files, in this order. Create them wi
 
 1. **01 · Brand:** one editable HTML frame with the brand name, image logo, one short guidelines paragraph and a few voice bullets. Use the file's tokens and keep it readable at a useful canvas zoom. Keep the corresponding file metadata in `set_brand({ fileId, name, logoUrl, guidelines, voice })` aligned with the frame; changing metadata does not rewrite the frame. Omitted metadata fields stay unchanged; empty strings/arrays clear them. Use `upload_image` for a permanent logo URL. `get_design_system` returns Brand and the marked page ID.
 2. **02 · Foundations:** place the file's token sheets here. Their existing canvas previews show colors by theme, then typography, spacing, radii and shadows. Recommended semantic color slots come first, with CSS comments as descriptions or utility classes as fallbacks. Show only defined tokens. Preserve existing brand-specific token names; alias recommended slots to their brand values with `var(...)`. Do not duplicate token values in hand-written swatch boards.
-3. **03 · Primitive components:** keep only component definitions in this automatic section. The existing canvas layout makes a grid with one row and label per family, wrapping long rows. Name variants `Family/Variant`; keep each family's variants contiguous using `order`. Follow the recommended family list below first, then the file's own families. Treat `Radio/*` as Radio Group and `Tab/*` as Tabs when ordering; do not rename existing tags just to match the list. Put each structural theme override beside its default. Give previews useful widths and omit fixed height so content and captions fit. Keep guidelines, token sheets and product compositions out of this catalog.
+3. **03 · Primitive components:** keep only component definitions in this automatic section. The existing canvas layout makes a grid with one row and label per family, wrapping long rows. Name variants `Family/Variant`; keep each family's variants contiguous using `order`. Follow the recommended family list below first, then the file's own families. Treat `Radio/*` as Radio Group and `Tab/*` as Tabs when ordering; do not rename existing tags just to match the list. Give previews useful widths and omit fixed height so content and captions fit. Keep guidelines, token sheets and product compositions out of this catalog.
 
-Components on the marked Design System page are registered primitives. Agents add them with `create_nodes` on that page or move definitions there with `update_nodes`. The canvas keeps its normal pan, zoom, selection, comments and preview behavior; no separate document view or interaction controls are needed. File/frame themes affect design previews while Sharpner keeps its own app theme.
+Components on the marked Design System page are registered primitives. Agents add them with `create_nodes` on that page or move definitions there with `update_nodes`. The canvas keeps its normal pan, zoom, selection, comments and preview behavior; no separate document view or interaction controls are needed. Previews render exactly the authored HTML; Sharpner keeps its own app theme.
 
 If the file uses a library, read its system with `get_design_system`, and put a short **From library: <name> · Open** link in the Brand guideline frame. Open the library's Design System canvas to edit inherited Brand, token sheets or primitive definitions. Keep this file's additions in its own three sections and label them as local where needed. Do not copy or register duplicate inherited definitions merely to display them: library tokens and components already work in local frames. A local definition with the same tag replaces the library's definitions. Libraries export only their own definitions.
 
@@ -94,7 +94,7 @@ Name tokens by purpose, such as primary. Set these example values for the produc
   --shadow-elevated: 0 8px 30px rgb(0 0 0 / 0.08);
 }
 
-/* Named theme overrides. Select with a frame theme or the file theme. */
+/* Named theme contexts. Screens opt in with data-theme on their root. */
 [data-theme="dark"] {
   --color-background: #09090b;
   --color-foreground: #fafafa;
@@ -128,7 +128,7 @@ Use token utilities in frames and components. Avoid hardcoded colors, arbitrary 
 
 Create a `kind: "component"` node with HTML in `source`. Its name sets the tag: `Button/Primary` → `<x-button-primary>`.
 
-- Name variants as `Family/Variant`, such as `Button/Ghost` or `Badge/Secondary`. Themes do not need duplicate component definitions; override only components whose structure differs in a theme (see Use themes).
+- Name variants as `Family/Variant`, such as `Button/Ghost` or `Badge/Secondary`. Components have one definition; theme differences go in token values or scoped CSS (see Use themes).
 - Use props for content. `{{label|Continue}}` takes the instance's label attribute or the default value.
 - Props also work in attributes: `<img src="{{src|/placeholder.png}}">`.
 - Use `<slot></slot>` for child content in cards, dialogs, sidebars, and lists.
@@ -152,19 +152,13 @@ Component previews add tag and prop captions. Instances in screens use the origi
 
 Define named `[data-theme="…"]` selectors in token CSS. Legacy `.dark` selectors also work. Use the same token names across themes.
 
-Themes can change colors, fonts, radii, and shadows. `get_design_system` returns their names.
+Themes can change colors, fonts, radii, and shadows. `get_design_system` returns the declared names; they are CSS contexts a screen can opt into, not a Sharpner setting.
 
-- Use `set_theme({ fileId, theme: "dark" })` for the file default. Frames and component previews inherit it.
-- Set a frame's `theme` to override the file. Set it to null to restore inheritance.
-- A null file theme preserves authored HTML themes. Token sheets always show every theme.
-- Keep new frame roots unthemed, such as `<main class="bg-background text-foreground">`.
-- The selected theme replaces outer authored theme contexts and preserves nested markup.
-- Nested light content in a dark frame needs explicit light token overrides in CSS.
-- Compare themes in separate frames with explicit theme fields. A file theme change then preserves those choices.
-
-Keep feature decoration in CSS with a scoped selector, such as `[data-theme="uwu"] .trade-chart`. Use token variables for colors. A shared screen component is optional.
-
-When a theme changes a component's structure, such as extra decoration elements, slots, or a different layout, add a theme override: create a component with the same name and `theme: "uwu"`. Instances inside that theme use it; other themes keep the default, so create the default first. Keep the same props and slot so instances work in every theme, and leave value differences to the token sheet. `get_design_system` lists overrides under `themeOverrides`. Use a separate frame when a whole screen's structure differs.
+- Themes are authored in HTML: put `data-theme="<name>"` on the screen root, such as `<main data-theme="dark" class="bg-background text-foreground">`. Without it the screen renders unthemed. Token sheets always show every declared theme.
+- Compare themes in separate screens, each with its own root theme.
+- Prefer token variables, which follow `data-theme`. Tailwind `dark:` utilities follow the viewer's OS setting unless the token CSS declares `@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));`.
+- Components have one definition. Put theme differences in token values or scoped CSS, such as `[data-theme="uwu"] .trade-chart` or `[data-theme=dark] &`. Use token variables for colors.
+- A structurally different alternative is a separate component, such as `Button/Sakura`, or a separate screen.
 
 ## Build and maintain
 

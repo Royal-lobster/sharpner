@@ -85,7 +85,7 @@ A node that defines tokens for its file.
 _Avoid_: Theme file, variables node, stylesheet
 
 **Theme**:
-A named presentation of the same design, with alternate token values and optional visual decoration, such as Light, Dark, or UwU. A file selects a default; each frame can override it or inherit. As authored preserves existing HTML theme contexts when no file theme is selected. Token sheets always compare all declared themes. A component can carry a theme override: a second definition, with different structure, used only inside that theme.
+A named set of alternate token values, with optional visual decoration, such as Light, Dark, or UwU, declared in token CSS. Themes are authored in HTML: a screen opts in with `data-theme` on its own root; Sharpner never applies or switches one. Token sheets compare all declared themes. Components have one definition.
 _Avoid_: Mode, skin, variant
 
 **Component**:
@@ -111,7 +111,7 @@ The place in a component where an instance's own content goes.
 _Avoid_: Children area, outlet, placeholder
 
 **Variant**:
-A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can apply to every variant.
+A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can restyle every variant.
 _Avoid_: State component, flavor
 
 **Library**:

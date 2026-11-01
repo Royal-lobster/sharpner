@@ -4,7 +4,7 @@ import { interactionDocument, interactionReply, INTERACTION_SANDBOX, type Intera
 import type { DesignSystem } from "./types";
 
 const design: DesignSystem = { tokens: '@theme { --color-primary: purple; }', components: [{ tag: "x-button", html: "<button>{{label|Go}}</button>" }] };
-const options = { base: "https://sharpner.test", token: "playback-token", design, theme: "dark" };
+const options = { base: "https://sharpner.test", token: "playback-token", design };
 
 describe("interaction document", () => {
   it.each([
@@ -21,7 +21,6 @@ describe("interaction document", () => {
     expect(doc.indexOf("window.authorMarker")).toBeGreaterThan(bridge);
     expect(doc.slice(0, bridge)).not.toContain("</head>");
     expect(doc).toContain("customElements.define");
-    expect(doc).toContain('__sharpnerTheme = theme');
   });
 
   it("keeps authored HTML/root/body attributes while preventing a later policy from relaxing its restrictions", () => {
@@ -57,14 +56,12 @@ describe("interaction document", () => {
     expect(() => interactionDocument("", { ...options, base: "javascript:alert(1)" })).toThrow(/HTTP/);
   });
 
-  it("recreates content, design and theme through the ordinary frameDocument renderer", () => {
+  it("recreates content and design through the ordinary frameDocument renderer", () => {
     const first = interactionDocument("<main>Before</main>", options);
     const content = interactionDocument("<main>After</main>", options);
-    const themed = interactionDocument("<main>Before</main>", { ...options, theme: "light" });
     const definition = interactionDocument("<main>Before</main>", { ...options, design: { ...design, components: [{ tag: "x-button", html: "<strong>Updated</strong>" }] } });
     expect(content).not.toBe(first);
     expect(content).toContain("<main>After</main>");
-    expect(themed).not.toBe(first);
     expect(definition).not.toBe(first);
     expect(definition).toContain("Updated");
   });

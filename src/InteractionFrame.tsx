@@ -6,7 +6,6 @@ type Props = {
   id: string;
   html: string;
   design: DesignSystem;
-  theme: string | undefined;
   width: number;
   height: number;
   title?: string;
@@ -15,13 +14,13 @@ type Props = {
 
 /**
  * One disposable executable document. Each mount is one session: the parent changes `key` to
- * restart (Reset, source, size, design or theme changes) and unmounts it to stop.
+ * restart (Reset, source, size or design changes) and unmounts it to stop.
  */
-export function InteractionFrame({ id, html, design, theme, width, height, title, onStop }: Props) {
+export function InteractionFrame({ id, html, design, width, height, title, onStop }: Props) {
   // Props are fixed for the lifetime of a session; a change arrives as a new key.
   const [session] = useState(() => {
     const token = crypto.randomUUID();
-    return { token, doc: interactionDocument(html, { base: location.origin, token, design, theme }) };
+    return { token, doc: interactionDocument(html, { base: location.origin, token, design }) };
   });
   const [ready, setReady] = useState(false);
   const iframe = useRef<HTMLIFrameElement>(null);

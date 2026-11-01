@@ -72,7 +72,7 @@ describe("persisted automatic layout", () => {
     expect(room.node("legacy-section")!.layout).toBe("free");
     expect(rects().get("legacy-screen")).toMatchObject({ x: 1000, y: 1200 });
     expect(room.node("component")!.rev).toBe(2);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "10" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "12" });
   });
 
   it("refreshes cached token previews once for named themes without rerendering screens or components", () => {

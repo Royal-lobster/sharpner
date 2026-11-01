@@ -58,7 +58,7 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
   let liveIds: Set<string>;
   if (settled) {
     liveCandidates.sort((a, b) => b.visibleArea - a.visibleArea);
-    // An outdated preview (after a theme or source change) is as unusable as a missing one.
+    // An outdated preview (after a source change) is as unusable as a missing one.
     const withPreview = liveCandidates.filter(({ node }) => previewCurrent(node)).slice(0, MAX_LIVE_WITH_PREVIEW);
     const withoutPreview = liveCandidates.filter(({ node }) => !previewCurrent(node)).slice(0, MAX_LIVE_WITHOUT_PREVIEW);
     liveIds = new Set([...withPreview, ...withoutPreview].map(({ node }) => node.id));

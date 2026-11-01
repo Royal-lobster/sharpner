@@ -1,24 +1,25 @@
 # Thumbnail rendering
 
-Content and presentation have independent identities. `nodes.rev` changes for
-source, size and design-system dependencies. File theme selection and frame theme
-overrides select a `node_thumbnails` row by `(node_id, theme, rev)` instead of
-changing that revision. A component definition's theme is part of its identity,
-so editing that field still invalidates its content and dependents.
+> 2026-11-02: theme switching was removed. Sharpner renders exactly the HTML an
+> agent wrote and never applies a theme, so previews have no theme dimension:
+> one preview per node and content revision. Sections below that mention
+> per-theme pairs, theme debounce or cached theme switches describe the earlier
+> design and the measurements taken under it. A migration baked each formerly
+> themed frame's theme into its HTML roots, so existing screens look the same.
 
-Each node/theme row holds the latest content revision, two immutable URLs, its
-measured height and a retry count. Metadata carries the ready theme map so the
-editor can switch optimistically, including on another member's theme change.
-The node's legacy preview columns retain one fallback while a pair is missing.
-The migration backfills existing rows without dropping their URLs or promoting
-outdated revisions. Library changes continue to invalidate dependent revisions.
+Previews are keyed by content revision. `nodes.rev` changes for source, size and
+design-system dependencies, including component definitions.
 
-The renderer uses `frameDocument`, component expansion and theme application for
+Each node row holds the latest content revision, two immutable URLs, its
+measured height and a retry count. Library changes continue to invalidate
+dependent revisions.
+
+The renderer uses `frameDocument`, component expansion for
 both screenshots and previews. Tailwind 4.3.3 is pinned for live documents and
 server compilation. A bounded compiler cache is keyed by the actual token and
 authored Tailwind CSS, so it is naturally invalidated by design-system changes.
 Styles are seeded before load; a second pass collects actual expanded DOM classes
-and styles, including props, slots, nested theme contexts and authored scripts.
+and styles, including props, slots, authored theme contexts and scripts.
 Shared Google Fonts styles and font bytes are fetched before browser launch,
 with bounded caching and an original-link fallback. Other font providers retain
 normal browser loading. One WebP capture produces the sharp tier; a detached
@@ -32,15 +33,14 @@ canvas derives the overview tier. Frames no wider than 256px share one object.
 | --- | ---: |
 | Automatic browsers, across the deployment | 1 |
 | Browser tabs in a turn | 4 |
-| Edit/theme debounce | 1.2 seconds |
+| Edit debounce | 1.2 seconds |
 | Fair turn / hard session deadline | 8 / 20 seconds |
 | Reserved time before admission | 45 seconds, refunded to measured elapsed time |
 | Daily automatic browser time per file | 90 seconds |
 | Daily automatic browser time per workspace | 180 seconds |
 | Daily automatic browser time globally | 900 seconds |
 | Queued files | 1,000 |
-| Themes per inheriting node | 4 |
-| Attempts per content/theme pair | 3 |
+| Attempts per node revision | 3 |
 
 The shared Durable Object rotates workspaces, then files. A busy file keeps one
 browser session across its batches until its fair turn expires; it does not
@@ -50,13 +50,9 @@ restarts and failures. Explicit `screenshot_nodes` requests use the same browser
 slot and the file's serialized browser work, with bounded waiting and session
 time. Their usage is logged separately and is outside automatic daily quotas.
 
-Current effective themes render first, with viewed pages before other pages.
-Previously used themes follow at lower priority. Usage means selecting a file
-theme, creating a frame in it, or setting a frame override; merely declaring a
-CSS theme or component override does not warm all frames. As authored is a
-separate key and is warmed only after use. Removed declarations are not warmed.
-Older history and noneligible cached themes are pruned. A ready pair is never
-rendered again while it remains cached.
+Each node keeps exactly one preview. Viewed pages render before other pages.
+Per-edit browser time is one render per edited node, regardless of how many
+themes the tokens declare.
 
 No automatic browser launches for a file without an active, unexpired viewing
 socket. Explicitly selecting an uncached cover is an exception: only its current
@@ -113,6 +109,9 @@ heights: 0 different pixels out of 1,200,000 per theme. This is fixture evidence
 not a claim about every possible authored script or external resource.
 The overview raster intentionally resamples the sharp WebP rather than capturing
 layout twice. Average tier sizes on the fixture were 2.4 KB and 25.4 KB.
+
+Theme switching (file-wide, removed 2026-11-01, then per-frame, removed 2026-11-02)
+no longer exists, so the multi-theme figures below are historical.
 
 Each additional used theme after a content edit costs approximately another
 0.130 browser-seconds, two R2 PUTs and 28 KB of retained images per rendered
@@ -179,7 +178,7 @@ Do not make an unproven capture library the primary path for that small saving.
 For interactive adaptation, follow the [live canvas experiments](live-canvas-rendering.md).
 Persistent browser HTML changed forty warmed screens in 51–55 ms without server
 work, while optimized SVG capture still took about 2.4 seconds. The current PR
-adds a conservative theme fast path for already-live documents. A broader
+added a conservative theme fast path for already-live documents (since removed with theme switching). A broader
 overview implementation needs bounded hydration and a faithful bitmap handoff;
 it is separate from the server-cost optimization above.
 
@@ -198,10 +197,10 @@ If production demand warrants a hybrid, implement it as a separate capability:
 2. Resolve assets through a bounded, authenticated byte bridge without changing
    sandbox privileges. Feature-test supported CSS and reject tainted/unsupported
    captures rather than publishing degraded previews.
-3. Have the room validate node revision, effective theme, dimensions, payload size
+3. Have the room validate node revision, dimensions, payload size
    and request ownership. Deduplicate competing clients before R2 writes and use
    the same immutable pair table and stale-write checks.
-4. Compare fonts, foreign images, nested themes and component overrides against
+4. Compare fonts, foreign images, authored theme contexts against
    server goldens; measure eligibility, battery cost, latency and failure rates.
 5. Keep server fallback within this scheduler's budgets. Preserve authoritative
    server screenshots and covers until fidelity is demonstrated.

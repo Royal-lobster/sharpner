@@ -28,7 +28,6 @@ describe("compiled thumbnail styles", () => {
     expect(live).toContain("@tailwindcss/browser@4.3.3");
     expect(thumbnail).not.toContain("cdn.jsdelivr.net");
     expect(thumbnail).toContain("data-sharpner-css");
-    expect(thumbnail).toContain("window.__sharpnerTheme");
     expect(thumbnail).toContain(html);
   });
 });

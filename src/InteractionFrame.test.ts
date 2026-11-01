@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InteractionFrame } from "./InteractionFrame";
 
 afterEach(() => vi.unstubAllGlobals());
-const props = { id: "screen-one", html: "<button>Go</button>", design: { tokens: "", components: [] }, theme: "dark", width: 400, height: 700, onStop: () => {} };
+const props = { id: "screen-one", html: "<button>Go</button>", design: { tokens: "", components: [] }, width: 400, height: 700, onStop: () => {} };
 const render = () => {
   vi.stubGlobal("location", { origin: "https://sharpner.test" });
   return renderToStaticMarkup(createElement(InteractionFrame, props));

@@ -21,7 +21,7 @@ input to one of them under a stricter policy, so there is no separate opt-in.
 - Reset recreates the initial document. Stop or Escape disposes it and returns
   keyboard focus to the canvas. The outer controls remain outside authored HTML.
   Escape is reserved for leaving playback.
-- Source, size, design-system and theme changes recreate the document rather than
+- Source, size and design-system changes recreate the document rather than
   attempting to migrate arbitrary JavaScript state. Stale document messages are
   rejected by iframe window and per-document token.
 - Clicked states, typed input and animation state never enter Room operations,
@@ -45,8 +45,8 @@ with live documents remains a separate performance improvement.
 `interactionDocument` wraps the actual `frameDocument` output. It introduces a
 trusted asset base, policy and small input/navigation bridge before authored
 bytes, including malformed full documents. The initial doctype preserves
-standards mode, and authored root/body attributes remain available. Components,
-tokens and effective themes use the same renderer as previews and screenshots.
+standards mode, and authored root/body attributes remain available. Components and
+tokens use the same renderer as previews and screenshots.
 
 The iframe has an opaque origin. Its sandbox allows scripts and local form
 events; it does not allow same-origin access, popups, top navigation, downloads
