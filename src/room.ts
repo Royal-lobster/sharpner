@@ -1,3 +1,5 @@
+import { selectThumbnail } from "../shared/thumbnails";
+import { effectiveTheme } from "../shared/themes";
 import { descendantsOf, layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
@@ -279,7 +281,8 @@ export class Room {
         const previousNodes = this.nodes;
         this.status = "open";
         this.pages = msg.pages;
-        this.nodes = new Map(msg.nodes.map((n) => [n.id, n]));
+        this.fileTheme = msg.fileTheme ?? null;
+        this.nodes = new Map(msg.nodes.map((n) => [n.id, selectThumbnail(n, this.fileTheme)]));
         this.peers = new Map(msg.peers.map((p) => [p.cid, p]));
         const comments = new Map((msg.comments ?? []).map((t) => [t.id, t]));
         for (const id of this.comments.keys()) if (!comments.has(id)) this.deletedComments.add(id);
@@ -299,7 +302,8 @@ export class Room {
           if (!node || !hasSource(node) || node.rev !== cached.rev) this.forgetSource(id);
         }
         for (const id of this.heights.keys()) {
-          if (!this.nodes.has(id) || previousNodes.get(id)?.rev !== this.nodes.get(id)?.rev) this.heights.delete(id);
+          if (!this.nodes.has(id) || previousNodes.get(id)?.rev !== this.nodes.get(id)?.rev
+            || previousNodes.get(id)?.thumbTheme !== this.nodes.get(id)?.thumbTheme) this.heights.delete(id);
         }
         for (const id of this.visibleSources) if (!this.nodes.has(id)) this.visibleSources.delete(id);
         this.reconcileSources();
@@ -307,7 +311,7 @@ export class Room {
       }
       case "sync": {
         if (msg.coverNodeId !== undefined) this.coverNodeId = msg.coverNodeId;
-        if (msg.fileTheme !== undefined) this.fileTheme = msg.fileTheme;
+        if (msg.fileTheme !== undefined) this.selectTheme(msg.fileTheme);
         if (msg.brand !== undefined) this.brand = msg.brand;
         if (msg.pages) for (const p of msg.pages) this.upsertPage({ ...p, kind: p.kind ?? "canvas" });
         if (msg.pageDels) for (const pageId of msg.pageDels) this.forgetPage(pageId);
@@ -321,12 +325,12 @@ export class Room {
           const previous = this.nodes.get(n.id);
           // The previous source keeps live previews on screen until the new revision arrives; unmounting
           // them would flash the outdated thumbnail underneath. reconcileSources refetches by revision.
-          if (previous && previous.rev !== n.rev) this.heights.delete(n.id);
-          this.nodes.set(n.id, n);
+          if (previous && (previous.rev !== n.rev || n.thumbRev === n.rev && (previous.thumbHi !== n.thumbHi || previous.thumbTheme !== n.thumbTheme))) this.heights.delete(n.id);
+          this.nodes.set(n.id, selectThumbnail(n, this.fileTheme));
           this.updateDesignNode(n);
           if (msg.by?.agent) this.markAgent(n.id, msg.by.name);
         }
-        if (msg.pages?.length || msg.pageDels?.length || msg.nodes?.length || msg.nodeDels?.length) this.changedData();
+        if (msg.fileTheme !== undefined || msg.pages?.length || msg.pageDels?.length || msg.nodes?.length || msg.nodeDels?.length) this.changedData();
         this.reconcileSources();
         break;
       }
@@ -578,7 +582,11 @@ export class Room {
         const cur = this.nodes.get(op.id);
         const { source: _source, ...meta } = op.node;
         // A theme change keeps the current height until the restyled preview reports its own.
-        if (cur) this.nodes.set(op.id, { ...cur, ...meta });
+        if (cur) {
+          const next = selectThumbnail({ ...cur, ...meta }, this.fileTheme);
+          if (meta.theme !== undefined && meta.theme !== cur.theme && next.thumbnails?.[next.thumbTheme ?? ""]?.rev === next.rev) this.heights.delete(op.id);
+          this.nodes.set(op.id, next);
+        }
         else if (meta.pageId) {
           this.nodes.set(op.id, {
             id: op.id, pageId: meta.pageId, parentId: meta.parentId ?? null, kind: meta.kind ?? "frame", name: meta.name ?? "Frame",
@@ -599,11 +607,22 @@ export class Room {
         break;
       case "theme.set":
         // Live previews restyle in place; heights stay until the restyled previews report theirs.
-        this.fileTheme = op.theme;
+        this.selectTheme(op.theme);
         break;
       case "node.del":
         for (const id of [...op.ids, ...descendantsOf([...this.nodes.values()], op.ids)]) this.forgetNode(id);
         break;
+    }
+  }
+
+  private selectTheme(theme: string | null) {
+    if (this.fileTheme === theme) return;
+    this.fileTheme = theme;
+    for (const [id, node] of this.nodes) {
+      if (node.kind !== "frame" && node.kind !== "component" || node.theme) continue;
+      const next = selectThumbnail(node, theme);
+      if (next.thumbnails?.[effectiveTheme(next, theme) ?? ""]?.rev === next.rev) this.heights.delete(id);
+      this.nodes.set(id, next);
     }
   }
 

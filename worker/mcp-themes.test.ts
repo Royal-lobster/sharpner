@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyBrand, type CanvasNode, type Op } from "../shared/types";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), apply: vi.fn(), theme: vi.fn(), nodes: vi.fn(), own: vi.fn(), loadFrame: vi.fn(), capture: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), apply: vi.fn(), theme: vi.fn(), nodes: vi.fn(), own: vi.fn(), screenshot: vi.fn() }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor,
   room: () => ({
     brand: async () => emptyBrand(), catalog: async () => ({ brand: emptyBrand(), pageId: null, primitives: [], tokenSheets: 0 }),
-      apply: mocks.apply, theme: mocks.theme, nodes: mocks.nodes,
+      apply: mocks.apply, theme: mocks.theme, nodes: mocks.nodes, screenshotNodes: mocks.screenshot,
     node: async (id: string) => (await mocks.nodes()).find((node: CanvasNode) => node.id === id),
     outline: async () => [{ id: "page", name: "Feature", sort: 0, nodes: await mocks.nodes() }],
     pages: async () => [{ id: "page", name: "Feature", sort: 0 }], peers: async () => [],
@@ -15,8 +15,6 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
     ownDesignSystem: async () => (await mocks.own()) ?? { tokens: "", components: [] },
   }),
 }));
-vi.mock("@cloudflare/puppeteer", () => ({ default: { launch: async () => ({ newPage: async () => ({}), close: async () => {} }) } }));
-vi.mock("./render", () => ({ loadFrame: mocks.loadFrame, capture: mocks.capture }));
 import { mcp } from "./mcp";
 
 let fileTheme: string | null;
@@ -46,8 +44,7 @@ beforeEach(() => {
   mocks.apply.mockImplementation(async (_file: string, _origin: string, ops: Op[]) => {
     for (const op of ops) if (op.t === "theme.set") fileTheme = op.theme;
   });
-  mocks.loadFrame.mockResolvedValue({ width: 400, height: 600 });
-  mocks.capture.mockResolvedValue(new Uint8Array([1, 2, 3]));
+  mocks.screenshot.mockResolvedValue({ content: [{type:"image", data:"AQID", mimeType:"image/jpeg"}] });
 });
 
 describe("agent theme controls", () => {
@@ -70,7 +67,7 @@ describe("agent theme controls", () => {
     expect(mocks.apply.mock.calls.at(-1)![2]).toMatchObject([{ t: "node.put", node: { kind: "component", name: "Card", theme: "sakura" } }]);
     // Its specimen renders in its own theme, whatever the file uses.
     await call("screenshot_nodes", { fileId: "file", nodeIds: ["sakura-button", "button"] });
-    expect(mocks.loadFrame.mock.calls.map(([, frame]) => [frame.id, frame.theme])).toEqual([["sakura-button", "sakura"], ["button", "dark"]]);
+    expect(mocks.screenshot).toHaveBeenCalledWith(["sakura-button", "button"], "https://sharpner.example");
   });
 
   it("exposes file selection, discovered names, and effective screen themes", async () => {
@@ -92,12 +89,11 @@ describe("agent theme controls", () => {
     expect(mocks.apply.mock.calls.at(-1)![2]).toEqual([{ t: "node.put", id: "override", node: { theme: null } }]);
   });
 
-  it("screenshots resolve the same inheritance as live frames and leave foundation panes alone", async () => {
+  it("forwards screenshots through the room browser slot and preserves image responses", async () => {
     const result = await call("screenshot_nodes", { fileId: "file", nodeIds: ["inherited", "override", "tokens", "component"] });
     expect(result.isError).not.toBe(true);
-    expect(mocks.loadFrame.mock.calls.map(([, frame]) => [frame.id, frame.theme])).toEqual([
-      ["inherited", "dark"], ["override", "light"], ["tokens", undefined], ["component", "dark"],
-    ]);
+    expect(mocks.screenshot).toHaveBeenCalledWith(["inherited", "override", "tokens", "component"], "https://sharpner.example");
+    expect(result.content).toEqual([{type:"image",data:"AQID",mimeType:"image/jpeg"}]);
   });
 
   it("enforces write scope and workspace membership before applying file themes", async () => {

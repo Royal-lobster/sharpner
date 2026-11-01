@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ authenticate: vi.fn() }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
+vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
 vi.mock("./mcp", async () => ({ mcp: new (await import("hono")).Hono() }));
 
 import app from "./index";

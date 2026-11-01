@@ -1,7 +1,9 @@
+import { thumbnailUrl } from "../shared/thumbnail-url";
+
 type PreviewGroup = { key: string; fileId: string; names: string[] };
 type PendingPreview = { image: HTMLImageElement; url: string; group: PreviewGroup; cancelled: boolean; batch?: PreviewBatch };
 type PreviewBatch = { controller: AbortController; items: PendingPreview[]; timeout?: ReturnType<typeof setTimeout> };
-const THUMBNAIL_URL = /^\/a\/([a-f0-9-]{36})\/t\/([a-f0-9-]{36}-\d{1,12}-(?:lo|hi)\.webp)$/i;
+const THUMBNAIL_URL = thumbnailUrl;
 const PREVIEWS_PER_BATCH = 16;
 const MAX_INFLIGHT_BATCHES = 4;
 const BATCH_TIMEOUT_MS = 15_000;

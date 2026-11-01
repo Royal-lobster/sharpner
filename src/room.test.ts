@@ -198,6 +198,26 @@ describe("file and screen themes", () => {
     expect(socket.sent.at(-1)).toEqual({ type: "ops", ops: [{ t: "theme.set", theme: "dark" }] });
   });
 
+  it("selects cached themes optimistically and on remote sync without refetching sources", () => {
+    const preview = (theme: string, measuredHeight: number) => ({rev:1,lo:`${theme}-lo`,hi:`${theme}-hi`,measuredHeight});
+    const screen = node("screen",{height:null,thumbLo:"authored-lo",thumbHi:"authored-hi",thumbTheme:"",thumbRev:1,
+      thumbnails:{"":preview("authored",600),light:preview("light",700),dark:preview("dark",900)}});
+    const socket=start([screen]); supply(socket,"screen"); room.heights.set("screen",650);
+    const source=room.sources.get("screen");
+    room.send([{t:"theme.set",theme:"dark"}]);
+    expect(room.nodes.get("screen")).toMatchObject({rev:1,thumbHi:"dark-hi",thumbRev:1,measuredHeight:900});
+    expect(room.heights.has("screen")).toBe(false);
+    socket.receive({type:"sync",fileTheme:"light",by:null});
+    expect(room.nodes.get("screen")).toMatchObject({thumbHi:"light-hi",thumbRev:1,measuredHeight:700});
+    room.send([{t:"node.put",id:"screen",node:{theme:"dark"}}]);
+    expect(room.nodes.get("screen")!.thumbHi).toBe("dark-hi");
+    expect(room.sources.get("screen")).toBe(source);
+    room.heights.set("screen",950);
+    socket.receive({type:"init",pages:room.pages,nodes:[screen],cid:"viewer",peers:[],library:null,fileTheme:"light"});
+    expect(room.nodes.get("screen")!.thumbHi).toBe("light-hi");
+    expect(room.heights.has("screen")).toBe(false);
+  });
+
   it("keeps screen overrides through ordinary edits and returns to the file theme when cleared", () => {
     const socket = start([node("screen", { theme: "light", height: null, measuredHeight: 800 })]);
     room.send([{ t: "theme.set", theme: "dark" }]);

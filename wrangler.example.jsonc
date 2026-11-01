@@ -21,9 +21,9 @@
   ],
   "r2_buckets": [{ "binding": "FILES", "bucket_name": "sharpner-files" }],
   "durable_objects": {
-    "bindings": [{ "name": "FILE_ROOM", "class_name": "FileRoom" }]
+    "bindings": [{ "name": "FILE_ROOM", "class_name": "FileRoom" }, { "name": "THUMBNAIL_QUEUE", "class_name": "ThumbnailQueue" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FileRoom"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FileRoom"] }, { "tag": "v2", "new_sqlite_classes": ["ThumbnailQueue"] }],
   // Optional: remove this binding to develop without thumbnail generation or screenshots.
   "browser": { "binding": "BROWSER" },
   "observability": { "enabled": true },

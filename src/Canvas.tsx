@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
-import { frameDocument, previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
+import { previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
 import { effectiveTheme, themeLabel } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
@@ -20,6 +20,7 @@ import { IconLayout, IconMaximize, IconMinus, IconPlus } from "@tabler/icons-rea
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { CanvasLayout } from "./canvas-layout";
+import { LiveFrame } from "./live-frame";
 import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
 
 type Tier = "lo" | "hi";
@@ -249,6 +250,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     return () => room.needSources([]);
   }, [room, liveIds.join(",")]);
   const design = room.design();
+  const reportHeight = useCallback((id: string, height: number) => room.setHeight(id, height), [room]);
 
   // Paint the small frames onto the raster layer, in sync with the DOM layer's transform.
   const rasterRef = useRef<HTMLCanvasElement>(null);
@@ -668,6 +670,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               live={live.current.has(f.id)}
               html={src && renderedHtml(f, src.source)}
               design={design}
+              onHeight={reportHeight}
               theme={effectiveTheme(f, room.fileTheme)}
               selected={selected.has(f.id)}
               peerColor={peerSelections.get(f.id)}
@@ -743,6 +746,7 @@ type FrameNodeProps = {
   live: boolean;
   html: string | undefined;
   design: DesignSystem;
+  onHeight: (id: string, height: number) => void;
   theme: string | undefined;
   selected: boolean;
   peerColor: string | undefined;
@@ -754,8 +758,9 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, onHeight, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
   const settling = doneAt !== undefined;
+  const reportHeight = useCallback((height: number) => onHeight(f.id, height), [onHeight, f.id]);
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
   const top = tier === "hi" && hi && hi !== lo ? hi : lo;
@@ -785,7 +790,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
         {!lo && !showLive && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} />}
+        {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} onHeight={reportHeight} />}
         {(agent || settling) && <AgentSheen />}
       </div>
       {(agent || settling) && <Trace doneAt={doneAt} />}
@@ -814,46 +819,6 @@ function Trace({ doneAt }: { doneAt: number | undefined }) {
       <rect className="trace-lead trace-head" pathLength={100} />
     </svg>
   );
-}
-
-type LiveLayer = { doc: string; key: number; ready: boolean; swap: boolean };
-
-/**
- * A live preview that swaps documents without blinking: the shown iframe stays until its
- * replacement has loaded and styled, so a theme or source change never reveals the outdated
- * thumbnail underneath. Only the newest document reports heights.
- */
-function LiveFrame({ id, html, design, theme, width, height }: { id: string; html: string; design: DesignSystem; theme: string | undefined; width: number; height: number }) {
-  const doc = useMemo(() => frameDocument(html, { measure: true, base: location.origin, design, theme }), [html, design, theme]);
-  const [layers, setLayers] = useState<LiveLayer[]>(() => [{ doc, key: 0, ready: false, swap: false }]);
-  const newest = layers[layers.length - 1]!;
-  if (newest.doc !== doc) {
-    // Replace a still-loading document; keep the one on screen as the backdrop.
-    const shown = layers.find((layer) => layer.ready);
-    setLayers([...(shown ? [shown] : []), { doc, key: newest.key + 1, ready: false, swap: !!shown }]);
-  }
-  const reveal = (key: number) => setLayers((current) => {
-    const at = current.findIndex((layer) => layer.key === key);
-    return at < 0 ? current : [{ ...current[at]!, ready: true }, ...current.slice(at + 1)];
-  });
-  return layers.map((layer) => {
-    const latest = layer === newest;
-    return (
-      <iframe
-        key={layer.key}
-        data-id={latest ? id : undefined}
-        title={id}
-        aria-hidden={latest ? undefined : true}
-        tabIndex={latest ? undefined : -1}
-        sandbox="allow-scripts"
-        srcDoc={layer.doc}
-        // A first preview fades in over its thumbnail; a replacement swaps in one frame, with nothing between.
-        style={{ width, height, opacity: layer.ready ? 1 : 0, zIndex: latest ? 1 : 0, transition: layer.swap ? "none" : undefined }}
-        // Give Tailwind a beat to generate styles before swapping the previous view out.
-        onLoad={() => setTimeout(() => reveal(layer.key), 120)}
-      />
-    );
-  });
 }
 
 // ---- raster layer -------------------------------------------------------------
@@ -911,7 +876,13 @@ export function paintRaster(
     const area = Math.max(0, Math.min(size.w, x + screenW) - Math.max(0, x)) * Math.max(0, Math.min(size.h, y + height) - Math.max(0, y));
     const distance = (x + screenW / 2 - size.w / 2) ** 2 + (y + height / 2 - size.h / 2) ** 2;
     const side = f.kind === "image" ? 400 : 256;
-    return [{ url, pixels: side * side * r.h / Math.max(1, r.w), priority: (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance }];
+    const pixels = side * side * r.h / Math.max(1, r.w);
+    const priority = (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance;
+    // Warm overview pixels only after the shown image is ready. The existing decoded-pixel,
+    // entry and network budgets still apply, and current-theme requests always win admission.
+    const alternatives = upgrades?.enabled && upgrades.settled && area > 0 && thumbnails?.get(url)
+      ? Object.values(f.thumbnails ?? {}).filter((t) => t.rev === f.rev && t.lo !== url).map((t) => ({ url: t.lo, pixels, priority: priority - 2e12 })) : [];
+    return [{ url, pixels, priority }, ...alternatives];
   }));
 
   // Load small previews first. Sharpen visible content in a separate bounded queue, without

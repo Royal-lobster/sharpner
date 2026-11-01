@@ -1,7 +1,8 @@
 // Shapes shared by the browser, the worker, and the FileRoom Durable Object. Vocabulary: see CONTEXT.md.
 import { componentSpecimen, tokenSpecimen } from "./specimens";
+import type { ThemeThumbnails } from "./thumbnails";
 import type { SessionPrincipal } from "./session-principal";
-import { componentTheme, documentThemeScript } from "./themes";
+import { componentTheme, documentThemeScript, type FrameThemeChannel } from "./themes";
 export { tokenNames } from "./specimens";
 
 /**
@@ -56,10 +57,14 @@ export type CanvasNode = {
   /** Raster previews used when the node is small on screen (lo ≈ 256px wide for the canvas layer, hi ≈ 1280px wide). */
   thumbLo: string | null;
   thumbHi: string | null;
-  /** Bumps whenever what the node renders changes (its source, size, theme, or the design system it uses). */
+  /** Bumps whenever what the node renders changes (its source, size, or the design system it uses; frame theme selection does not bump it). */
   rev: number;
   /** Revision the current thumbnails show. Behind `rev` while the renderer catches up. */
   thumbRev?: number;
+  /** Theme of the selected/fallback raster. Empty string means As authored. */
+  thumbTheme?: string;
+  /** Cached pairs, including stale rasters retained during content edits. */
+  thumbnails?: ThemeThumbnails;
 };
 
 /** Whether the node's raster previews show its current revision (missing on older clients' metadata). */
@@ -174,7 +179,7 @@ this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(th
 };
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
-export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null } = {}): string {
+export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; themeChannel?: FrameThemeChannel } = {}): string {
   // Remote @imports (web fonts) become <link>s; the rest is Tailwind CSS that defines the token utilities.
   const imports: string[] = [];
   const css = (opts.design?.tokens ?? "").replace(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g, (_, href: string) => {
@@ -188,14 +193,14 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
   const head =
     (opts.base ? `<base href="${opts.base}">` : "") +
     `<meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
-    `<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>` +
+    (opts.compiledTailwind ? `<style data-sharpner-css>${(opts.tailwindCss ?? "").replace(/<\//g, "<\\/")}</style>` : `<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3"></script>`) +
     `<style>html,body{margin:0}body{-webkit-font-smoothing:antialiased}</style>` +
     tokens;
   // Reports content height to the canvas so auto-height frames can size themselves.
-  const probe = opts.measure
+  const probe = opts.measure && !opts.themeChannel
     ? `<script>(()=>{let h=0;const post=()=>{const n=Math.ceil(document.body.getBoundingClientRect().height);if(n!==h){h=n;parent.postMessage({sharpnerHeight:n},"*")}};new ResizeObserver(post).observe(document.body);addEventListener("load",post)})()</script>`
     : "";
-  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + documentThemeScript(opts.theme) + probe;
+  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + documentThemeScript(opts.theme, opts.themeChannel) + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
     const withHead = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => m + head)

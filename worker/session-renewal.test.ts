@@ -6,6 +6,7 @@ vi.mock("./data", async (original) => ({
   ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, room: () => ({ renewSession: mocks.renewSession }),
 }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
+vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
 vi.mock("./mcp", async () => ({ mcp: new (await import("hono")).Hono() }));
 import app from "./index";
 
