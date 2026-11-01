@@ -47,6 +47,26 @@ Update the established cover when the product's identity changes. The choice fol
 
 After each screen, call `screenshot_nodes` when available. Check clipping, overflow, visual focus, spacing, alignment, contrast, and component use. Fix the existing frame with `edit_node_source`.
 
+## Design interactions beside the screens
+
+Keep interaction studies on the feature page, beside the screens or components
+they belong to. Any frame or component can be played; viewers choose Interact to
+send mouse, keyboard, scroll and touch input to one design.
+
+Use ordinary HTML/CSS, inline JavaScript and browser animation APIs. Keep state
+inside the rendered document, provide a useful initial state, and respect
+`prefers-reduced-motion`. A component's inline event handlers can implement local
+behavior; initialize behavior that needs expanded components in its containing
+frame's `load` handler. External JavaScript packages, eval, API connections and
+network form submissions are blocked during playback. Simulate application data
+locally and cancel a form's default submission when implementing a local submit
+handler.
+
+Typed values and clicked states belong to that viewer and are never saved as
+source, geometry or thumbnails. Reset recreates the initial document. Screenshots
+and covers show the normal render, not a viewer's playback state. Verify the
+initial appearance with `screenshot_nodes` and the interactions in the editor.
+
 ## Landing pages
 
 Start with one message and one call to action. Follow with sections for evidence, such as features, customer results, pricing, and FAQ. End with a call to action. Use more space and larger type than product screens. Use `font-display` when defined. Give each section a purpose; avoid generic gradients and repeated card layouts.

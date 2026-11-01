@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { layoutHeight, layoutRects } from "../shared/layout";
 import type { CanvasNode } from "../shared/types";
-import { planCanvasRendering } from "./canvas-render-plan";
+import { canInteract, planCanvasRendering } from "./canvas-render-plan";
 
 const node = (id: string, overrides: Partial<CanvasNode> = {}): CanvasNode => ({
   id, pageId: "page", parentId: null, kind: "frame", name: id, x: 0, y: 0,
@@ -13,12 +13,30 @@ const viewport = {
   ready: true, settled: true,
   previous: { liveIds: new Set<string>(), imageIds: new Set<string>() },
 };
-function plan(nodes: CanvasNode[], overrides: Partial<typeof viewport> = {}) {
+function plan(nodes: CanvasNode[], overrides: Partial<typeof viewport> & { interactionId?: string | null } = {}) {
   return planCanvasRendering(nodes, layoutRects(nodes, layoutHeight), { ...viewport, ...overrides });
 }
 const ids = (nodes: { node: CanvasNode }[]) => nodes.map(({ node }) => node.id);
 
 describe("canvas render plan", () => {
+  it("adds the played design to the live set without suspending other live previews", () => {
+    const result = plan([node("playing", { width: 80 }), node("ordinary")], { interactionId: "playing" });
+    expect(result.liveIds).toEqual(new Set(["playing", "ordinary"]));
+  });
+
+  it("keeps the played design mounted when panned away, so its input state survives", () => {
+    const result = plan([node("active", { x: 5000 }), node("inactive", { x: 5000 })], { interactionId: "active" });
+    expect(ids(result.domFrames)).toEqual(["active"]);
+    expect([...result.liveIds]).toEqual(["active"]);
+  });
+
+  it("only plays frames and components that exist", () => {
+    expect(plan([node("other")], { interactionId: "deleted" }).liveIds).toEqual(new Set(["other"]));
+    for (const kind of ["tokens", "image", "section"] as const) expect(canInteract(node("bad", { kind }))).toBe(false);
+    expect(canInteract(node("screen"))).toBe(true);
+    expect(canInteract(node("button", { kind: "component" }))).toBe(true);
+  });
+
   it("waits for the opening camera before promoting sources or originals", () => {
     const result = plan([node("frame"), node("image", { kind: "image" })], {
       ready: false,

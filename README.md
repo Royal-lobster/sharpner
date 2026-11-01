@@ -66,6 +66,11 @@ A component named `Button/Primary` becomes a reusable `<x-button-primary>` tag:
 Agents can read the source, change it precisely, and screenshot the result through
 the same MCP connection. See the [Sharpner skill](worker/skills/sharpner/SKILL.md).
 
+Choose **Interact** on any frame or component to try its clicks, typing, scrolling
+and scripted motion beside the design. Each viewer plays one design at a time, with
+Reset and Stop controls; temporary input stays local. Read about
+[interaction playback](docs/interaction-playback.md).
+
 ## Bring your agent
 
 Open **Connect an agent**, copy the setup prompt, and paste it into your coding
