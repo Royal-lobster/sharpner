@@ -4,6 +4,7 @@ import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
 import { prepareRenderDesign } from "./render-fonts";
 import { capture, captureThumbnails, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { renderOverviewAtlas } from "./overview-atlas.prototype";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
 import { sourceBatches, type SourceItem } from "../shared/source-batches";
@@ -139,6 +140,45 @@ export class FileRoom extends DurableObject<Env> {
   private browserTask: Promise<unknown> | null = null;
   private overviewTurns:{at:number;rendered:number;browserMs:number}[]=[];
   private overviewRenders:Record<string,unknown>[]=[];
+
+  /** THROWAWAY explicit local benchmark: uses the shared browser lease and writes no previews. */
+  async overviewAtlas(input:{ids:string[];theme?:string|null;side?:number;base?:string;cssTransport?:"intercept"|"blob"}){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1"||!this.env.BROWSER)throw Error("Experiment unavailable");
+    if(!Array.isArray(input.ids)||!input.ids.length||input.ids.length>300)throw Error("Atlas needs1–300frames");
+    this.setMeta("overviewHold","1");
+    return this.withFileBrowser(async()=>{
+      const nodes=this.nodes(input.ids).filter(n=>n.kind==="frame"),revisions=new Map(nodes.map(n=>[n.id,{rev:n.rev,theme:n.theme}]));
+      const designRev=this.meta("designRev"),design=await this.designSystem(),coordinator=this.env.THUMBNAIL_QUEUE?.get(this.env.THUMBNAIL_QUEUE.idFromName("global"));
+      if(!coordinator)throw Error("Shared browser queue unavailable");
+      let lease:string|null=null;const waiting=Date.now();while(!(lease=await coordinator.acquireScreenshot())){if(Date.now()-waiting>30_000)throw Error("Shared browser busy");await new Promise(r=>setTimeout(r,250));}
+      try{
+        const result=await renderOverviewAtlas({binding:this.env.BROWSER!,design,base:input.base??this.meta("origin")??"",nodes,theme:input.theme===undefined?this.theme():input.theme,side:input.side,cssTransport:input.cssTransport,
+          load:async(ids:string[])=>ids.map(id=>{const n=this.node(id);if(!n||n.kind!=="frame"||n.rev!==revisions.get(id)?.rev)throw Error("Stale atlas source");return {id:n.id,html:n.source,width:n.width,height:n.height,theme:n.theme??undefined};})});
+        if(this.meta("designRev")!==designRev||nodes.some(n=>{const now=this.node(n.id);return !now||now.rev!==n.rev||now.theme!==n.theme}))throw Error("Stale atlas discarded");
+        return result;
+      }finally{if(lease)await coordinator.releaseScreenshot(lease);}
+    });
+  }
+
+  /** THROWAWAY control/goldens using the existing per-screen renderer, four tabs, no R2 writes. */
+  async overviewIndividual(input:{ids:string[];theme:string|null;side?:number;base?:string;referenceIds?:string[]}){
+    if(import.meta.env.VITE_OVERVIEW_EXPERIMENT!=="1"||!this.env.BROWSER||input.ids.length>300)throw Error("Experiment unavailable");
+    this.setMeta("overviewHold","1");
+    return this.withFileBrowser(async()=>{
+      const design=await prepareRenderDesign(await this.designSystem()),queue=this.nodes(input.ids).filter(n=>n.kind==="frame");
+      const coordinator=this.env.THUMBNAIL_QUEUE?.get(this.env.THUMBNAIL_QUEUE.idFromName("global"));if(!coordinator)throw Error("Shared browser queue unavailable");
+      let lease:string|null=null;const waiting=Date.now();while(!(lease=await coordinator.acquireScreenshot())){if(Date.now()-waiting>30_000)throw Error("Shared browser busy");await new Promise(r=>setTimeout(r,250));}
+      const started=Date.now(),references:any[]=[],jobs:any[]=[];let browser:Awaited<ReturnType<typeof puppeteer.launch>>|undefined,failure:unknown,stopped=false;
+      try{await withTimeout((async()=>{browser=await puppeteer.launch(this.env.BROWSER!,{keep_alive:10_000});if(stopped){await browser.close();return;}const tabs=await Promise.all(Array.from({length:Math.min(4,queue.length)},()=>browser!.newPage()));
+        await Promise.all(tabs.map(async tab=>{for(let n=queue.shift();n&&!stopped;n=queue.shift()){const start=performance.now(),canonical=this.node(n.id)!;
+          const size=await loadFrame(tab,{...n,html:canonical.source,theme:n.theme??input.theme??undefined},input.base??this.meta("origin")??"",design);
+          const bytes=await capture(tab,size.width,size.height,{type:"webp",quality:70,scale:Math.min(1,(input.side??128)/size.width)});jobs.push({id:n.id,ms:performance.now()-start,width:size.width,height:size.height,bytes:bytes.length});
+          if(input.referenceIds?.includes(n.id)){let binary="";for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));references.push({id:n.id,imageBase64:btoa(binary),width:Math.round(size.width*Math.min(1,(input.side??128)/size.width)),height:Math.round(size.height*Math.min(1,(input.side??128)/size.width))});}
+        }}));})(),20_000,"individual benchmark");}catch(error){failure=error;}
+      finally{stopped=true;if(browser)await withTimeout(browser.close(),5000,"individual browser close");if(lease)await coordinator.releaseScreenshot(lease);}
+      const browserMs=Date.now()-started;if(failure)throw Error(`Individual benchmark failed after ${browserMs} browser-ms: ${String(failure)}`);return {browserMs,jobs,references};
+    });
+  }
 
   /** THROWAWAY local benchmark controls. Reachable only through the guarded experiment route. */
   async overviewPrototype(input:{mode?:string;hold?:boolean;resetMetrics?:boolean}){

@@ -12,6 +12,14 @@ export { ThumbnailQueue } from "./thumbnail-queue";
 
 const app = new Hono<AppEnv>();
 
+// THROWAWAY: a network document (not srcdoc) lets the experiment test browser site isolation.
+// It contains no design data; a parent transfers one nonce-protected document after load.
+if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1")app.get("/api/overview-bootstrap",c=>{
+  if(!["localhost","127.0.0.1"].includes(new URL(c.req.url).hostname))return c.notFound();
+  c.header("cache-control","no-store");c.header("origin-agent-cluster","?1");
+  return c.html(`<!doctype html><meta charset="utf-8"><script>addEventListener("message",function receive(e){if(e.source!==parent||e.data?.type!=="overview-bootstrap"||e.data.token!==location.hash.slice(1)||typeof e.data.html!=="string")return;removeEventListener("message",receive);document.open();document.write(e.data.html);document.close();});parent.postMessage({type:"overview-bootstrap-ready",token:location.hash.slice(1)},"*");<\/script>`);
+});
+
 if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1")app.get("/api/overview-prototype-css/:key",c=>{
   if(new URL(c.req.url).hostname!=="localhost")return c.notFound();
   const css=overviewSheets.get(c.req.param("key"));return css?c.body(css,200,{"content-type":"text/css","cache-control":"public,max-age=86400"}):c.notFound();
@@ -81,6 +89,8 @@ if(import.meta.env.VITE_OVERVIEW_EXPERIMENT==="1"){
     if(!file||!file.name.startsWith("PROTOTYPE · overview"))return c.notFound();
     const input=await c.req.json(),stub=room(c.env,file.id),action=c.req.param("action");
     if(action==="prepare")return c.json(await prepareOverview(input.design,input.html));
+    if(action==="atlas")return c.json(await stub.overviewAtlas(input));
+    if(action==="individual")return c.json(await stub.overviewIndividual(input));
     if(action==="config")return c.json(await stub.overviewPrototype(input));
     if(action==="queue")return c.json(await c.env.THUMBNAIL_QUEUE!.get(c.env.THUMBNAIL_QUEUE!.idFromName("global")).overviewPrototype());
     if(action==="checkpoint")return c.json(await stub.overviewCheckpoint(input));

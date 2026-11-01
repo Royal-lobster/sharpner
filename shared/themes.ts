@@ -80,7 +80,7 @@ export function componentTheme(element: Element, applied: string | null | undefi
   return context ? name(context) : "";
 }
 
-export type FrameThemeChannel = { token: string; generation: number };
+export type FrameThemeChannel = { token: string; generation: number; prototypeComponentRefresh?: boolean; prototypeIdleDocument?: boolean };
 export type FrameThemeReply = FrameThemeChannel & {
   type: "sharpner:frame-ready" | "sharpner:frame-height" | "sharpner:frame-reload";
   height?: number;
@@ -105,9 +105,12 @@ function applyDocumentTheme(theme: string | null, channel?: FrameThemeChannel) {
   const authored = new Map<HTMLElement, (string | null)[]>();
   const attributes = ["data-theme", "class", "style"];
   const restore = () => {
-    for (const [element, values] of authored) for (let i = 0; i < attributes.length; i++) {
-      if (values[i] === null) element.removeAttribute(attributes[i]!);
-      else element.setAttribute(attributes[i]!, values[i]!);
+    for (const [element, values] of authored) {
+      if (channel?.prototypeComponentRefresh && !element.isConnected) { authored.delete(element); continue; }
+      for (let i = 0; i < attributes.length; i++) {
+        if (values[i] === null) element.removeAttribute(attributes[i]!);
+        else element.setAttribute(attributes[i]!, values[i]!);
+      }
     }
   };
   const apply = () => {
@@ -135,6 +138,20 @@ function applyDocumentTheme(theme: string | null, channel?: FrameThemeChannel) {
     let declarative = false;
     const post = (type: FrameThemeReply["type"], height?: number) => parent.postMessage({ type, token: channel.token, generation, ...(height === undefined ? {} : { height }) }, "*");
     const height = () => Math.ceil(document.body.getBoundingClientRect().height);
+    const declarativeMarkup = () => ![document.documentElement, document.body, ...document.body.querySelectorAll("*")].some((element) =>
+      [...element.attributes].some((attribute) => /^on/i.test(attribute.name)
+        ? !(channel.prototypeIdleDocument && /^on(?:click|dblclick|auxclick|contextmenu|mouse\w*|pointer\w*|touch\w*|key\w*|input|change|submit|reset|select|copy|cut|paste|drag\w*|drop)$/i.test(attribute.name))
+        : /^(?:href|src|action|formaction|xlink:href)$/i.test(attribute.name) && /^\s*(?:javascript|vbscript):/i.test(attribute.value)));
+    const present = () => {
+      apply();
+      if (channel.prototypeComponentRefresh) {
+        const restoreDisplay = (window as unknown as { __sharpnerRefreshComponents?: () => (() => void) | void }).__sharpnerRefreshComponents?.();
+        apply();
+        // A component with no matching definition must recover its authored display, even if
+        // theme-attribute restoration remembered the previous expansion's display:contents.
+        if (typeof restoreDisplay === "function") restoreDisplay();
+      }
+    };
     const ready = async (expected: number, waitForFonts = true) => {
       document.body.getBoundingClientRect();
       if (waitForFonts) await document.fonts.ready;
@@ -156,22 +173,21 @@ function applyDocumentTheme(theme: string | null, channel?: FrameThemeChannel) {
       if (!declarative) { post("sharpner:frame-reload"); return; }
       theme = data.theme;
       (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme ?? undefined;
-      apply();
+      present();
       document.body.getBoundingClientRect();
       // Roll back in this task, before painting, if this change needs cold assets. The parent
       // will prepare a fresh document behind the shown one using its ordinary no-flicker swap.
-      if (document.fonts.status !== "loaded" || [...document.images].some((image) => !image.complete)) {
+      if (document.fonts.status !== "loaded" || [...document.images].some((image) => !image.complete) || channel.prototypeComponentRefresh && !declarativeMarkup()) {
         theme = previousTheme;
         (window as unknown as { __sharpnerTheme?: string }).__sharpnerTheme = theme ?? undefined;
-        apply();
+        present();
         post("sharpner:frame-reload");
         return;
       }
       void ready(generation);
     });
     const observe = () => {
-      declarative = ![document.documentElement, document.body, ...document.body.querySelectorAll("*")].some((element) =>
-        [...element.attributes].some((attribute) => /^on/i.test(attribute.name) || /^(?:href|src|action|formaction|xlink:href)$/i.test(attribute.name) && /^\s*(?:javascript|vbscript):/i.test(attribute.value)));
+      declarative = declarativeMarkup();
       new ResizeObserver(() => {
         if (readyGeneration !== generation) return;
         const next = height();

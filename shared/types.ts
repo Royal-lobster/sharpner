@@ -159,9 +159,26 @@ export function mergeDesignSystems(library: DesignSystem | null | undefined, own
  * Specimens pin their own definition with `data-sharpner-definition`, so a default stays visible in any theme.
  * Expansion runs before the document theme is applied, so the theme script announces it as `__sharpnerTheme`.
  */
-const componentScript = (defs: ComponentDef[]) => {
+const componentScript = (defs: ComponentDef[], prototypeRefresh = false) => {
   const byTag: Record<string, Record<string, string>> = {};
   for (const d of defs) (byTag[d.tag] ??= {})[d.theme ?? ""] = d.html;
+  // THROWAWAY: canonical idle refresh. Capture all authored slots before any element upgrades.
+  if (prototypeRefresh) return String.raw`<script>(()=>{
+const C=${JSON.stringify(byTag).replace(/</g, "\\u003c")};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
+const T=${componentTheme.toString()},S=new WeakMap(),selector=Object.keys(C).join(",");
+const remember=e=>{if(!S.has(e))S.set(e,{kids:e.innerHTML,style:e.getAttribute("style")});return S.get(e)};
+for(const e of document.querySelectorAll(selector))remember(e);
+for(const[t,d]of Object.entries(C))if(!customElements.get(t))customElements.define(t,class extends HTMLElement{
+connectedCallback(){document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>this.x(),{once:true}):this.x()}
+x(force=false){if(this._x&&!force)return;this._x=1;const original=remember(this);if(this.parentElement&&this.parentElement.closest(t))return;
+const p=this.getAttribute("data-sharpner-definition"),h=d[p??T(this,window.__sharpnerTheme)]??d[""];
+if(h==null){if(force){if(original.style===null)this.removeAttribute("style");else this.setAttribute("style",original.style);this.innerHTML=original.kids}return}
+this.style.display="contents";
+this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>original.kids);
+}});
+window.__sharpnerRefreshComponents=()=>{const styles=[];for(const e of document.querySelectorAll(selector))if(e.isConnected&&!e.parentElement?.closest(selector)&&typeof e.x==="function"){e.x(true);styles.push([e,e.getAttribute("style")])}return()=>{for(const[e,value]of styles)if(e.isConnected){if(value===null)e.removeAttribute("style");else e.setAttribute("style",value)}}};
+})()</script>`;
   return String.raw`<script>(()=>{
 const C=${JSON.stringify(byTag).replace(/</g, "\\u003c")};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
@@ -176,7 +193,7 @@ this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(th
 };
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
-export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; themeChannel?: FrameThemeChannel } = {}): string {
+export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; themeChannel?: FrameThemeChannel; prototypeComponentRefresh?: boolean } = {}): string {
   // Remote @imports (web fonts) become <link>s; the rest is Tailwind CSS that defines the token utilities.
   const imports: string[] = [];
   const css = (opts.design?.tokens ?? "").replace(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g, (_, href: string) => {
@@ -197,7 +214,7 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
   const probe = opts.measure && !opts.themeChannel
     ? `<script>(()=>{let h=0;const post=()=>{const n=Math.ceil(document.body.getBoundingClientRect().height);if(n!==h){h=n;parent.postMessage({sharpnerHeight:n},"*")}};new ResizeObserver(post).observe(document.body);addEventListener("load",post)})()</script>`
     : "";
-  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + documentThemeScript(opts.theme, opts.themeChannel) + probe;
+  const tail = (opts.design?.components.length ? componentScript(opts.design.components, opts.prototypeComponentRefresh) : "") + documentThemeScript(opts.theme, opts.themeChannel) + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
     const withHead = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => m + head)
