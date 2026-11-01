@@ -261,7 +261,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
           <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} readOnly={readOnly}
-            interactionId={interactionId} onInteract={setInteractionId}
+            interactionId={playbackValid ? interactionId : null} onInteract={setInteractionId}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (

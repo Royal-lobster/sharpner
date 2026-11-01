@@ -34,6 +34,7 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
   const { camera, size, pixelRatio, ready, settled, previous, interactionId } = viewport;
   const visible: ProjectedNode[] = [];
   const sections: ProjectedNode[] = [];
+  let playingVisible = false;
   // The default 100% camera is not the opening overview. Wait for the first fitted/restored camera.
   if (ready && size.w && size.h) {
     const view = { x: -camera.x / camera.z, y: -camera.y / camera.z, w: size.w / camera.z, h: size.h / camera.z };
@@ -41,6 +42,7 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
     for (const node of nodes) {
       const rect = rects.get(node.id)!;
       const playing = node.id === interactionId && canInteract(node);
+      playingVisible ||= playing;
       if (!playing && (rect.x > view.x + view.w + margin || rect.y > view.y + view.h + margin ||
           rect.x + rect.w < view.x - margin || rect.y + rect.h < view.y - margin)) continue;
       const visibleWidth = Math.max(0, Math.min(rect.x + rect.w, view.x + view.w) - Math.max(rect.x, view.x));
@@ -64,7 +66,7 @@ export function planCanvasRendering(nodes: CanvasNode[], rects: ReadonlyMap<stri
     liveIds = keepEligible(previous.liveIds, liveCandidates);
   }
   // Playback needs the source, so it counts as live; other live previews keep their budget.
-  if (interactionId && visible.some(({ node }) => node.id === interactionId && canInteract(node))) liveIds.add(interactionId);
+  if (playingVisible) liveIds.add(interactionId!);
 
   const imageCandidates = visible.filter(({ node, visibleArea, screenWidth }) =>
     node.kind === "image" && visibleArea > 0 && screenWidth * pixelRatio > HI_RES_MIN_PIXELS);

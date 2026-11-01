@@ -34,7 +34,8 @@ describe("interaction document", () => {
   });
 
   it("disables API connections, forms, base changes and child runtimes while retaining display assets", () => {
-    const doc = interactionDocument("<main>Screen</main>", options);
+    // The policy is an attribute value; compare it as the browser parses it.
+    const doc = interactionDocument("<main>Screen</main>", options).replaceAll("&#39;", "'");
     for (const directive of ["default-src 'none'", "connect-src 'none'", "form-action 'none'", "base-uri 'none'", "frame-src 'none'", "object-src 'none'", "worker-src 'none'", "media-src 'none'"]) expect(doc).toContain(directive);
     expect(doc).toContain("script-src 'unsafe-inline' https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3");
     expect(doc).toContain("style-src 'unsafe-inline' https: https://sharpner.test");
@@ -81,12 +82,13 @@ function bridgeFixture(fonts = Promise.resolve()) {
     getAttribute() { return this.href; }
   }
   const script = interactionDocument("<main>Screen</main>", options).match(/<script data-sharpner-playback-bridge>([\s\S]*?)<\/script>/)![1]!;
-  runInNewContext(script, {
+  const context: Record<string, unknown> = {
     parent, Element,
     document: { fonts: { ready: fonts }, getElementById: (id: string) => ({ scrollIntoView: () => scrolled.push(id) }) },
     addEventListener: (name: string, listener: (event: Record<string, unknown>) => void) => listeners.set(name, [...listeners.get(name) ?? [], listener]),
     setTimeout: (callback: () => void, delay: number) => { timers.push({ callback, delay }); return timers.length; },
-  });
+  };
+  runInNewContext(script, context);
   const dispatch = (name: string, values: Record<string, unknown> = {}) => {
     let prevented = false, blocked = false;
     const event = { isTrusted: true, composedPath: () => [], ...values, preventDefault: () => { prevented = true; }, stopImmediatePropagation: () => { blocked = true; } };
@@ -98,7 +100,7 @@ function bridgeFixture(fonts = Promise.resolve()) {
     for (let i = timers.length - 1; i >= 0; i--) if (timers[i]!.delay === delay) timers.splice(i, 1);
   };
   const start = (source: unknown = parent, token = options.token) => dispatch("message", { source, data: { type: "sharpner:interaction-start", token } });
-  return { messages, parent, Element, scrolled, dispatch, runTimers, start };
+  return { messages, parent, Element, scrolled, dispatch, runTimers, start, context };
 }
 
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -118,6 +120,19 @@ describe("trusted interaction bridge", () => {
     expect(f.dispatch("click").blocked).toBe(true);
     f.start(undefined, "wrong-token");
     expect(f.dispatch("click").blocked).toBe(true);
+    f.start();
+    expect(f.dispatch("click")).toEqual({ prevented: false, blocked: false });
+  });
+
+  it("keeps its parent channel when authored scripts shadow parent or setTimeout", async () => {
+    const f = bridgeFixture();
+    // A design's top-level `const parent = …` / `let setTimeout = …` replaces these globals for later scripts.
+    f.context.parent = { menu: true };
+    f.context.setTimeout = () => { throw new Error("authored timer"); };
+    f.dispatch("load");
+    await flush();
+    f.runTimers(120);
+    expect(f.messages).toEqual([{ type: "sharpner:interaction-ready", token: options.token }]);
     f.start();
     expect(f.dispatch("click")).toEqual({ prevented: false, blocked: false });
   });

@@ -23,6 +23,7 @@ import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { CanvasLayout } from "./canvas-layout";
 import { LiveFrame } from "./live-frame";
 import { InteractionFrame } from "./InteractionFrame";
+import { INTERACTION_READY_TIMEOUT_MS } from "../shared/interaction-document";
 import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
 
 type Tier = "lo" | "hi";
@@ -67,19 +68,19 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useSyncExternalStore(room.subscribe, room.getVersion);
   const rootRef = useRef<HTMLDivElement>(null);
   const [playbackReset, setPlaybackReset] = useState(0);
-  const candidate = interactionId ? room.nodes.get(interactionId) : undefined;
-  const playingNode = !commentMode && room.status === "open" && candidate?.pageId === pageId && canInteract(candidate) ? candidate : undefined;
+  // The editor only passes a design that may still be played (see `playbackValid`).
+  const playingNode = interactionId ? room.nodes.get(interactionId) : undefined;
   const playingId = playingNode?.id;
+  // While playing, the canvas only navigates; the played design receives its own input.
+  const navigationOnly = readOnly || !!playingId;
   const stopInteraction = useCallback((reason?: "timeout") => {
     onInteract?.(null);
     rootRef.current?.focus({ preventScroll: true });
     if (reason === "timeout") toast("This interaction didn’t finish loading. Try Interact again.", { tone: "error" });
   }, [onInteract]);
   const startInteraction = useCallback((id: string) => {
-    if (!canInteract(room.nodes.get(id)) || room.status !== "open") return;
-    if (!readOnly) onSelect([id]);
-    onInteract?.(id);
-  }, [room, readOnly, onSelect, onInteract]);
+    if (canInteract(room.nodes.get(id)) && room.status === "open") onInteract?.(id);
+  }, [room, onInteract]);
   const playback = useMemo(() => ({ reset: playbackReset, stop: stopInteraction }), [playbackReset, stopInteraction]);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const saved = useMemo(() => {
@@ -356,7 +357,8 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const down = (e: KeyboardEvent) => {
       // Input inside the played design never reaches here; Escape inside it is handled by its bridge.
       if (playingId) {
-        if (e.key === "Escape") { e.preventDefault(); stopInteraction(); }
+        const busy = typing(e) || (e.target as HTMLElement).closest?.("[role=dialog],[role=menu],[role=listbox]");
+        if (e.key === "Escape" && !busy && !e.defaultPrevented) { e.preventDefault(); stopInteraction(); }
         return;
       }
       if (typing(e)) return;
@@ -436,7 +438,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       const frame = id && room.nodes.get(id);
       if (frame) fitTo([rectOf(frame)], frame.kind === "section" ? 1 : 4);
     } else if (action.type === "tap") {
-      if (readOnly || playingId) return;
+      if (navigationOnly) return;
       if (commentMode) return placeComment(action.x, action.y);
       const hit = hitTest(action.x, action.y);
       onSelect(hit ? [hit] : []);
@@ -455,8 +457,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     stopTween();
     const { sx, sy } = local(e);
     if (commentMode && !readOnly && e.button === 0 && !spaceDown) return placeComment(sx, sy);
-    // While playing, the canvas only navigates; the played design receives its own input.
-    const navigationOnly = readOnly || !!playingId;
     const hit = navigationOnly ? null : hitTest(sx, sy);
     rootRef.current!.setPointerCapture(e.pointerId);
     if (navigationOnly || e.button === 1 || spaceDown || (!hit && !e.shiftKey)) {
@@ -579,7 +579,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const g = gesture.current;
     gesture.current = null;
     setMarquee(null);
-    if (g?.kind === "pan" && !g.moved && !readOnly && !playingId) onSelect([]);
+    if (g?.kind === "pan" && !g.moved && !navigationOnly) onSelect([]);
     if (g?.kind === "move" && g.moved) {
       const { sx, sy } = local(e);
       sendMoves(g.roots, true, g.anchors, g.start, toWorld(sx, sy));
@@ -625,7 +625,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const files = [...(e.clipboardData?.files ?? [])];
-      if (readOnly || playingId || !files.length || (e.target as HTMLElement).closest?.("input, textarea")) return;
+      if (navigationOnly || !files.length || (e.target as HTMLElement).closest?.("input, textarea")) return;
       e.preventDefault();
       // Pasted images go to the right of everything on the page (dropped ones land where dropped).
       const all = topLevel();
@@ -638,7 +638,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    if (readOnly || playingId) return;
+    if (navigationOnly) return;
     const b = rootRef.current!.getBoundingClientRect();
     placeImages([...e.dataTransfer.files], toWorld(e.clientX - b.left, e.clientY - b.top));
   };
@@ -836,7 +836,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {!lo && !showLive && !playback && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
         {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} onHeight={reportHeight} />}
         {playback && (html === undefined
-          ? <div className="interaction-loading" role="status">Loading interaction…</div>
+          ? <InteractionLoading onTimeout={() => playback.stop("timeout")} />
           // A new key is a new session: Reset, or any change to what the design renders.
           : <InteractionFrame key={`${f.rev}:${f.width}:${theme ?? ""}:${designKey(design)}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`}
               html={html} design={design} theme={theme} width={f.width} height={height} onStop={playback.stop} />)}
@@ -845,7 +845,8 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
       {(agent || settling) && <Trace doneAt={doneAt} />}
       {peerColor && <div className="peer-ring" />}
       {onPlay && !playback && <Button className="frame-play" variant="secondary" size="sm" aria-label={`Interact with ${f.name}`}
-        onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); onPlay(f.id); }}>
+        onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); onPlay(f.id); }}>
         <IconPlayerPlay aria-hidden />Interact
       </Button>}
     </div>
@@ -855,13 +856,31 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
 /** Below this on-screen width a design is too small to use, and the button would cover it. */
 const PLAY_BUTTON_MIN_WIDTH = 160;
 
-/** `room.design()` is cached per design revision, so object identity marks a design change. */
-const designKeys = new WeakMap<DesignSystem, number>();
-let nextDesignKey = 0;
+/**
+ * Restarts playback only when design content changes. A design revision can change before its
+ * new component sources arrive, so object identity alone would restart a session twice.
+ */
+const designKeys = new WeakMap<DesignSystem, string>();
 function designKey(design: DesignSystem) {
   let key = designKeys.get(design);
-  if (key === undefined) designKeys.set(design, key = ++nextDesignKey);
+  if (key === undefined) {
+    let hash = 0x811c9dc5;
+    const text = [design.tokens, ...design.components.map((c) => `${c.tag}\0${c.theme ?? ""}\0${c.html}`)].join("\u0001");
+    for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+    designKeys.set(design, key = `${text.length}:${(hash >>> 0).toString(36)}`);
+  }
   return key;
+}
+
+/** The source has not arrived yet; give up with the same message as a document that never became ready. */
+function InteractionLoading({ onTimeout }: { onTimeout: () => void }) {
+  const timeout = useRef(onTimeout);
+  timeout.current = onTimeout;
+  useEffect(() => {
+    const timer = setTimeout(() => timeout.current(), INTERACTION_READY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return <div className="interaction-loading" role="status">Loading interaction…</div>;
 }
 
 /** A negative delay fixed at mount puts a CSS loop on the shared clock: its phase at time t is (t % period) / period. */

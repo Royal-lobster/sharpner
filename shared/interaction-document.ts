@@ -1,4 +1,5 @@
 import { frameDocument, type DesignSystem } from "./types";
+import { escapeHtml } from "./specimens";
 
 // Form events and validation remain usable; form-action blocks their network/navigation default.
 export const INTERACTION_SANDBOX = "allow-scripts allow-forms";
@@ -14,10 +15,12 @@ export function interactionReply(event: Pick<MessageEvent, "source" | "data">, s
 
 /** Runs before authored code, inside the opaque playback document only. */
 function interactionBridge(token: string) {
+  // Authored top-level declarations (`const parent = …`) shadow these globals for every later script.
+  const host = parent, later = setTimeout;
   let enabled = false;
   let announced = false;
   let exited = false;
-  const post = (type: InteractionReply["type"]) => parent.postMessage({ type, token }, "*");
+  const post = (type: InteractionReply["type"]) => host.postMessage({ type, token }, "*");
   const exit = () => { if (!exited) { exited = true; enabled = false; post("sharpner:interaction-exit"); } };
   const block = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); };
   addEventListener("keydown", (event) => {
@@ -30,7 +33,7 @@ function interactionBridge(token: string) {
     addEventListener(name, (event) => { if (!enabled && event.isTrusted) block(event); }, { capture: true, passive: false });
   }
   addEventListener("message", (event) => {
-    if (event.source === parent && event.data?.type === "sharpner:interaction-start" && event.data.token === token && announced && !exited) enabled = true;
+    if (event.source === host && event.data?.type === "sharpner:interaction-start" && event.data.token === token && announced && !exited) enabled = true;
   });
   addEventListener("click", (event) => {
     const anchor = event.composedPath().find((target): target is HTMLAnchorElement | HTMLAreaElement => target instanceof Element && target.matches("a[href],area[href]"));
@@ -47,16 +50,14 @@ function interactionBridge(token: string) {
   addEventListener("pagehide", exit);
   addEventListener("load", () => {
     const fonts = document.fonts?.ready ?? Promise.resolve();
-    const deadline = new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    void Promise.race([fonts, deadline]).catch(() => {}).then(() => setTimeout(() => {
+    const deadline = new Promise<void>((resolve) => later(resolve, 2000));
+    void Promise.race([fonts, deadline]).catch(() => {}).then(() => later(() => {
       if (exited) return;
       announced = true;
       post("sharpner:interaction-ready");
     }, 120));
   }, { once: true });
 }
-
-const attribute = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
 /**
  * Playback uses the normal renderer, with a policy and bridge parsed before every authored byte.
@@ -79,6 +80,6 @@ export function interactionDocument(html: string, options: { base: string; token
   // The first base is trusted and frozen before base-uri is enforced. Later author bases cannot
   // select another asset origin. An additional authored CSP can tighten, never relax, this policy.
   // Leave the implicit head open: the normal document's html/body attributes are still parsed.
-  const prefix = `<!doctype html><base href="${attribute(origin + "/")}" target="_self"><meta http-equiv="Content-Security-Policy" content="${attribute(policy)}"><script data-sharpner-playback-bridge>(${interactionBridge.toString()})(${token})</script>`;
+  const prefix = `<!doctype html><base href="${escapeHtml(origin + "/")}" target="_self"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(policy)}"><script data-sharpner-playback-bridge>(${interactionBridge.toString()})(${token})</script>`;
   return prefix + frameDocument(html, { design: options.design, theme: options.theme });
 }

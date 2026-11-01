@@ -2,7 +2,8 @@
 import { themeLabel } from "./themes";
 import { foundations } from "./design-system";
 
-const escape = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+/** Escapes text for HTML content and quoted attributes. */
+export const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 export const tokenNames = (css: string) => [...new Set([...css.matchAll(/--([\w-]+)\s*:/g)].map((m) => m[1]!))];
 
@@ -49,14 +50,14 @@ export function componentSpecimen(name: string, tag: string, source: string, hei
   const slot = /<slot[\s/>]/i.test(source);
   const propItems = props.map(({ name, defaults }) => {
     const value = defaults.length > 1 ? "multiple defaults" : defaults[0] ? `"${defaults[0]}"` : "empty";
-    return `<span class="sp-component-prop">${escape(name)} <em>${escape(value)}</em></span>`;
+    return `<span class="sp-component-prop">${escapeHtml(name)} <em>${escapeHtml(value)}</em></span>`;
   });
   if (slot) propItems.push('<span class="sp-component-prop">slot <em>accepts content</em></span>');
   // A theme override is the same component in another theme, so it names that theme rather than a new variant.
-  if (theme) propItems.unshift(`<span class="sp-component-prop">theme <em>${escape(themeLabel(theme))}</em></span>`);
-  return `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escape(`${family} / ${variant} component${theme ? `, ${themeLabel(theme)} theme` : ""}`)}">
-<div class="sp-component-stage"><div class="sp-component-instance"><${tag} data-sharpner-definition="${escape(theme ?? "")}"></${tag}></div></div>
-${compact ? "" : `<footer class="sp-component-spec"><code class="sp-component-tag">&lt;${escape(tag)}&gt;</code>${propItems.join("")}</footer>`}
+  if (theme) propItems.unshift(`<span class="sp-component-prop">theme <em>${escapeHtml(themeLabel(theme))}</em></span>`);
+  return `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escapeHtml(`${family} / ${variant} component${theme ? `, ${themeLabel(theme)} theme` : ""}`)}">
+<div class="sp-component-stage"><div class="sp-component-instance"><${tag} data-sharpner-definition="${escapeHtml(theme ?? "")}"></${tag}></div></div>
+${compact ? "" : `<footer class="sp-component-spec"><code class="sp-component-tag">&lt;${escapeHtml(tag)}&gt;</code>${propItems.join("")}</footer>`}
 </article>`;
 }
 
@@ -114,7 +115,7 @@ export function tokenSpecimen(css: string, title = "Design tokens") {
     const group = (prefix: string) => defined.filter((token) => token.name.startsWith(`--${prefix}`)).map((token) => token.name.slice(2));
     const item = (name: string, specimen: string) => {
       const token = defined.find((token) => token.name === `--${name}`)!;
-      return `<div class="sp-token">${specimen}<code class="sp-token-name">${escape(name)}</code><span class="sp-token-description">${escape(token.description || token.utility)}</span><span class="sp-token-value" data-sp-value="${escape(name)}">${escape(token.values[theme]!)}</span></div>`;
+      return `<div class="sp-token">${specimen}<code class="sp-token-name">${escapeHtml(name)}</code><span class="sp-token-description">${escapeHtml(token.description || token.utility)}</span><span class="sp-token-value" data-sp-value="${escapeHtml(name)}">${escapeHtml(token.values[theme]!)}</span></div>`;
     };
     const sections = [
       row("Color", group("color-").map((name) => item(name, `<div class="sp-color"><div class="sp-color-fill" style="background:var(--${name})"></div></div>`))),
@@ -126,7 +127,7 @@ export function tokenSpecimen(css: string, title = "Design tokens") {
       row("Shadow", tokens.shadows.filter((token) => token.values[theme]).map((token) => item(token.name.slice(2), `<div class="sp-shadow-stage"><div class="sp-shadow" style="box-shadow:var(${token.name})"></div></div>`))),
     ].filter(Boolean);
     const sheet = sections.join("") || '<p class="sp-empty">Give this system its first decisions.<br>Declare named tokens in an <code>@theme { … }</code> block.</p>';
-    return `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escape(theme)}">${tokens.themes.length > 1 ? `<p class="sp-theme-title">${escape(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
+    return `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escapeHtml(theme)}">${tokens.themes.length > 1 ? `<p class="sp-theme-title">${escapeHtml(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
   };
-  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escape(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${tokens.themes.length > 1 ? ` · ${tokens.themes.length} themes` : ""}</span></header><div class="sp-themes">${tokens.themes.map(pane).join("")}</div></article>${tokenValueScript}`;
+  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escapeHtml(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${tokens.themes.length > 1 ? ` · ${tokens.themes.length} themes` : ""}</span></header><div class="sp-themes">${tokens.themes.map(pane).join("")}</div></article>${tokenValueScript}`;
 }
