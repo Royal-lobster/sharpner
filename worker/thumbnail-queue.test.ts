@@ -4,7 +4,7 @@ vi.mock("cloudflare:workers", () => ({ DurableObject: class { constructor(readon
 const calls = vi.hoisted(() => ({ render: vi.fn() }));
 vi.mock("./data", () => ({ room: (_env: unknown, fileId: string) => ({ renderThumbnails: () => calls.render(fileId) }) }));
 import { ThumbnailQueue } from "./thumbnail-queue";
-import { THUMBNAIL_POLICY as policy } from "./thumbnail-policy";
+import { BACKFILL, THUMBNAIL_POLICY as policy } from "./thumbnail-policy";
 const databases: DatabaseSync[] = [];
 beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000); calls.render.mockReset().mockResolvedValue({ more: false, browserMs: 1000, rendered: 4 }); });
 afterEach(() => { vi.useRealTimers(); for (const db of databases.splice(0)) db.close(); });
@@ -58,6 +58,24 @@ describe("shared automatic render budget", () => {
     await fire(); expect(calls.render).not.toHaveBeenCalled();
     expect(alarm()).toBe((day+1)*86_400_000);
     vi.setSystemTime((day+1)*86_400_000); await fire();
+    expect(calls.render).toHaveBeenCalledTimes(1);
+  });
+
+  it("charges a backfilling file to the global budget only, until the backfill expires", async () => {
+    const {queue, fire, db} = fixture();
+    const file = [...BACKFILL.files][0]!, team = file.split("-")[0];
+    vi.setSystemTime(BACKFILL.until - 86_400_000);
+    const day = Math.floor(Date.now()/86_400_000);
+    db.prepare("INSERT INTO budgets VALUES (?, ?, ?, 0)").run(`file:${file}`,day,policy.fileDailyMs);
+    db.prepare("INSERT INTO budgets VALUES (?, ?, ?, 0)").run(`team:${team}`,day,policy.teamDailyMs);
+    await queue.enqueue(file, Date.now()); await fire();
+    expect(calls.render).toHaveBeenCalledTimes(1);
+    expect(db.prepare("SELECT spent FROM budgets WHERE id = 'global'").get()).toEqual({spent:1000});
+    expect(db.prepare("SELECT spent FROM budgets WHERE id = ?").get(`file:${file}`)).toEqual({spent:policy.fileDailyMs});
+    // Expired: the file's own exhausted budget applies again.
+    vi.setSystemTime(BACKFILL.until + 1000);
+    db.prepare("UPDATE budgets SET day = ? WHERE id != 'global'").run(Math.floor(Date.now()/86_400_000));
+    await queue.enqueue(file, Date.now()); await fire();
     expect(calls.render).toHaveBeenCalledTimes(1);
   });
 

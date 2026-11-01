@@ -13,7 +13,7 @@ import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
-import { THUMBNAIL_POLICY } from "./thumbnail-policy";
+import { backfilling, THUMBNAIL_POLICY } from "./thumbnail-policy";
 import { themeLabel } from "../shared/themes";
 import { bakeTheme } from "../shared/bake-theme";
 import { patchBrand } from "../shared/design-system";
@@ -162,6 +162,11 @@ const MIGRATIONS = [
       sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('component', 'tokens')`);
     }
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
+  // Backfill files render their queued previews without waiting for a viewer; see BACKFILL.
+  (sql: SqlStorage) => {
+    const fileId = sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k = 'fileId'`).toArray()[0]?.v;
+    if (backfilling(fileId)) sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('backfill', '1')`);
   },
 ];
 
@@ -774,7 +779,10 @@ export class FileRoom extends DurableObject<Env> {
     return requested && requested === this.meta("coverNodeId") ? requested : null;
   }
 
-  private hasRenderAudience() { return this.viewedPages().length > 0 || this.coverRequest() !== null; }
+  private hasRenderAudience() { return this.viewedPages().length > 0 || this.coverRequest() !== null || this.backfill(); }
+
+  /** A one-off backfill renders the whole file without a viewer until it finishes or expires. */
+  private backfill() { return this.meta("backfill") === "1" && backfilling(this.meta("fileId")); }
 
   private pendingThumbnails(limit: number = THUMB_BATCH, design?: DesignSystem) {
     return this.sql.exec<{
@@ -786,7 +794,7 @@ export class FileRoom extends DurableObject<Env> {
        WHERE t.thumb_lo IS NULL AND t.tries < ${THUMB_MAX_TRIES}
          AND t.theme = '' AND (? OR n.id = ?)
        ORDER BY n.page_id IN (SELECT value FROM json_each(?)) DESC, t.tries, n.sort, n.id LIMIT ?`,
-      Number(this.viewedPages().length > 0), this.coverRequest(),
+      Number(this.viewedPages().length > 0 || this.backfill()), this.coverRequest(),
       JSON.stringify(this.viewedPages()), limit,
     ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source, design) }));
   }
@@ -794,7 +802,7 @@ export class FileRoom extends DurableObject<Env> {
   private pendingImages(limit: number) {
     return this.sql.exec<{ id: string; src: string; width: number; height: number | null; rev: number }>(
       `SELECT id, src, width, height, rev FROM nodes WHERE ${PENDING_IMAGES} AND (? OR id = ?) LIMIT ?`,
-      Number(this.viewedPages().length > 0), this.coverRequest(), limit,
+      Number(this.viewedPages().length > 0 || this.backfill()), this.coverRequest(), limit,
     ).toArray().map((n) => ({ ...n, kind: "image" as const, html: "" }));
   }
 
@@ -873,7 +881,10 @@ export class FileRoom extends DurableObject<Env> {
     if (Date.now() > notAfter || this.meta("designRev") !== designRev) return { more: true, browserMs: 0, rendered: 0 };
     // Edits and library refreshes reconcile when they happen; only the migration backfill remains.
     this.reconcileMigrated();
-    if (!this.hasPendingThumbnails()) return { more: false, browserMs: 0, rendered: 0 };
+    if (!this.hasPendingThumbnails()) {
+      if (this.backfill()) this.setMeta("backfill", "");
+      return { more: false, browserMs: 0, rendered: 0 };
+    }
     const tabCount = Math.min(THUMB_TABS, this.pendingThumbnails(THUMB_TABS).length + this.pendingImages(THUMB_TABS).length);
     const started = Date.now();
     let rendered = 0;
@@ -915,6 +926,7 @@ export class FileRoom extends DurableObject<Env> {
     console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, browserMs }));
     this.updateCover(fileId);
     const more = this.hasPendingThumbnails();
+    if (!more && this.backfill()) { this.setMeta("backfill", ""); console.log("thumbnail-backfill-done", JSON.stringify({ fileId })); }
     return { more: more && this.hasRenderAudience(), browserMs, rendered, retryAt };
   }
 

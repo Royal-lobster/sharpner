@@ -73,7 +73,7 @@ describe("persisted automatic layout", () => {
     expect(rects().get("legacy-screen")).toMatchObject({ x: 1000, y: 1200 });
     // Two specimen refreshes: the old card presentation, then dark specimens.
     expect(room.node("component")!.rev).toBe(3);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "13" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "14" });
   });
 
   it("refreshes cached token previews once for named themes without rerendering screens or components", () => {
