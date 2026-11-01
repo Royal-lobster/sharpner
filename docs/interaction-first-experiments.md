@@ -2,9 +2,9 @@
 
 ## Decision
 
-Treat frames and components as capable of behavior. A screen's source, named
-scenarios, example data and theme define the design; the viewer's execution mode
-decides whether it shows a poster, plays motion, or receives input. Keep one input
+Treat frames and components as capable of behavior. A screen's source and theme
+define the design; it may also declare example data or named scenarios. The viewer's
+execution mode decides whether it shows a poster, plays motion, or receives input. Keep one input
 owner. Start with one active runtime, and consider a small additional motion
 allowance only when measured work and device conditions permit it. Four active
 dense fixtures worked on this desktop; this is not justification for a universal
@@ -174,6 +174,63 @@ Unknown overview variants still need actual rendering; a bounded pool cannot
 instantly update 300 novel layouts and then reveal matching rasters without that
 path. Retain cached first paint and the existing per-theme reuse while developing
 the [broader live-canvas architecture](live-canvas-rendering.md) in stages.
+
+## Independent review and next decisions
+
+Astra independently reviewed production and prototype code at `79b72ea`, without
+rerunning benchmarks. Its review supports the reusable pieces—content/theme
+identity, cached opening, bounded work, shared compilation and one input owner—but
+does not endorse a final rendering architecture.
+
+The next experiments should answer these questions in order:
+
+1. **Unseen overview convergence.** Use genuinely distinct designs, preview bytes,
+   fonts/assets and mixed dimensions, with a target theme absent from every cache.
+   Include changed component structure and heights. Compare bounded server
+   convergence, a small persistent pool with idle local checkpoints and identical
+   fallback, and prioritizing low-resolution visible server output. Measure correct
+   visible pixel-area coverage over time, stale pixels after eviction, structural
+   fidelity, navigation, memory, bytes, browser seconds and queue age. Include
+   concurrent demand from multiple files: one global browser is a protective policy,
+   not a validated capacity plan. If faithful checkpoints do not improve convergence
+   enough within resource limits, describe new arbitrary-HTML variants as progressive
+   rather than promising an instant dense overview.
+2. **Actual device budgets.** Use the actual camera/planner, distinct posters and
+   representative laptop/phone hardware for cold opening, sustained pan/zoom/input,
+   background/resume and repeated eviction. Compare zero, one and four live
+   documents and compiled CSS versus browser compilation. Measure memory growth,
+   stalls and responsiveness before choosing defaults; a resized desktop viewport
+   does not establish a phone budget.
+3. **Minimum optional behavior contract.** Compare native motion with disposal,
+   a small optional pause/state adapter and the full scenario/clock experiment
+   across independently authored hover, spinner, carousel, deposit, order-book and
+   canvas-chart examples. Include reduced motion, late-created utility classes,
+   noncooperative timers, structural theme changes and incompatible revisions.
+   Simple CSS/WAAPI behavior should require no scenario, seek or serialization code.
+   Pause, state restoration, deterministic poster selection and seeking are separate
+   capabilities; unsupported scripts retain explicit reset/dispose behavior.
+
+These are decision experiments, not new measured guarantees. Keep engineering
+complexity and client energy in the cost comparison: bounded browser-server
+checkpointing may remain the best economic solution. Shared DOM on a dedicated
+preview surface is worth reconsidering only for a demonstrated constrained
+authoring subset. A native scene renderer would deliberately change the supported
+design language; it does not follow automatically from these results.
+
+The current PRs remain increments with different acceptance scopes:
+
+- **PR26:** its cache and render-cost improvements stand independently. Uncached
+  overview latency and queue contention still need capacity validation. This review
+  identifies no architecture blocker, and is not a full correctness/security signoff.
+- **PR28:** enabling interaction currently excludes the node from ordinary live
+  previews, so an inactive enabled design remains on its poster even at close zoom.
+  Theme changes recreate the session and discard local state; automatic motion is
+  absent. These staging limitations prevent claiming that the PR completes the
+  interaction-first model or preserves a deposit during theme comparison. Resource
+  isolation limits also remain as documented in the playback policy.
+
+The full review is preserved outside git at
+`/home/srujangurram/.cache/agent-artifacts/sharpner/2026-11-01/151137-astra-architecture-review-a05708/astra-review.md`.
 
 ## Reproduce and evidence
 
