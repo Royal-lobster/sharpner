@@ -110,3 +110,12 @@ describe("theme selection", () => {
     expect(() => validateTheme(value)).toThrow(/Theme must/);
   });
 });
+
+describe("prepared thumbnail fonts", () => {
+  it("emits embedded font faces as plain CSS, outside the Tailwind source", () => {
+    const html = frameDocument("<p>Hi</p>", { compiledTailwind: true, fontCss: "@font-face{font-family:Inter;src:url(data:font/woff2;base64,AQID)}", design: { tokens: "@theme { --font-sans: Inter; }", components: [] } });
+    expect(html).toContain('<style data-sharpner-fonts>@font-face{font-family:Inter;src:url(data:font/woff2;base64,AQID)}</style>');
+    expect(html).toMatch(/<style type="text\/tailwindcss">@theme static \{ --font-sans: Inter; \}<\/style>/);
+    expect(html).not.toContain("<link");
+  });
+});

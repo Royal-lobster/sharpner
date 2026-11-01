@@ -1,6 +1,7 @@
 import type { Page as BrowserPage } from "@cloudflare/puppeteer";
 import { thumbnailCss } from "./thumbnail-css";
-import { frameDocument, type DesignSystem } from "../shared/types";
+import { frameDocument } from "../shared/types";
+import type { RenderDesign } from "./render-fonts";
 
 const MAX_HEIGHT = 8000;
 
@@ -21,11 +22,11 @@ const tailwindCss = (input: string, candidates: string[]) => thumbnailCss(input,
  * Loads HTML into a browser tab at its viewport width and waits for fonts and Tailwind.
  * Returns the height to capture (fixed height, or measured content height for auto frames).
  */
-export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null; theme?: string | null }, base: string, design: DesignSystem) {
+export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null; theme?: string | null }, base: string, design: RenderDesign) {
   const width = Math.max(1, Math.round(f.width));
   // Seed styles before navigation, so fonts and CSS images load alongside document resources.
   // The DOM pass below covers classes/styles produced by props, slots and authored scripts.
-  const initial = frameDocument(f.html, { base, design, theme: f.theme, compiledTailwind: true });
+  const initial = frameDocument(f.html, { base, design, theme: f.theme, compiledTailwind: true, fontCss: design.fonts });
   const cssSource = [...initial.matchAll(/<style\b[^>]*type=["']text\/tailwindcss["'][^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join("\n");
   const sources = [f.html, ...design.components.map((c) => c.html)].join("\n");
   const candidates = [...sources.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].flatMap((match) => (match[1] ?? match[2] ?? match[3]!).split(/\s+/));
@@ -36,7 +37,7 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
   if (viewport?.width !== width || viewport.height !== viewportHeight || (viewport.deviceScaleFactor ?? 1) !== 1) {
     await page.setViewport({ width, height: viewportHeight });
   }
-  await page.setContent(frameDocument(f.html, { base, design, theme: f.theme, compiledTailwind: true, tailwindCss: seedCss }), { waitUntil: "load", timeout: 20_000 });
+  await page.setContent(frameDocument(f.html, { base, design, theme: f.theme, compiledTailwind: true, tailwindCss: seedCss, fontCss: design.fonts }), { waitUntil: "load", timeout: 20_000 });
   // Component expansion and the theme script have finished parsing. Read actual classes rather
   // than guessing from source (props, slots, SVG and theme overrides may create new classes).
   const { css, classes } = await page.evaluate(() => ({
