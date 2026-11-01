@@ -47,7 +47,7 @@ Geometry uses canvas pixels: x increases rightward; y increases downward. Width 
 - New sections use automatic layout. Add children with `sectionId` and omit x/y. Use `order` to change their sequence.
 - Screens wrap after about four desktop or thirteen phone widths. Other nodes wrap after four previews.
 - Sections with screens each use a row. Other sibling sections fill about √n columns from top to bottom.
-- Sections with only components form catalogs. Each family gets a row and one label. Keep its variants together.
+- Sections with only components form catalogs. Each family gets a row and one label. A tall catalog stacks its families in columns so it grows about as wide as it is tall. Keep its variants together.
 - Free sections or loose nodes force top-level automatic sections into one column. `get_file` and `list_pages` explain this as `stacked`.
 - Set those sections to `layout: "auto"` or put loose nodes in sections to restore columns.
 - `layout: "free"` preserves current positions. Its x/y move the section's visible top-left and all children. Legacy sections stay free until changed.

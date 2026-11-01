@@ -53,6 +53,10 @@ export const CATALOG_GAP = 40;
 export const CATALOG_ROW_GAP = 64;
 export const CATALOG_ROW_WIDTH = 1600;
 export const CATALOG_GUTTER = 160;
+/** Catalogs taller than this multiple of their width split their family rows into columns; shorter ones keep one. */
+export const CATALOG_TALL = 1.5;
+/** Space between catalog columns. The next column's gutter holds its family names, so this only clears the specimens. */
+export const CATALOG_COLUMN_GAP = AUTO_GAP;
 const EMPTY_SECTION = { w: 480, h: 280 };
 
 /** Height used for layout: fixed, else what a live iframe reported, else the renderer's measurement. */
@@ -66,8 +70,7 @@ export const layoutHeight = (f: CanvasNode, live?: Map<string, number>) =>
 export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => number, floating?: Set<string>) {
   const kids = childrenOf(frames);
   const rects = new Map<string, Rect>();
-  const order = new Map(frames.map((f, i) => [f.id, f.order ?? i]));
-  const ordered = (nodes: CanvasNode[]) => [...nodes].sort((a, b) => order.get(a.id)! - order.get(b.id)! || a.id.localeCompare(b.id));
+  const ordered = inOrder(frames);
   const shift = (f: CanvasNode, dx: number, dy: number, seen = new Set<string>()) => {
     if (seen.has(f.id)) return;
     seen.add(f.id);
@@ -102,17 +105,23 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
       const children = ordered((kids.get(f.id) ?? [])
         .filter((k) => !seen.has(k.id) && !(f.layout !== "auto" && floating?.has(k.id) && !floating.has(f.id))));
       const inner = children.map((k) => rectOf(k, new Set(seen)));
-      if (f.layout === "auto" && inner.length) {
-        const catalog = isCatalog(children);
-        const pad = catalog ? CATALOG_PAD : SECTION_PAD, gap = catalog ? CATALOG_GAP : AUTO_GAP, rowGap = catalog ? CATALOG_ROW_GAP : AUTO_ROW_GAP;
+      if (f.layout === "auto" && inner.length && isCatalog(children)) {
+        const gutter = children.some((k) => familyOf(k.name)) ? CATALOG_GUTTER : 0;
+        const block = catalogLayout(children.map((k) => k.name), inner, gutter);
+        children.forEach((child, i) => {
+          const cr = inner[i]!, o = block.offsets[i]!;
+          if (!(floating?.has(child.id) && !floating.has(f.id))) shift(child, f.x + CATALOG_PAD + o.x - cr.x, f.y + CATALOG_PAD + o.y - cr.y);
+        });
+        r = { x: f.x, y: f.y, w: block.w + CATALOG_PAD * 2, h: block.h + CATALOG_PAD * 2 };
+      } else if (f.layout === "auto" && inner.length) {
+        const pad = SECTION_PAD, gap = AUTO_GAP, rowGap = AUTO_ROW_GAP;
         // Screens directly in a section make it a flow, which wraps only when it runs out of width.
         const flow = children.some((k) => k.kind === "frame");
-        const gutter = catalog && children.some((k) => familyOf(k.name)) ? CATALOG_GUTTER : 0;
         // Keep the original slot while a child floats. This prevents the drop target collapsing
         // under the pointer and the rest of the canvas jumping before the drop is committed.
         const place = (i: number, dx: number, dy: number) => {
           const child = children[i]!, cr = inner[i]!;
-          if (!(floating?.has(child.id) && !floating.has(f.id))) shift(child, f.x + pad + gutter + dx - cr.x, f.y + pad + dy - cr.y);
+          if (!(floating?.has(child.id) && !floating.has(f.id))) shift(child, f.x + pad + dx - cr.x, f.y + pad + dy - cr.y);
         };
         let x = 0, y = 0, rowHeight = 0, columns = 0, width = 0;
         for (let i = 0; i < children.length; i++) {
@@ -126,10 +135,7 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
             i = end - 1;
             continue;
           }
-          // Catalogs wrap per family instead of after a fixed column count.
-          const wraps = catalog
-            ? familyOf(child.name) !== familyOf(children[i - 1]?.name ?? "") || x + cr.w > CATALOG_ROW_WIDTH
-            : children[i - 1]?.kind === "section" || !flow && columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
+          const wraps = children[i - 1]?.kind === "section" || !flow && columns >= AUTO_COLUMNS || x + cr.w > AUTO_ROW_WIDTH;
           if (columns && wraps) {
             y += rowHeight + rowGap; x = 0; rowHeight = 0; columns = 0;
           }
@@ -138,7 +144,7 @@ export function layoutRects(frames: CanvasNode[], heightOf: (f: CanvasNode) => n
           rowHeight = Math.max(rowHeight, cr.h);
           x += cr.w + gap; columns++;
         }
-        r = { x: f.x, y: f.y, w: gutter + width + pad * 2, h: y + rowHeight + pad * 2 };
+        r = { x: f.x, y: f.y, w: width + pad * 2, h: y + rowHeight + pad * 2 };
       } else {
         r = inner.length ? pad(union(inner), SECTION_PAD) : { x: f.x, y: f.y, ...EMPTY_SECTION };
       }
@@ -185,6 +191,81 @@ export function pageArrangement(pageNodes: readonly CanvasNode[]) {
   return { arrangement: "stacked" as const, stackedBy };
 }
 
+/** Sorts nodes by `order`, falling back to their position in `frames`, then id. */
+const inOrder = (frames: readonly CanvasNode[]) => {
+  const order = new Map(frames.map((f, i) => [f.id, f.order ?? i]));
+  return (nodes: readonly CanvasNode[]) => [...nodes].sort((a, b) => order.get(a.id)! - order.get(b.id)! || a.id.localeCompare(b.id));
+};
+
+/**
+ * Offsets inside a catalog's padding. Each component family ("Chip" in "Chip/Active") is a block that starts its
+ * own row and wraps at the row width, with its name in a gutter to the left. A catalog much taller than wide stacks
+ * these blocks in columns instead, so a long Design System grows as wide as it is tall. Columns keep family order,
+ * top to bottom then left to right, and split where their heights balance.
+ */
+export function catalogLayout(names: readonly string[], sizes: readonly { w: number; h: number }[], gutter: number) {
+  const blocks: { offsets: { x: number; y: number }[]; w: number; h: number }[] = [];
+  for (let i = 0; i < sizes.length;) {
+    const start = i, family = familyOf(names[i]!), offsets: { x: number; y: number }[] = [];
+    let x = 0, y = 0, rowHeight = 0, w = 0;
+    for (; i < sizes.length && (i === start || familyOf(names[i]!) === family); i++) {
+      const s = sizes[i]!;
+      if (x && x + s.w > CATALOG_ROW_WIDTH) { y += rowHeight + CATALOG_ROW_GAP; x = 0; rowHeight = 0; }
+      offsets.push({ x, y });
+      w = Math.max(w, x + s.w); rowHeight = Math.max(rowHeight, s.h); x += s.w + CATALOG_GAP;
+    }
+    blocks.push({ offsets, w, h: y + rowHeight });
+  }
+  const arrange = (starts: number[]) => {
+    const offsets: { x: number; y: number }[] = [];
+    let x = 0, h = 0;
+    starts.forEach((start, c) => {
+      const column = blocks.slice(start, starts[c + 1] ?? blocks.length);
+      let y = 0;
+      for (const b of column) { for (const o of b.offsets) offsets.push({ x: x + gutter + o.x, y: y + o.y }); y += b.h + CATALOG_ROW_GAP; }
+      h = Math.max(h, y - CATALOG_ROW_GAP);
+      x += gutter + Math.max(...column.map((b) => b.w)) + CATALOG_COLUMN_GAP;
+    });
+    return { offsets, w: x - CATALOG_COLUMN_GAP, h };
+  };
+  let best = arrange([0]);
+  if (best.h <= best.w * CATALOG_TALL) return best;
+  // Closest to square wins, within the same width budget as tiled sections.
+  const skew = (a: { w: number; h: number }) => Math.abs(Math.log(a.w / a.h));
+  for (let columns = 2; columns <= blocks.length; columns++) {
+    const next = arrange(balancedStarts(blocks.map((b) => b.h), columns, CATALOG_ROW_GAP));
+    if (next.w > TILE_WIDTH) break;
+    if (skew(next) < skew(best)) best = next;
+  }
+  return best;
+}
+
+/**
+ * First index of each of `columns` contiguous runs of `heights`, chosen so the tallest run (with gaps between
+ * members) is as short as possible, then so the runs are as even as possible. Remaining ties make the last run the shortest.
+ */
+export function balancedStarts(heights: readonly number[], columns: number, gap: number) {
+  const n = heights.length, sum = [0];
+  for (const h of heights) sum.push(sum.at(-1)! + h);
+  const run = (i: number, j: number) => sum[j]! - sum[i]! + (j - i - 1) * gap;
+  // best[c][j]: the tallest run, then the sum of squared runs, when the first j heights fill c columns.
+  type Cost = { tallest: number; spread: number; from: number };
+  const best: Cost[][] = [Array.from({ length: n + 1 }, (_, j) => ({ tallest: j ? Infinity : 0, spread: 0, from: 0 }))];
+  for (let c = 1; c <= columns; c++) {
+    best.push(Array.from({ length: n + 1 }, () => ({ tallest: Infinity, spread: Infinity, from: 0 })));
+    for (let j = c; j <= n; j++) {
+      for (let i = c - 1; i < j; i++) {
+        const prev = best[c - 1]![i]!, h = run(i, j), cur = best[c]![j]!;
+        const tallest = Math.max(prev.tallest, h), spread = prev.spread + h * h;
+        if (tallest < cur.tallest || tallest === cur.tallest && spread <= cur.spread) best[c]![j] = { tallest, spread, from: i };
+      }
+    }
+  }
+  const starts: number[] = [];
+  for (let c = columns, j = n; c > 0; c--) starts.unshift(j = best[c]![j]!.from);
+  return starts;
+}
+
 const isCatalog = (children: CanvasNode[]) => children.length > 0 && children.every((k) => k.kind === "component");
 
 /** "Chip" for "Chip/Active"; empty for a name without a family. Matches the specimens' componentName. */
@@ -198,18 +279,16 @@ export function catalogSectionIds(frames: CanvasNode[]) {
   return ids;
 }
 
-/** Where each catalog row's family name goes: the gutter beside the first specimen of each family. */
+/** Where each catalog family's name goes: the gutter beside its first specimen, in whichever column it landed. */
 export function catalogFamilyLabels(frames: CanvasNode[], rects: ReadonlyMap<string, Rect>, catalogs: ReadonlySet<string>) {
   const labels: { family: string; x: number; y: number }[] = [];
-  const kids = childrenOf(frames);
+  const kids = childrenOf(frames), ordered = inOrder(frames);
   for (const id of catalogs) {
-    const section = rects.get(id);
-    const placed = (kids.get(id) ?? []).flatMap((node) => rects.has(node.id) ? [{ node, rect: rects.get(node.id)! }] : [])
-      .sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
-    if (!section) continue;
-    placed.forEach(({ node, rect }, i) => {
-      const family = familyOf(node.name);
-      if (family && family !== familyOf(placed[i - 1]?.node.name ?? "")) labels.push({ family, x: section.x + CATALOG_PAD, y: rect.y });
+    if (!rects.has(id)) continue;
+    const placed = ordered(kids.get(id) ?? []).filter((node) => rects.has(node.id));
+    placed.forEach((node, i) => {
+      const family = familyOf(node.name), rect = rects.get(node.id)!;
+      if (family && family !== familyOf(placed[i - 1]?.name ?? "")) labels.push({ family, x: rect.x - CATALOG_GUTTER, y: rect.y });
     });
   }
   return labels;
