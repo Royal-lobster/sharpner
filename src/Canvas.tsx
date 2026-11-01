@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
 import { previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
-import { effectiveTheme, themeLabel } from "../shared/themes";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
 import { colorFor, uploadImage } from "./api";
@@ -272,7 +271,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     return () => room.needSources([]);
   }, [room, liveIds.join(",")]);
   const design = room.design();
-  const reportHeight = useCallback((id: string, height: number) => room.setHeight(id, height), [room]);
 
   // Paint the small frames onto the raster layer, in sync with the DOM layer's transform.
   const rasterRef = useRef<HTMLCanvasElement>(null);
@@ -700,11 +698,9 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               // A session is keyed by revision, so it waits for the matching source instead of starting stale.
               html={src && (f.id !== playingId || src.rev === f.rev) ? renderedHtml(f, src.source) : undefined}
               design={design}
-              onHeight={reportHeight}
               playback={f.id === playingId ? playback : undefined}
               // Members play from the selection toolbar; link viewers cannot select, so frames offer it.
               onPlay={readOnly && onInteract && canInteract(f) && screenWidth >= PLAY_BUTTON_MIN_WIDTH ? startInteraction : undefined}
-              theme={effectiveTheme(f, room.fileTheme)}
               selected={selected.has(f.id)}
               peerColor={peerSelections.get(f.id)}
               agent={room.agentActivity.get(f.id)?.name ?? null}
@@ -787,11 +783,9 @@ type FrameNodeProps = {
   live: boolean;
   html: string | undefined;
   design: DesignSystem;
-  onHeight: (id: string, height: number) => void;
   /** Present only on the design being played. */
   playback?: { reset: number; stop: (reason?: "timeout") => void };
   onPlay?: (id: string) => void;
-  theme: string | undefined;
   selected: boolean;
   peerColor: string | undefined;
   /** Name of the agent working on this node right now, if any. */
@@ -802,9 +796,8 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, onHeight, playback, onPlay, theme, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, playback, onPlay, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
   const settling = doneAt !== undefined;
-  const reportHeight = useCallback((height: number) => onHeight(f.id, height), [onHeight, f.id]);
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
   const top = tier === "hi" && hi && hi !== lo ? hi : lo;
@@ -834,12 +827,12 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
         {!lo && !showLive && !playback && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {showLive && <LiveFrame id={f.id} html={html} design={design} theme={theme} width={f.width} height={height} onHeight={reportHeight} />}
+        {showLive && <LiveFrame id={f.id} html={html} design={design} width={f.width} height={height} />}
         {playback && (html === undefined
           ? <InteractionLoading onTimeout={() => playback.stop("timeout")} />
           // A new key is a new session: Reset, or any change to what the design renders.
-          : <InteractionFrame key={`${f.rev}:${f.width}:${theme ?? ""}:${designKey(design)}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`}
-              html={html} design={design} theme={theme} width={f.width} height={height} onStop={playback.stop} />)}
+          : <InteractionFrame key={`${f.rev}:${f.width}:${designKey(design)}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`}
+              html={html} design={design} width={f.width} height={height} onStop={playback.stop} />)}
         {(agent || settling) && <AgentSheen />}
       </div>
       {(agent || settling) && <Trace doneAt={doneAt} />}
@@ -865,7 +858,7 @@ function designKey(design: DesignSystem) {
   let key = designKeys.get(design);
   if (key === undefined) {
     let hash = 0x811c9dc5;
-    const text = [design.tokens, ...design.components.map((c) => `${c.tag}\0${c.theme ?? ""}\0${c.html}`)].join("\u0001");
+    const text = [design.tokens, ...design.components.map((c) => `${c.tag}\0${c.html}`)].join("\u0001");
     for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
     designKeys.set(design, key = `${text.length}:${(hash >>> 0).toString(36)}`);
   }
@@ -917,8 +910,7 @@ const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", 
 /** Catalog rows already name the family in their gutter, so specimens show only their variant. */
 function nodeLabel(f: CanvasNode, catalogs: ReadonlySet<string>) {
   const name = catalogs.has(f.parentId ?? "") && familyOf(f.name) ? componentName(f.name).variant : f.name;
-  // A component theme override shares its default's name; the theme tells them apart.
-  return KIND_PREFIX[f.kind] + name + (f.kind === "component" && f.theme ? ` · ${themeLabel(f.theme)}` : "");
+  return KIND_PREFIX[f.kind] + name;
 }
 
 /** Previews behind their node's revision: kept on screen, dimmed, until the renderer catches up. */
@@ -963,7 +955,7 @@ export function paintRaster(
     const pixels = side * side * r.h / Math.max(1, r.w);
     const priority = (area > 0 ? 1e12 : 0) + (selected.has(f.id) ? 1e9 : 0) + area * 100 - distance;
     // Warm overview pixels only after the shown image is ready. The existing decoded-pixel,
-    // entry and network budgets still apply, and current-theme requests always win admission.
+    // entry and network budgets still apply, and current-revision requests always win admission.
     const alternatives = upgrades?.enabled && upgrades.settled && area > 0 && thumbnails?.get(url)
       ? Object.values(f.thumbnails ?? {}).filter((t) => t.rev === f.rev && t.lo !== url).map((t) => ({ url: t.lo, pixels, priority: priority - 2e12 })) : [];
     return [{ url, pixels, priority }, ...alternatives];
@@ -1008,13 +1000,13 @@ export function paintRaster(
     const sharper = f.kind !== "image" && f.thumbHi ? highPreviews?.get(f.thumbHi) : null;
     const box = !sharper && Boolean(url && thumbnails && !thumbnails.has(url));
     const current = sharper ?? (!box && url ? thumbnails?.get(url) ?? null : null);
-    // A new revision's preview (after a theme or source change) replaces the old one only once loaded,
+    // A new revision's preview (after a source change) replaces the old one only once loaded,
     // instead of blanking the frame in between.
     const img = current ?? (!box && url ? painted.get(f.id) ?? null : null);
     if (img) paintedNow.set(f.id, img);
     const born = fx.appeared.get(f.id);
     const fresh = fx.reducedMotion || born === undefined ? 1 : Math.min(1, (fx.now - born) / MATERIALIZE_MS);
-    // A preview from an earlier revision (say, the previous theme) stays dimmed until its re-render lands.
+    // A preview from an earlier revision (say, the previous revision) stays dimmed until its re-render lands.
     ctx.globalAlpha = (1 - (1 - fresh) ** 3) * (img && outdated(f) ? OUTDATED_ALPHA : 1);
     ctx.fillStyle = box ? COLORS.box : img ? "#fff" : COLORS.placeholder;
     if (f.kind !== "image" || !img) ctx.fillRect(x, y, sw, sh);

@@ -1,5 +1,9 @@
 # A canvas that adapts to changes
 
+> 2026-11-02: theme switching was removed. Screens render exactly their authored
+> HTML, so the live-iframe theme hot-swap and the "theme change" measurements
+> below are historical experiments, not current behavior.
+
 The interactive representation should be HTML that can change locally. A raster
 is a useful loading and navigation cache, but cannot respond to a new font,
 component tree or layout until something renders those changes. Keep the fast
@@ -83,17 +87,15 @@ documents would avoid some of that work, but was not implemented or measured.
 
 The persistent prototype manually expanded components and deliberately rejected
 executable authored behavior. It is evidence for the rendering approach, not
-production runtime code. Shared component/theme semantics must remain in
+production runtime code. Shared component semantics must remain in
 `frameDocument`; do not maintain a second component engine.
 
 ## What is safe to ship now
 
 The production change keeps the existing overview admission limits and raster
-first paint. An already-live, eligible declarative document can receive a
-versioned theme update inside its existing opaque sandbox. Its original authored
-theme attributes are restored before applying another choice. Unsupported author
-behavior, structural component definitions, content/design edits and cold assets
-retain the existing fresh-document swap. Only the latest request may report
+first paint. (Historical: this shipped a warm theme update for already-live documents; it was
+removed with theme switching.) Content/design edits and cold assets use the
+fresh-document swap. Only the latest request may report
 readiness or height. This improves the shared runtime without committing to an
 unbounded overview DOM or trusting a capture library.
 
@@ -129,7 +131,7 @@ and then evict them: without a matching bitmap, eviction reveals stale pixels.
    count. Validate actual low-end devices and separately measure browser native
    memory and sustained frame time.
 4. Add a faithful local bitmap path only when available. Keep new live pixels
-   resident until their exact content/theme bitmap exists. With a small pool,
+   resident until their exact content bitmap exists. With a small pool,
    progressively process larger dirty overviews; do not promise simultaneous
    instant changes beyond its budget. Deduplicate uploads and checkpoint only
    useful snapshots instead of persisting every intermediate edit.
@@ -154,9 +156,9 @@ than translating everything into a limited drawing scene. It also argues against
 running hundreds of scripted documents at overview zoom. Inactive interactive
 designs need a chosen poster state and disposal of their executable runtime;
 pausing CSS animations alone does not stop authored JavaScript timers. Reset
-recreates the initial document. Preserving playback state across theme or source
-changes needs an explicit runtime contract; the conservative theme fast path in
-this PR excludes authored scripts and retains their existing reload semantics.
+recreates the initial document. Preserving playback state across source
+changes needs an explicit runtime contract; authored scripts keep their existing
+reload semantics.
 
 [Interaction playback](interaction-playback.md) now supplies viewer-local
 Interact/Stop/Reset controls and one disposable sandboxed document. Normal canvas

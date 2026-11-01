@@ -15,7 +15,7 @@ Use custom HTML for layout and unique content. Extract repeated feature markup i
 - Use viewport widths of 1440 for desktop, 1280 for compact desktop, 768 for tablet, or 390 for mobile.
 - Use a fixed mobile height of 844. Omit desktop height to fit content.
 
-Set the file theme with `set_theme`. Use explicit frame `theme` fields for comparisons such as Light, Dark, and UwU. Null restores inheritance. Leave new HTML roots unthemed so frames can inherit. Components use the screen's theme.
+Sharpner renders exactly the HTML you write; it never applies a theme. For a themed screen, put `data-theme="<name>"` on the root element (names from `get_design_system.themes`). To compare themes, make separate screens, each with its own root theme.
 
 Keep theme decoration with its feature. Reuse a screen component when useful. Use a separate frame for a different structure.
 

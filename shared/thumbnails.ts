@@ -1,4 +1,3 @@
-import { effectiveTheme } from "./themes";
 import type { CanvasNode } from "./types";
 
 /** Empty theme key means As authored (also used by theme-independent token specimens). */
@@ -6,9 +5,10 @@ export type Thumbnail = { rev: number; lo: string; hi: string; measuredHeight: n
 export type ThemeThumbnails = Record<string, Thumbnail>;
 
 /** Select without throwing away the last image: missing pairs retain today's dimmed fallback. */
-export function selectThumbnail<T extends CanvasNode>(node: T, fileTheme: string | null): T {
+export function selectThumbnail<T extends CanvasNode>(node: T): T {
   if (!node.thumbnails) return node;
-  const theme = effectiveTheme(node, fileTheme) ?? "";
+  // Themes are authored in HTML; every node keeps one pair under the empty key.
+  const theme = "";
   const thumbnail = node.thumbnails[theme];
   if (thumbnail?.rev === node.rev) return {
     ...node, thumbLo: thumbnail.lo, thumbHi: thumbnail.hi, thumbRev: thumbnail.rev,

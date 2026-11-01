@@ -8,7 +8,7 @@ describe("component specimens", () => {
     expect(componentName("Navigation/Item/Active")).toEqual({ family: "Navigation", variant: "Item / Active" });
     expect(componentName("Card")).toEqual({ family: "Card", variant: "Default" });
     const html = renderedHtml({ kind: "component", name: "Button/Primary" }, '<button>{{label|Continue}}</button>');
-    expect(html).toContain('<x-button-primary data-sharpner-definition=""></x-button-primary>');
+    expect(html).toContain('<x-button-primary></x-button-primary>');
     expect(html).toContain('aria-label="Button / Primary component"');
     expect(html).toContain('label <em>&quot;Continue&quot;</em>');
     expect(html).not.toMatch(/Hover|Focus|Disabled/);
@@ -25,14 +25,14 @@ describe("component specimens", () => {
     const html = renderedHtml({ kind: "component", name: "Card" }, source);
     expect(html).toContain('multiple defaults');
     expect(html).toContain('accepts content');
-    expect(html).toContain('<x-card data-sharpner-definition=""></x-card>');
+    expect(html).toContain('<x-card></x-card>');
     expect(html).not.toContain('<x-card>Sample');
   });
 
   it("keeps board chrome out of a legacy fixed-height component's preview", () => {
     const compact = renderedHtml({ kind: "component", name: "Button/Primary", height: 64 }, "<button>Continue</button>");
     expect(compact).toContain('sp-component--compact');
-    expect(compact).toContain('<x-button-primary data-sharpner-definition=""></x-button-primary>');
+    expect(compact).toContain('<x-button-primary></x-button-primary>');
     expect(compact).not.toContain('<footer');
     const automatic = renderedHtml({ kind: "component", name: "Button/Primary", height: null }, "<button>Continue</button>");
     expect(automatic).not.toContain('class="sp-component sp-component--fixed');

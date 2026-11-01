@@ -231,16 +231,9 @@ body:has(.editor) { --toast-offset: 84px; }
 .dock-button > span:first-of-type { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .dock-chevron { flex: none; transition: transform 0.16s var(--ease); }
 .dock-page-button[aria-expanded=true] .dock-chevron { transform: rotate(180deg); }
-.dock-theme-button { gap: 6px; max-width: 150px; }
-.dock-theme-button > .theme-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-/* A theme in its own colors; the custom properties it carries resolve its token references. */
-.theme-swatch { position: relative; flex: none; width: 14px; height: 14px; border-radius: 4px; background: var(--swatch-bg, var(--muted)); box-shadow: inset 0 0 0 1px rgb(255 240 215 / 0.22); }
-.theme-swatch::after { content: ""; position: absolute; right: 2px; bottom: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--swatch-accent, transparent); }
-.theme-menu-head, .file-menu-head { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 6px; }
-.theme-menu-head strong, .file-menu-head strong { color: var(--foreground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.theme-menu-head span, .file-menu-head span { line-height: 1.4; }
-.theme-menu-note { flex-direction: column; align-items: flex-start; gap: 2px; color: var(--muted-foreground); }
-.theme-menu-action { color: var(--primary); font-weight: 500; }
+.file-menu-head { display: flex; flex-direction: column; gap: 2px; padding: 8px 8px 6px; }
+.file-menu-head strong { color: var(--foreground); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-menu-head span { line-height: 1.4; }
 .dock-divider { flex: none; align-self: center; height: 18px !important; margin-inline: 3px; }
 .status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
@@ -301,7 +294,6 @@ body:has(.editor) { --toast-offset: 84px; }
 .selection-divider { flex: none; height: 16px !important; margin-inline: 6px 2px; }
 .selection-action { flex: none; max-width: 150px; color: var(--foreground); }
 .selection-action > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.selection-action.inherits { color: var(--muted-foreground); }
 .selection-cover-on { display: grid; flex: none; place-items: center; width: 24px; height: 24px; color: var(--primary); }
 .selection-cover-on svg { width: 14px; height: 14px; }
 .zoom { position: absolute; z-index: 20; right: calc(16px + var(--safe-right)); bottom: calc(16px + var(--safe-bottom)); }
@@ -321,7 +313,6 @@ body:has(.editor) { --toast-offset: 84px; }
   .dock-people-button > .presence-dot { display: none; }
   .selection-bar { top: calc(64px + var(--safe-top)); left: calc(10px + var(--safe-left)); right: auto; margin: 0; max-width: calc(100% - 20px - var(--safe-left) - var(--safe-right)); }
   .selection-agents { display: none; }
-  .dock-theme-button > .theme-label { display: none; }
   .zoom { top: auto; right: calc(10px + var(--safe-right)); bottom: calc(max(10px, var(--safe-bottom)) + var(--keyboard)); }
   .zoom .zoom-step, .zoom-divider { display: none; }
 }

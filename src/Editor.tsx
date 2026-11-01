@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
 import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck, IconPlayerPlay } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
@@ -6,8 +6,6 @@ import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
 import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
-import { themeNames, themeSwatches } from "../shared/themes";
-import { FileThemeMenu, ScreenThemeMenu } from "./components/theme-menu";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canInteract } from "./canvas-render-plan";
@@ -135,8 +133,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   room: Room; meta: FileMeta; user: User; onChange: (f: Partial<FileInfo>) => void; onShare?: (token: string | null) => void; readOnly?: boolean;
 }) {
   useSyncExternalStore(room.subscribe, room.getVersion);
-  const tokens = room.design().tokens;
-  const swatches = useMemo(() => themeSwatches(tokens), [tokens]);
   const desktop = useDesktop();
   const { file, workspace } = meta;
   const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes } = useCanvasLocation(file.id, room);
@@ -227,18 +223,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
   const coverCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "image") ? selected[0]! : null;
-  const themeScreen = selected.length === 1 && selected[0]!.kind === "frame" ? selected[0]! : null;
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
-  const themes = themeNames(tokens);
-  const overriding = [...room.nodes.values()].filter((node) => node.kind === "frame" && !!node.theme);
-  const hasThemes = themes.length > 1 || room.fileTheme !== null || overriding.length > 0;
-  const followFileTheme = async () => {
-    const ok = await askConfirm({
-      title: overriding.length === 1 ? "Make 1 screen follow the file theme?" : `Make ${overriding.length} screens follow the file theme?`,
-      message: "They drop their own theme and use the file theme from now on.", confirm: "Follow file theme",
-    });
-    if (ok) room.send(overriding.map((node) => ({ t: "node.put", id: node.id, node: { theme: null } })));
-  };
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
   const describePage = async (p: Page) => {
     const description = await askText({
@@ -271,12 +256,10 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
             <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
             <span className="selection-agents">visible to agents</span>
-            {(themeScreen && hasThemes || coverCandidate || playable) && <Separator orientation="vertical" className="selection-divider" />}
+            {(coverCandidate || playable) && <Separator orientation="vertical" className="selection-divider" />}
             {playable && <Tooltip><TooltipTrigger asChild>
               <Button variant="ghost" size="sm" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}><IconPlayerPlay aria-hidden />Interact</Button>
             </TooltipTrigger><TooltipContent side="bottom">Try clicks, typing and scrolling. Nothing you do is saved.</TooltipContent></Tooltip>}
-            {hasThemes && themeScreen && <ScreenThemeMenu themes={themes} swatches={swatches} value={themeScreen.theme ?? null} fileTheme={room.fileTheme}
-              disabled={room.status !== "open"} onChange={(theme) => room.send([{ t: "node.put", id: themeScreen.id, node: { theme } }])} />}
             {coverCandidate && (room.coverNodeId === coverCandidate.id
               ? <Tooltip><TooltipTrigger asChild><span className="selection-cover-on" role="img" aria-label="File cover"><IconPhotoCheck aria-hidden /></span></TooltipTrigger><TooltipContent side="bottom">This is the file cover</TooltipContent></Tooltip>
               : <Tooltip><TooltipTrigger asChild>
@@ -372,11 +355,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               ))}
             </ItemGroup>
           </DockPanel>
-          {!readOnly && hasThemes && <>
-            <Separator orientation="vertical" className="dock-divider dock-theme-divider" />
-            <FileThemeMenu themes={themes} swatches={swatches} value={room.fileTheme} overrides={overriding.length} disabled={room.status !== "open"}
-              onChange={(theme) => room.send([{ t: "theme.set", theme }])} onFollowAll={() => void followFileTheme()} />
-          </>}
         </ButtonGroup></nav>
       </div>
       {!readOnly && <div className="editor-dock editor-collaboration" onKeyDown={(e) => e.stopPropagation()}>

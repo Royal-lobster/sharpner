@@ -2,7 +2,6 @@
 import { componentSpecimen, tokenSpecimen } from "./specimens";
 import type { ThemeThumbnails } from "./thumbnails";
 import type { SessionPrincipal } from "./session-principal";
-import { componentTheme, documentThemeScript, type FrameThemeChannel } from "./themes";
 export { tokenNames } from "./specimens";
 
 /**
@@ -34,11 +33,6 @@ export type CanvasNode = {
   parentId: string | null;
   kind: NodeKind;
   name: string;
-  /**
-   * Frames: named theme override; null or missing inherits the file's theme.
-   * Components: the theme this definition serves; null or missing is the default definition.
-   */
-  theme?: string | null;
   x: number;
   y: number;
   /** Stable sibling order for automatic layout. Optional only for older client metadata. */
@@ -57,7 +51,7 @@ export type CanvasNode = {
   /** Raster previews used when the node is small on screen (lo ≈ 256px wide for the canvas layer, hi ≈ 1280px wide). */
   thumbLo: string | null;
   thumbHi: string | null;
-  /** Bumps whenever what the node renders changes (its source, size, or the design system it uses; frame theme selection does not bump it). */
+  /** Bumps whenever what the node renders changes (its source, size, or the design system it uses). */
   rev: number;
   /** Revision the current thumbnails show. Behind `rev` while the renderer catches up. */
   thumbRev?: number;
@@ -72,7 +66,7 @@ export const previewCurrent = (node: Pick<CanvasNode, "rev" | "thumbRev" | "thum
   !!node.thumbHi && (node.thumbRev === undefined || node.thumbRev >= node.rev);
 
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
-export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "theme" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
+export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "x" | "y" | "order" | "layout" | "description" | "width" | "height" | "src" | "thumbLo">> & {
   source?: string;
 };
 
@@ -83,8 +77,6 @@ export type Op =
   /** Creates the node if `id` is new, otherwise merges the given fields. */
   | { t: "node.put"; id: string; node: NodeInput }
   | { t: "node.del"; ids: string[] }
-  /** File theme inherited by frames without an override; null preserves authored theme contexts. */
-  | { t: "theme.set"; theme: string | null }
   /** Pins a frame or image as the file's workspace cover; null restores automatic selection. */
   | { t: "cover.set"; id: string | null };
 
@@ -108,11 +100,8 @@ export type Presence = {
 
 export type Peer = Actor & Presence & { cid: string };
 
-/**
- * A component's HTML. A definition with a `theme` overrides the default inside that theme only, for
- * themes whose components need different structure (decoration, slots, layout), not just token values.
- */
-export type ComponentDef = { tag: string; html: string; theme?: string | null };
+/** A component's HTML, one definition per tag. */
+export type ComponentDef = { tag: string; html: string };
 /** Everything a frame needs to render consistently: token CSS and component definitions. */
 export type DesignSystem = { tokens: string; components: ComponentDef[] };
 export type LibraryInfo = { fileId: string; name: string; design: DesignSystem; catalog?: DesignCatalog };
@@ -123,9 +112,9 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; brand?: Brand; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null; fileTheme?: string | null }
+  | { type: "init"; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; brand?: Brand; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
-  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; brand?: Brand; coverNodeId?: string | null; fileTheme?: string | null; by: Actor | null }
+  | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; brand?: Brand; coverNodeId?: string | null; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
   /** An agent is looking at or working on these nodes without changing them (reading, screenshotting). */
   | { type: "activity"; by: Actor; ids: string[] }
@@ -142,7 +131,7 @@ export function componentTag(name: string) {
 
 /**
  * A file's design system: its library's, overridden by its own (own tokens come last in CSS). Components
- * are replaced per tag: a file defining a tag in any theme owns every definition of that tag.
+ * are replaced per tag.
  */
 export function mergeDesignSystems(library: DesignSystem | null | undefined, own: DesignSystem): DesignSystem {
   if (!library) return own;
@@ -157,29 +146,24 @@ export function mergeDesignSystems(library: DesignSystem | null | undefined, own
  * Defines every component as a light-DOM custom element. `{{prop|default}}` placeholders take the element's
  * attributes and `<slot></slot>` takes its children. Expansion waits until the document is parsed, so an
  * instance's children are always there to slot (elements can upgrade mid-parse if a tag is already defined).
- *
- * Each instance uses the definition for the theme it renders in (see componentTheme), else the default.
- * Specimens pin their own definition with `data-sharpner-definition`, so a default stays visible in any theme.
- * Expansion runs before the document theme is applied, so the theme script announces it as `__sharpnerTheme`.
  */
 const componentScript = (defs: ComponentDef[]) => {
-  const byTag: Record<string, Record<string, string>> = {};
-  for (const d of defs) (byTag[d.tag] ??= {})[d.theme ?? ""] = d.html;
+  const byTag: Record<string, string> = {};
+  for (const d of defs) byTag[d.tag] = d.html;
   return String.raw`<script>(()=>{
 const C=${JSON.stringify(byTag).replace(/</g, "\\u003c")};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
-const T=${componentTheme.toString()};
 for(const[t,d]of Object.entries(C))if(!customElements.get(t))customElements.define(t,class extends HTMLElement{
 connectedCallback(){document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>this.x(),{once:true}):this.x()}
 x(){if(this._x)return;this._x=1;if(this.parentElement&&this.parentElement.closest(t))return;
-const p=this.getAttribute("data-sharpner-definition"),h=d[p??T(this,window.__sharpnerTheme)]??d[""];if(h==null)return;
+const h=d;
 const kids=this.innerHTML;this.style.display="contents";
 this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
 }});})()</script>`;
 };
 
 /** Wraps HTML into the document rendered inside a live iframe, in thumbnails, and in screenshots. */
-export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; theme?: string | null; compiledTailwind?: boolean; tailwindCss?: string; fontCss?: string; themeChannel?: FrameThemeChannel } = {}): string {
+export function frameDocument(html: string, opts: { base?: string; measure?: boolean; design?: DesignSystem; compiledTailwind?: boolean; tailwindCss?: string; fontCss?: string } = {}): string {
   // Remote @imports (web fonts) become <link>s; the rest is Tailwind CSS that defines the token utilities.
   const imports: string[] = [];
   const css = (opts.design?.tokens ?? "").replace(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g, (_, href: string) => {
@@ -199,10 +183,10 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
     (opts.fontCss ? `<style data-sharpner-fonts>${opts.fontCss.replace(/<\//g, "<\\/")}</style>` : "") +
     tokens;
   // Reports content height to the canvas so auto-height frames can size themselves.
-  const probe = opts.measure && !opts.themeChannel
+  const probe = opts.measure
     ? `<script>(()=>{let h=0;const post=()=>{const n=Math.ceil(document.body.getBoundingClientRect().height);if(n!==h){h=n;parent.postMessage({sharpnerHeight:n},"*")}};new ResizeObserver(post).observe(document.body);addEventListener("load",post)})()</script>`
     : "";
-  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + documentThemeScript(opts.theme, opts.themeChannel) + probe;
+  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
     const withHead = /<head[^>]*>/i.test(html)
       ? html.replace(/<head[^>]*>/i, (m) => m + head)
@@ -213,8 +197,8 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
 }
 
 /** Screens retain their source; design-system nodes get a consistent specimen presentation. */
-export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "height" | "theme">>, source: string) {
-  if (n.kind === "component") return componentSpecimen(n.name, componentTag(n.name), source, n.height, n.theme);
+export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "height">>, source: string) {
+  if (n.kind === "component") return componentSpecimen(n.name, componentTag(n.name), source, n.height);
   if (n.kind === "tokens") return tokenSpecimen(source, n.name);
   return source;
 }

@@ -7,7 +7,7 @@ import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
 import { layoutHeight, layoutRects, pageArrangement, union, type Rect } from "../shared/layout";
 import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type CanvasNode, type NodeInput, type Op, type Page } from "../shared/types";
-import { effectiveTheme, themeNames } from "../shared/themes";
+import { themeNames } from "../shared/themes";
 import skill from "./skills/sharpner/SKILL.md?raw";
 import designSystemGuide from "./skills/sharpner/references/design-system.md?raw";
 import screensGuide from "./skills/sharpner/references/screens.md?raw";
@@ -19,7 +19,6 @@ const pageDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Describe the page's contents and purpose in one or two sentences. Empty clears it.");
 const sectionDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Sections only. Describe the contents and purpose in one or two sentences. Empty clears it.");
-const themeChoice = z.string().trim().min(1).max(80).regex(/^[^\u0000-\u001f\u007f]+$/).nullable();
 
 const INSTRUCTIONS = `Use Sharpner for shared UI design and canvas feedback. Call read_skill() before edits. Use get_app_state to find the member's file and selection. Preserve other members' edits.`;
 
@@ -74,7 +73,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     const open = files.find((f) => f.id === me?.last_file_id);
     if (open) {
       const stub = room(env, open.id);
-      const [peers, outline, comments, cover, fileTheme] = await Promise.all([stub.peers(), stub.outline(), stub.comments(), stub.cover(), stub.theme()]);
+      const [peers, outline, comments, cover] = await Promise.all([stub.peers(), stub.outline(), stub.comments(), stub.cover()]);
       const mine = peers.find((p) => p.id === user.id && !p.agent);
       const page = outline.find((p) => p.id === mine?.pageId);
       const nodes = outline.flatMap((p) => p.nodes);
@@ -82,7 +81,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         fileId: open.id,
         fileName: open.name,
         libraryFileId: open.library_id,
-        fileTheme,
         cover: { ...cover, url: abs(cover.url) },
         openInBrowser: Boolean(mine),
         currentPage: page ? { id: page.id, name: page.name } : null,
@@ -224,16 +222,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json({ ok: true, cover: { ...cover, url: abs(cover.url) } });
   });
 
-  server.registerTool("set_theme", {
-    description: "Set the file theme from get_design_system.themes. Use null to preserve HTML themes. Frame overrides remain; change them with update_nodes.",
-    inputSchema: { fileId: z.string(), theme: themeChoice.describe("Named theme from the token CSS, or null for As authored.") },
-    annotations: { destructiveHint: false, idempotentHint: true },
-  }, async ({ fileId, theme }) => {
-    const { stub, apply } = await access(fileId);
-    await apply([{ t: "theme.set", theme }]);
-    return json({ ok: true, fileTheme: await stub.theme() });
-  });
-
   server.registerTool("list_pages", {
     description: "List page and section descriptions and design counts. Use this overview to choose a pageId for get_file.",
     inputSchema: { fileId: z.string() },
@@ -260,7 +248,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     annotations: { readOnlyHint: true },
   }, async ({ fileId, pageId }) => {
     const { file, stub } = await access(fileId);
-    const [all, cover, fileTheme] = await Promise.all([stub.outline(), stub.cover(), stub.theme()]);
+    const [all, cover] = await Promise.all([stub.outline(), stub.cover()]);
     const outline = all.filter((p) => !pageId || p.id === pageId);
     if (pageId && !outline.length) throw new Error(`Page ${pageId} not found`);
     const pages = outline.map((p) => {
@@ -278,16 +266,14 @@ function buildServer(env: Env, identity: Identity, origin: string) {
           ...(n.height == null && n.measuredHeight ? { renderedHeight: n.measuredHeight } : {}),
           ...(n.kind === "image" ? { src: abs(n.src) } : {}),
           ...(n.kind === "component" ? { tag: componentTag(n.name) } : {}),
-          ...(n.kind === "frame" ? { theme: n.theme ?? null, effectiveTheme: effectiveTheme(n, fileTheme) ?? null } : {}),
-          ...(n.kind === "component" && n.theme ? { theme: n.theme } : {}),
         })),
       };
     });
-    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, fileTheme, cover: { ...cover, url: abs(cover.url) }, pages });
+    return json({ id: file.id, name: file.name, libraryFileId: file.library_id, cover: { ...cover, url: abs(cover.url) }, pages });
   });
 
   server.registerTool("get_design_system", {
-    description: "Read Brand, system page, tokens, themes, components, primitives and uses, including the library.",
+    description: "Read Brand, system page, tokens, themes (contexts declared in the token CSS that screens opt into with data-theme in their own HTML), components, primitives and uses, including the library.",
     inputSchema: { fileId: z.string() },
     annotations: { readOnlyHint: true },
   }, async ({ fileId }) => {
@@ -297,17 +283,13 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const s = room(env, id);
       const [outline, own] = await Promise.all([s.outline(), s.ownDesignSystem()]);
       const nodes = outline.flatMap((p) => p.nodes.map((n) => ({ ...n, page: p.name, primitive: p.kind === "design-system" })));
-      const node = (tag: string, theme: string | null) => nodes.find((x) => x.kind === "component" && componentTag(x.name) === tag && (x.theme ?? null) === theme);
-      // One entry per tag. Theme overrides are listed with it: the same component, restructured for one theme.
+      const node = (tag: string) => nodes.find((x) => x.kind === "component" && componentTag(x.name) === tag);
       const tags = [...new Set(own.components.map((c) => c.tag))];
       return tags.map((tag) => {
-        const defs = own.components.filter((c) => c.tag === tag);
-        const c = defs.find((d) => !d.theme) ?? defs[0]!;
-        const n = node(tag, c.theme ?? null);
-        const overrides = defs.filter((d) => d.theme).map((d) => ({ theme: d.theme!, nodeId: node(tag, d.theme!)?.id, props: propsOf(d.html) }));
+        const c = own.components.find((d) => d.tag === tag)!;
+        const n = node(tag);
         return {
           tag, name: n?.name, nodeId: n?.id, page: n?.page, pageId: n?.pageId, primitive: n?.primitive ?? false, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html),
-          ...(c.theme ? { missingDefault: true } : {}), ...(overrides.length ? { themeOverrides: overrides } : {}),
           source, ...(source === "library" ? { libraryFileId: id } : {}),
         };
       });
@@ -323,7 +305,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       brand: await stub.brand(),
       designSystemPageId: (await stub.pages()).find((p) => p.kind === "design-system")?.id ?? null,
       libraryCatalog: inherited ? { brand: inherited.brand, designSystemPageId: inherited.pageId } : null,
-      fileTheme: design.fileTheme,
+      // Theme contexts declared in the token CSS. Screens opt in with data-theme in their own HTML; Sharpner never applies one.
       themes: themeNames(design.tokens),
       tokens: tokenNames(design.tokens),
       tokenCss: design.tokens,
@@ -441,7 +423,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         kind: z.enum(["frame", "component", "tokens", "image"]).optional(),
         name: z.string().describe("Component names set their tag: Button/Primary -> <x-button-primary>"),
         source: z.string().optional().describe("HTML for frames/components, Tailwind v4 CSS for token sheets"),
-        theme: themeChoice.optional().describe("Frames: named theme override; null or omitted inherits the file theme. Components: create a theme override, a second definition of an existing component (same name) used only inside that theme; omit for the default definition."),
         imageUrl: z.string().optional().describe("For images, e.g. a URL from upload_image"),
         previewUrl: z.string().optional().describe("Small image preview. Omit to generate one if Browser Rendering is available."),
         width: z.number().positive().optional().describe("Viewport width in px. Default 400; token sheets default to 960."),
@@ -460,7 +441,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const width = n.width ?? (kind === "tokens" ? 960 : 400);
       const x = n.x ?? at.x, y = n.y ?? at.y;
       at = { x: Math.max(at.x, x + width + 80), y: at.y };
-      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y, ...(n.theme !== undefined ? { theme: n.theme } : {}) };
+      const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width, x, y };
       const node: NodeInput = kind === "image"
         ? { ...base, src: n.imageUrl, thumbLo: n.previewUrl ?? null, height: n.height ?? width }
         : { ...base, source: n.source, height: n.height ?? null };
@@ -488,7 +469,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   }, async ({ fileId, nodeIds }) => {
     const { stub } = await access(fileId);
     const nodes = await Promise.all(nodeIds.map((id) => stub.node(id)));
-    const [all, fileTheme] = await Promise.all([stub.nodes(), stub.theme()]);
+    const all = await stub.nodes();
     const rects = layoutRects(all, (n) => layoutHeight(n));
     await stub.agentActivity(actor, nodes.flatMap((n) => (n && n.kind !== "section" ? [n.id] : [])));
     return json(nodes.map((node, index) => {
@@ -501,8 +482,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         sectionId: node.parentId,
         layout: node.kind === "section" ? node.layout ?? "free" : undefined,
         order: node.order,
-        ...(node.kind === "frame" ? { theme: node.theme ?? null, effectiveTheme: effectiveTheme(node, fileTheme) ?? null } : {}),
-        ...(node.kind === "component" && node.theme ? { theme: node.theme } : {}),
         ...nodeGeometry(node, rects),
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
       };
@@ -522,7 +501,6 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         name: z.string().optional(),
         description: sectionDescription.optional(),
         source: z.string().optional(),
-        theme: themeChoice.optional().describe("Frames: named theme override; null restores file inheritance. Components: the theme this definition overrides; null makes it the default. Omit to preserve."),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
         x: z.number().optional(),

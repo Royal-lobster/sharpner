@@ -63,7 +63,7 @@ function interactionBridge(token: string) {
  * Playback uses the normal renderer, with a policy and bridge parsed before every authored byte.
  * Resource display remains network-capable; this is not an offline or total-network-isolation mode.
  */
-export function interactionDocument(html: string, options: { base: string; token: string; design: DesignSystem; theme?: string | null }): string {
+export function interactionDocument(html: string, options: { base: string; token: string; design: DesignSystem }): string {
   const base = new URL(options.base);
   if (base.protocol !== "https:" && base.protocol !== "http:") throw new Error("Playback requires an HTTP(S) asset origin");
   const origin = base.origin;
@@ -81,5 +81,5 @@ export function interactionDocument(html: string, options: { base: string; token
   // select another asset origin. An additional authored CSP can tighten, never relax, this policy.
   // Leave the implicit head open: the normal document's html/body attributes are still parsed.
   const prefix = `<!doctype html><base href="${escapeHtml(origin + "/")}" target="_self"><meta http-equiv="Content-Security-Policy" content="${escapeHtml(policy)}"><script data-sharpner-playback-bridge>(${interactionBridge.toString()})(${token})</script>`;
-  return prefix + frameDocument(html, { design: options.design, theme: options.theme });
+  return prefix + frameDocument(html, { design: options.design });
 }
