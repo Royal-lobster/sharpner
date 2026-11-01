@@ -164,6 +164,14 @@ previews keep pointer input disabled. Dedicated preview origin and stronger
 resource isolation remain hardening work. Live playback, covers and explicitly
 requested agent screenshots use the same document renderer.
 
+The [interaction-first experiments](interaction-first-experiments.md) test
+automatic motion, user-triggered flows and deterministic local scenarios. Four
+dense runtimes retained 16.7 ms p95 frame intervals in a 30-second desktop probe,
+while forty degraded badly. The [overview convergence](unseen-overview-convergence.md)
+and [instant variant documents](instant-variant-documents.md) reports measure
+bounded native documents, shared CSS and server atlases against the three-second
+target for an uncached theme switch.
+
 ### Native HTML in canvas
 
 Chrome's [HTML-in-Canvas announcement](https://developer.chrome.com/blog/html-in-canvas)
