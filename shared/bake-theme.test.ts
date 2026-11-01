@@ -17,6 +17,12 @@ describe("baking a former theme selection into screen HTML", () => {
     expect(bakeTheme("<html><p>a</p></html>", "dark")).toBe('<html data-theme="dark" class="dark" style="color-scheme:dark"><p>a</p></html>');
   });
 
+  it("is idempotent and replaces an earlier baked color scheme", () => {
+    const once = bakeTheme("<p>a</p>", "light");
+    expect(bakeTheme(bakeTheme(once, "dark"), "dark")).toBe(bakeTheme("<p>a</p>", "dark"));
+    expect(bakeTheme('<html style="color: red; color-scheme: light"><body>x</body></html>', "dark")).toContain('style="color: red;color-scheme:dark"');
+  });
+
   it("escapes theme names", () => {
     expect(bakeTheme("<p></p>", 'x"><script>')).toContain('data-theme="x&quot;><script>"');
   });

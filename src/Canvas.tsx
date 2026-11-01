@@ -696,7 +696,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               tier={screenWidth * dpr > HI_RES_MIN_PIXELS ? "hi" : "lo"}
               live={live.current.has(f.id)}
               // A session is keyed by revision, so it waits for the matching source instead of starting stale.
-              html={src && (f.id !== playingId || src.rev === f.rev) ? renderedHtml(f, src.source) : undefined}
+              html={src && (f.id !== playingId || src.rev === f.rev) ? renderedHtml(f, src.source, design) : undefined}
               design={design}
               playback={f.id === playingId ? playback : undefined}
               // Members play from the selection toolbar; link viewers cannot select, so frames offer it.

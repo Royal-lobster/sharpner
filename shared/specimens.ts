@@ -1,4 +1,5 @@
 /** Presentation for design-system nodes; component definitions themselves stay untouched. */
+import { bakeTheme } from "./bake-theme";
 import { themeLabel } from "./themes";
 import { foundations } from "./design-system";
 
@@ -42,7 +43,8 @@ const componentStyles = `<style>
 .sp-component--compact .sp-component-stage{padding:8px 10px}
 </style>`;
 
-export function componentSpecimen(name: string, tag: string, source: string, height?: number | null) {
+/** `dark` presents the specimen in its design system's dark theme, on the document roots like a dark screen. */
+export function componentSpecimen(name: string, tag: string, source: string, height?: number | null, dark = false) {
   const { family, variant } = componentName(name);
   const fixed = typeof height === "number";
   const compact = fixed && height < 220;
@@ -53,10 +55,11 @@ export function componentSpecimen(name: string, tag: string, source: string, hei
     return `<span class="sp-component-prop">${escapeHtml(name)} <em>${escapeHtml(value)}</em></span>`;
   });
   if (slot) propItems.push('<span class="sp-component-prop">slot <em>accepts content</em></span>');
-  return `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escapeHtml(`${family} / ${variant} component`)}">
+  const html = `${componentStyles}<article class="sp-component${fixed ? " sp-component--fixed" : ""}${compact ? " sp-component--compact" : ""}" aria-label="${escapeHtml(`${family} / ${variant} component`)}">
 <div class="sp-component-stage"><div class="sp-component-instance"><${tag}></${tag}></div></div>
 ${compact ? "" : `<footer class="sp-component-spec"><code class="sp-component-tag">&lt;${escapeHtml(tag)}&gt;</code>${propItems.join("")}</footer>`}
 </article>`;
+  return dark ? bakeTheme(html, "dark") : html;
 }
 
 const foundationStyles = `<style>
@@ -102,9 +105,14 @@ update();setTimeout(update,50);addEventListener("load",()=>{update();setTimeout(
 const observer=new MutationObserver(update);observer.observe(document.head,{childList:true,subtree:true,characterData:true});setTimeout(()=>observer.disconnect(),1000);
 })()</script>`;
 
-/** The CSS remains the source of truth, including aliases and per-theme overrides. */
+/**
+ * The CSS remains the source of truth, including aliases and per-theme overrides. A sheet that defines
+ * a dark theme is shown in dark only; screens are dark, so a light pane would show what nothing uses.
+ */
 export function tokenSpecimen(css: string, title = "Design tokens") {
   const tokens = foundations(css);
+  const dark = tokens.themes.includes("dark");
+  const themes = dark ? ["dark"] : tokens.themes;
   const all = [...tokens.colors, ...tokens.type, ...tokens.spacing, ...tokens.radii, ...tokens.shadows];
   const names = tokenNames(css.replace(/\/\*[\s\S]*?\*\//g, ""));
   const row = (heading: string, items: string[], type = "") => items.length ? `<section class="sp-token-section"><h2>${heading}<span class="sp-token-count">${items.length}</span></h2><div class="sp-token-grid ${type}">${items.join("")}</div></section>` : "";
@@ -125,7 +133,8 @@ export function tokenSpecimen(css: string, title = "Design tokens") {
       row("Shadow", tokens.shadows.filter((token) => token.values[theme]).map((token) => item(token.name.slice(2), `<div class="sp-shadow-stage"><div class="sp-shadow" style="box-shadow:var(${token.name})"></div></div>`))),
     ].filter(Boolean);
     const sheet = sections.join("") || '<p class="sp-empty">Give this system its first decisions.<br>Declare named tokens in an <code>@theme { … }</code> block.</p>';
-    return `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escapeHtml(theme)}">${tokens.themes.length > 1 ? `<p class="sp-theme-title">${escapeHtml(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
+    return `<div class="sp-theme${theme === "dark" ? " dark" : ""}" data-theme="${escapeHtml(theme)}">${themes.length > 1 ? `<p class="sp-theme-title">${escapeHtml(themeLabel(theme))}</p>` : ""}${sheet}</div>`;
   };
-  return `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escapeHtml(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${tokens.themes.length > 1 ? ` · ${tokens.themes.length} themes` : ""}</span></header><div class="sp-themes">${tokens.themes.map(pane).join("")}</div></article>${tokenValueScript}`;
+  const html = `${foundationStyles}<article class="sp-foundations"><header class="sp-foundations-header"><h1>${escapeHtml(title)}</h1><span class="sp-foundations-count">${names.length} ${names.length === 1 ? "token" : "tokens"}${themes.length > 1 ? ` · ${themes.length} themes` : ""}</span></header><div class="sp-themes">${themes.map(pane).join("")}</div></article>${tokenValueScript}`;
+  return dark ? bakeTheme(html, "dark") : html;
 }

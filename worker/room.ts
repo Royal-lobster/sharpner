@@ -15,7 +15,7 @@ import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
 import { THUMBNAIL_POLICY } from "./thumbnail-policy";
 import { themeLabel } from "../shared/themes";
-import { bakeTheme } from "./bake-theme";
+import { bakeTheme } from "../shared/bake-theme";
 import { patchBrand } from "../shared/design-system";
 import {
   componentTag, mergeDesignSystems, DESCRIPTION_MAX, renderedHtml, previewCurrent, emptyBrand, type Brand,
@@ -145,7 +145,33 @@ const MIGRATIONS = [
     }
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Specimens present a design system's dark theme when its tokens define one. The IQ Industries files
+  // (fraxnet, fraxramp, tupredices) are dark-only at their owner's request: every screen's roots and
+  // light theme wrappers become dark. Every rendered node in those files re-renders. Runs once per room,
+  // even when an older deployment lowers the recorded schema version.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'darkSpecimens'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('darkSpecimens', '1')`);
+    const fileId = sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k = 'fileId'`).toArray()[0]?.v;
+    if (fileId && DARK_ONLY_FILES.has(fileId)) {
+      for (const f of sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'frame'`).toArray()) {
+        sql.exec(`UPDATE nodes SET source = ? WHERE id = ?`, darken(f.source), f.id);
+      }
+      sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('frame', 'component', 'tokens')`);
+    } else {
+      sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('component', 'tokens')`);
+    }
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
+
+/** Files whose owner asked for every screen in dark; see the migration that uses it. */
+const DARK_ONLY_FILES = new Set(["2f86e75c-5e8a-4a4d-a5a6-5a065a943e4a", "c84c7946-be06-46d7-9b1d-c4486691dabb", "4d0f3398-96fd-4b9c-a8fc-dd7b1b75f437"]);
+
+/** A screen in dark: dark document roots, and any authored `data-theme="light"` wrapper switched to dark. */
+export function darken(source: string): string {
+  return bakeTheme(source, "dark").replace(/(\sdata-theme\s*=\s*)(["']?)light\2(?=[\s>\/])/gi, '$1"dark"');
+}
 
 /** Public URL for an object in the FILES bucket (served by the worker at /a/*). */
 export const fileUrl = (key: string) => `/a/${key}`;
@@ -750,7 +776,7 @@ export class FileRoom extends DurableObject<Env> {
 
   private hasRenderAudience() { return this.viewedPages().length > 0 || this.coverRequest() !== null; }
 
-  private pendingThumbnails(limit: number = THUMB_BATCH) {
+  private pendingThumbnails(limit: number = THUMB_BATCH, design?: DesignSystem) {
     return this.sql.exec<{
       id: string; kind: NodeKind; name: string; source: string; src: string | null;
       width: number; height: number | null; rev: number;
@@ -762,7 +788,7 @@ export class FileRoom extends DurableObject<Env> {
        ORDER BY n.page_id IN (SELECT value FROM json_each(?)) DESC, t.tries, n.sort, n.id LIMIT ?`,
       Number(this.viewedPages().length > 0), this.coverRequest(),
       JSON.stringify(this.viewedPages()), limit,
-    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source) }));
+    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source, design) }));
   }
 
   private pendingImages(limit: number) {
@@ -819,7 +845,7 @@ export class FileRoom extends DurableObject<Env> {
             const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
             for (const n of nodes) {
               if (stopped) break;
-              const size = await loadFrame(tab, { ...n, html: renderedHtml(n, this.node(n.id)!.source) }, origin, design);
+              const size = await loadFrame(tab, { ...n, html: renderedHtml(n, this.node(n.id)!.source, design) }, origin, design);
               const scale = Math.min(1, 1600 / Math.max(size.width, size.height));
               const bytes = await capture(tab, size.width, size.height, { type: "jpeg", scale });
               content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: bytesToBase64(bytes), mimeType: "image/jpeg" });
@@ -863,7 +889,7 @@ export class FileRoom extends DurableObject<Env> {
         // Stop while an edit's debounce is pending; without I/O, Date.now() cannot advance past it.
         while (!stopped && Date.now() - started < THUMBNAIL_POLICY.quantumMs && Date.now() >= Number(this.meta("thumbAfter") ?? 0)
           && this.hasRenderAudience() && this.meta("designRev") === designRev) {
-          const queue = this.pendingThumbnails();
+          const queue = this.pendingThumbnails(THUMB_BATCH, design);
           const jobs = [...queue, ...this.pendingImages(THUMB_BATCH - queue.length)];
           if (!jobs.length) break;
           await Promise.all(tabs.map(async (tab) => {
