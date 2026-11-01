@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalFamily, documentFoundations, foundations, livePreviewIds, MAX_LIVE_PREVIEWS, patchBrand, primitiveFamilies } from "./design-system";
+import { canonicalFamily, documentFoundations, foundations, patchBrand, primitiveFamilies } from "./design-system";
 import { componentTag, emptyBrand, mergeDesignSystems, type CanvasNode, type DesignSystem, type LibraryInfo } from "./types";
 
 const node = (name: string, pageId = "ds", theme: string | null = null): CanvasNode => ({ id: name + (theme ?? ""), name, pageId, theme, kind: "component", parentId: null, x: 0, y: 0, width: 400, height: null, measuredHeight: null, thumbLo: null, thumbHi: null, src: null, rev: 1 });
@@ -111,17 +111,6 @@ describe("primitive catalogs", () => {
     expect(primitiveFamilies([], "local", library.design, library)).toHaveLength(3);
     // Local feature definitions still own their tag under the existing merge rule.
     expect(primitiveFamilies([node("Input/Default", "feature")], "local", merged, library).some((f) => f.name === "Input")).toBe(false);
-  });
-});
-
-describe("live preview budget", () => {
-  it("mounts only visible previews and never exceeds its hard budget, even with hundreds visible", () => {
-    const ids = Array.from({ length: 400 }, (_, n) => `preview-${n}`);
-    expect(livePreviewIds(ids, new Set()).size).toBe(0);
-    expect(livePreviewIds(ids, new Set(ids)).size).toBe(MAX_LIVE_PREVIEWS);
-    const scrolled = livePreviewIds(ids, new Set(ids.slice(120, 125)));
-    expect([...scrolled]).toEqual(ids.slice(120, 125));
-    expect([...scrolled].some((id) => ids.slice(0, MAX_LIVE_PREVIEWS).includes(id))).toBe(false);
   });
 });
 

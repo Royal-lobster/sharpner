@@ -1,35 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import { COLLAPSED_VARIANTS, COLOR_SLOTS, documentFoundations, livePreviewIds, patchBrand, primitiveFamilies, type FoundationToken, type Primitive } from "../shared/design-system";
-import { emptyBrand, frameDocument, type Brand, type DesignSystem } from "../shared/types";
+import { COLLAPSED_VARIANTS, COLOR_SLOTS, documentFoundations, patchBrand, primitiveFamilies, type FoundationToken, type Primitive } from "../shared/design-system";
+import { emptyBrand, type Brand, type DesignSystem } from "../shared/types";
 import { themeLabel } from "../shared/themes";
 import { uploadImage } from "./api";
 import { Room } from "./room";
 import { Link } from "./router";
 import { toast } from "./toast";
+import { fitPreview, primitivePreviewDocument } from "./design-system-preview";
 import "./design-system.css";
 
 const varsStyle = (vars: Record<string, string>) => vars as CSSProperties;
 const hasBrand = (brand: Brand) => Boolean(brand.name || brand.logoUrl || brand.guidelines || brand.voice.length);
-const escape = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
-function useLivePreviews(root: RefObject<HTMLDivElement | null>, ids: string[]) {
-  const [visible, setVisible] = useState<Set<string>>(new Set());
-  const key = ids.join("|");
-  useEffect(() => {
-    if (!root.current) return;
-    const observer = new IntersectionObserver((entries) => setVisible((previous) => {
-      const next = new Set(previous);
-      for (const entry of entries) {
-        const id = (entry.target as HTMLElement).dataset.previewId!;
-        if (entry.isIntersecting) next.add(id); else next.delete(id);
-      }
-      return next;
-    }), { root: root.current, threshold: 0 });
-    for (const element of root.current.querySelectorAll("[data-preview-id]")) observer.observe(element);
-    return () => observer.disconnect();
-  }, [root, key]);
-  return livePreviewIds(ids, visible);
-}
 
 export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: { room: Room; fileId: string; fileName: string; pageId: string; readOnly: boolean }) {
   const root = useRef<HTMLDivElement>(null);
@@ -43,7 +24,8 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const shown = families.map((f) => ({ ...f, shown: expanded.has(f.name) ? f.variants : f.variants.slice(0, COLLAPSED_VARIANTS) }));
   const previewId = (p: Primitive) => `${p.library ? "library" : "file"}:${p.node.id}`;
-  const live = useLivePreviews(root, shown.flatMap((f) => f.shown.flatMap((v) => v.definitions.map(previewId))));
+  // One explicit interaction, independent of scrolling through the catalog.
+  const [interaction, setInteraction] = useState<{ id: string; playing: boolean } | null>(null);
   const library = room.library;
   const libraryUrl = library ? `/f/${library.fileId}${library.catalog?.pageId ? `?page=${library.catalog.pageId}` : ""}` : "";
   const [editing, setEditing] = useState(false);
@@ -67,7 +49,7 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
   const tokenSheets = nodes.filter((n) => n.kind === "tokens").length + (library?.catalog?.tokenSheets ?? 0);
   const fontImports = [...design.tokens.matchAll(/@import\s+(?:url\()?\s*["']?(https?:[^"')\s]+)["']?\s*\)?[^;]*;/g)].map((m) => m[1]!);
 
-  return <div className="ds-document" ref={root} style={varsStyle(tokens.vars[theme] ?? {})}>
+  return <div className="ds-document" ref={root}>
     {fontImports.map((href) => <link key={href} rel="stylesheet" href={href} />)}
     <article className="ds-content" aria-label="Design System">
       <header className="ds-header">
@@ -99,12 +81,12 @@ export function DesignSystemPage({ room, fileId, fileName, pageId, readOnly }: {
       </section>
 
       <section id="ds-primitives">
-        <SectionHeading number="3" title="Primitive components" meta={`${total} primitives · previews follow the theme switcher`} />
+        <SectionHeading number="3" title="Primitive components" meta={`${total} primitives · click a preview to try it`} />
         {shown.map((family, index) => <div className="ds-family" key={family.name}>
           <div className="ds-family-info"><h3><small>{String(index + 1).padStart(2, "0")}</small>{family.name}</h3><code>{family.variants.length === 1 ? family.variants[0]!.tag : family.variants[0]!.tag.replace(/-[^-]+$/, "-*")}</code><p>{[...new Set(family.variants.flatMap((v) => v.definitions.flatMap((p) => [...p.props.map((p) => p.name), ...(p.slot ? ["slot"] : [])])))].join(" · ") || "No props"}</p><small>{family.variants.length} {family.variants.length === 1 ? "variant" : "variants"}</small></div>
-          <div className="ds-family-stage"><div className="ds-variant-grid">{family.shown.map((variant) => <div className="ds-variant" key={variant.tag}>{variant.definitions.map((primitive) => <figure key={previewId(primitive)}>
+          <div className="ds-family-stage"><div className="ds-variant-grid">{family.shown.map((variant) => <div className="ds-variant" key={variant.tag}>{variant.definitions.map((primitive) => <figure className={interaction?.id === previewId(primitive) ? "ds-interacting" : undefined} key={previewId(primitive)}>
             <figcaption>{variant.name}{primitive.node.theme ? ` · ${themeLabel(primitive.node.theme)} override` : ""}{library && <small>{primitive.library ? `${library.name} · read only` : "This file"}</small>}</figcaption>
-            <PrimitivePreview primitive={primitive} id={previewId(primitive)} live={live.has(previewId(primitive))} design={design} theme={primitive.node.theme ?? theme} />
+            <PrimitivePreview primitive={primitive} id={previewId(primitive)} active={interaction?.id === previewId(primitive)} live={interaction?.id === previewId(primitive) && interaction.playing} root={root} design={design} theme={primitive.node.theme ?? theme} onInteract={() => setInteraction({ id: previewId(primitive), playing: true })} onPause={() => setInteraction((current) => current?.id === previewId(primitive) ? { ...current, playing: false } : current)} onClose={() => setInteraction(null)} />
             {primitive.node.theme && <small className="ds-override-spec"><code>{primitive.tag}</code> · {primitive.props.map((p) => p.name).join(" · ")}{primitive.slot ? " · slot" : ""}</small>}
           </figure>)}</div>)}</div>
           {family.variants.length > COLLAPSED_VARIANTS && <button className="ds-action ds-show-variants" onClick={() => setExpanded((old) => { const next = new Set(old); if (next.has(family.name)) next.delete(family.name); else next.add(family.name); return next; })}>{expanded.has(family.name) ? "Show fewer" : `Show all ${family.variants.length}`}</button>}</div>
@@ -147,18 +129,57 @@ function FoundationGroup({ title, rows, theme, libraryName, vars, libraryVars }:
   </div>)}{rows.length > 6 && <button className="ds-action" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${rows.length}`}</button>}</div>;
 }
 
-function PrimitivePreview({ primitive, id, live, design, theme }: { primitive: Primitive; id: string; live: boolean; design: DesignSystem; theme: string }) {
+function PrimitivePreview({ primitive, id, active, live, root, design, theme, onInteract, onPause, onClose }: { primitive: Primitive; id: string; active: boolean; live: boolean; root: RefObject<HTMLDivElement | null>; design: DesignSystem; theme: string; onInteract: () => void; onPause: () => void; onClose: () => void }) {
   const iframe = useRef<HTMLIFrameElement>(null);
-  const [height, setHeight] = useState(120);
-  const document = useMemo(() => live ? frameDocument(`<main style="box-sizing:border-box;display:grid;place-items:center;min-height:112px;padding:16px;background:var(--color-background,#fff);color:var(--color-foreground,#222);font-family:var(--font-sans,system-ui)"><${primitive.tag} data-sharpner-definition="${escape(primitive.node.theme ?? "")}"></${primitive.tag}></main>`, { base: location.origin, design, theme, measure: true }) : undefined, [live, primitive.tag, primitive.node.theme, design, theme]);
+  const interact = useRef<HTMLButtonElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const [available, setAvailable] = useState(640);
+  const [measurement, setMeasurement] = useState({ session: "", width: 640, height: 160, scale: 1 });
+  const viewportHeight = Math.max(160, primitive.node.height ?? 600);
+  const document = useMemo(() => {
+    if (!live) return null;
+    const session = crypto.randomUUID();
+    return { session, html: primitivePreviewDocument(primitive.tag, primitive.node.theme, design, theme, session) };
+  }, [live, primitive.tag, primitive.node.theme, design, theme]);
+  const ready = live && measurement.session === document?.session;
+  const fitted = fitPreview(available, measurement.width, measurement.height);
+  useEffect(() => { if (ready) iframe.current?.focus({ preventScroll: true }); }, [ready]);
   useEffect(() => {
-    if (!live) return;
-    const measure = (e: MessageEvent) => { if (e.source === iframe.current?.contentWindow && typeof e.data?.sharpnerHeight === "number" && Number.isFinite(e.data.sharpnerHeight)) setHeight(Math.max(112, Math.min(480, e.data.sharpnerHeight))); };
+    if (!active || !stage.current) return;
+    const measure = () => { const width = stage.current?.getBoundingClientRect().width; if (width) setAvailable(width); };
+    measure();
+    // Spanning the row can move a later card below the viewport. Keep the chosen control visible
+    // before observing visibility, rather than immediately pausing the interaction just opened.
+    stage.current.scrollIntoView({ block: "nearest", behavior: "instant" });
+    const observer = new ResizeObserver(measure); observer.observe(stage.current);
+    return () => observer.disconnect();
+  }, [active]);
+  useEffect(() => {
+    if (!document) return;
+    const measure = (e: MessageEvent) => {
+      const value = e.data?.sharpnerPreview;
+      if (e.source !== iframe.current?.contentWindow || value?.session !== document.session || !Number.isFinite(value.width) || !Number.isFinite(value.height) || !Number.isFinite(value.scale) || value.width <= 0 || value.height <= 0 || value.scale <= 0 || value.scale > 1) return;
+      setMeasurement(value);
+    };
     window.addEventListener("message", measure);
     return () => window.removeEventListener("message", measure);
-  }, [live]);
+  }, [document]);
+  // Preserve the expanded footprint when paused; returning to it never loads a frame by itself.
+  const pause = useRef(onPause); pause.current = onPause;
+  useEffect(() => {
+    if (!live || !stage.current) return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => !entry.isIntersecting)) pause.current(); }, { root: root.current });
+    observer.observe(stage.current);
+    return () => observer.disconnect();
+  }, [live, root]);
   const still = primitive.node.thumbHi || primitive.node.thumbLo;
-  return <div className="ds-preview" data-preview-id={id} style={{ height }}>
-    {live ? <iframe ref={iframe} title={`${primitive.node.name}${primitive.node.theme ? ` ${primitive.node.theme} override` : ""} interactive preview`} sandbox="allow-scripts" srcDoc={document} /> : still ? <img src={still} loading="lazy" alt={`${primitive.node.name} preview`} /> : <span className="ds-preview-still">{primitive.variant}</span>}
-  </div>;
+  return <>
+    <div className="ds-preview" ref={stage} data-preview-id={id} style={{ height: active ? Math.max(160, fitted.height) : 160 }}>
+      {!ready && (still ? <img src={still} loading="lazy" alt={`${primitive.node.name} saved preview`} /> : <span className="ds-preview-still">{primitive.variant}</span>)}
+      {live && <iframe ref={iframe} data-preview-session={document!.session} title={`${primitive.node.name}${primitive.node.theme ? ` ${primitive.node.theme} override` : ""} interactive preview`} sandbox="allow-scripts" scrolling="no" srcDoc={document!.html} style={{ width: available, height: viewportHeight, transform: `scale(${ready ? fitted.scale / measurement.scale : 1})`, opacity: ready ? 1 : 0 }} />}
+      {!live && <button ref={interact} className="ds-interact" aria-label={`Interact with ${primitive.node.name}`} onClick={onInteract}><span>Try preview</span></button>}
+      {live && !ready && <span className="ds-preview-loading" role="status">Loading {themeLabel(theme)} preview…</span>}
+    </div>
+    <div className="ds-preview-caption"><span>{live ? `${ready ? "Live" : "Loading"} · ${themeLabel(theme)}` : "Saved preview"}</span>{active && <button className="ds-action" aria-label={`Close ${primitive.node.name} preview`} onClick={() => { onClose(); requestAnimationFrame(() => interact.current?.focus()); }}>Done</button>}</div>
+  </>;
 }
