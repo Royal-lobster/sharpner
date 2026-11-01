@@ -164,6 +164,13 @@ document. Normal canvas previews keep pointer input disabled. Dedicated preview
 origin and stronger resource isolation remain hardening work. Live playback,
 covers and explicitly requested agent screenshots use the same document renderer.
 
+The later [interaction-first experiments](interaction-first-experiments.md) test
+automatic market motion, user-triggered flows and deterministic local scenarios.
+They support ordinary behavior-capable screens with a small executable set:
+four dense runtimes retained 16.7 ms p95 frame intervals in a 30-second desktop
+probe, while forty degraded badly. Cooperative state can survive theme changes
+and eviction; structural overrides still require fresh rendering and restoration.
+
 ### Native HTML in canvas
 
 Chrome's [HTML-in-Canvas announcement](https://developer.chrome.com/blog/html-in-canvas)
