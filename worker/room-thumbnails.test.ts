@@ -6,9 +6,9 @@ import { emptyBrand, type Actor, type NodeInput, type Op, type ServerMsg } from 
 vi.mock("cloudflare:workers", () => ({
   DurableObject: class { constructor(readonly ctx: DurableObjectState, readonly env: Env) {} },
 }));
-const renderer = vi.hoisted(() => ({ launch: vi.fn(), loadFrame: vi.fn(), capture: vi.fn(), captureThumbnails: vi.fn() }));
+const renderer = vi.hoisted(() => ({ launch: vi.fn(), loadFrame: vi.fn(), loadImagePreview: vi.fn(), capture: vi.fn(), captureThumbnails: vi.fn() }));
 vi.mock("@cloudflare/puppeteer", () => ({ default: { launch: renderer.launch } }));
-vi.mock("./render", async (original) => ({ ...await original<typeof import("./render")>(), loadFrame: renderer.loadFrame, capture: renderer.capture, captureThumbnails: renderer.captureThumbnails }));
+vi.mock("./render", async (original) => ({ ...await original<typeof import("./render")>(), loadFrame: renderer.loadFrame, loadImagePreview: renderer.loadImagePreview, capture: renderer.capture, captureThumbnails: renderer.captureThumbnails }));
 import { darken, FileRoom } from "./room";
 
 const databases: DatabaseSync[] = [];
@@ -16,6 +16,7 @@ afterEach(() => { for (const db of databases.splice(0)) db.close(); });
 beforeEach(() => {
   renderer.launch.mockReset().mockResolvedValue({ newPage: async () => ({}), close: async () => {} });
   renderer.loadFrame.mockReset().mockResolvedValue({ width: 400, height: 600, measured: 600 });
+  renderer.loadImagePreview.mockReset().mockResolvedValue({ width: 800, height: 600 });
   renderer.capture.mockReset().mockResolvedValue(new Uint8Array([1, 2, 3]));
   renderer.captureThumbnails.mockReset().mockResolvedValue({ lo: new Uint8Array([1]), hi: new Uint8Array([2]) });
 });
@@ -194,6 +195,27 @@ describe("thumbnail scheduling", () => {
     await create("photo",{kind:"image",src:"/a/other-file/t/photo-1-hi.webp",thumbLo:"/a/other-file/t/photo-1-lo.webp"});
     await apply([{t:"node.del",ids:["photo"]}]);
     expect((env.FILES.delete as ReturnType<typeof vi.fn>).mock.calls.flat(2)).not.toContain("other-file/t/photo-1-lo.webp");
+  });
+
+  it("deletes only an image's own earlier preview when it renders, never an object its src names", async () => {
+    const {create,apply,render,env,db} = fixture(true);
+    const deleted = () => (env.FILES.delete as ReturnType<typeof vi.fn>).mock.calls.flat(2);
+    await create("photo",{kind:"image",src:"/a/other-file/t/screen-3-abc-hi.webp"});
+    await render();
+    expect(db.prepare("SELECT thumb_lo FROM nodes WHERE id='photo'").get()).toEqual({thumb_lo:"/a/file/t/photo-1-lo.webp"});
+    await apply([{t:"node.put",id:"photo",node:{src:"/a/other-file/t/screen-4-def-hi.webp"}}]);
+    await render();
+    expect(db.prepare("SELECT thumb_lo FROM nodes WHERE id='photo'").get()).toEqual({thumb_lo:"/a/file/t/photo-2-lo.webp"});
+    expect(deleted().filter((key: string) => key.startsWith("other-file/"))).toEqual([]);
+  });
+
+  it("ignores a late partial put for a deleted node instead of recreating it", async () => {
+    const {create,apply,room,db} = fixture();
+    await create("screen");
+    await apply([{t:"node.del",ids:["screen"]}]);
+    await apply([{t:"node.put",id:"screen",node:{x:120,y:40}}]);
+    expect(room.node("screen")).toBeFalsy();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM nodes").get()).toEqual({n:0});
   });
 
   it("reconciles only edited screens, so an edit costs the same in small and large files", async () => {

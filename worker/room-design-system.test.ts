@@ -107,4 +107,21 @@ describe("Design System page persistence", () => {
     await library.apply([{ t: "node.put", id: "feature", node: { pageId: library.page.id } }]);
     expect(library.room.catalog().primitives).toHaveLength(2);
   });
+  it("re-renders only users of the edited component's exact tag", async () => {
+    const { room, page, apply } = fixture();
+    await apply([
+      { t: "node.put", id: "tab", node: { pageId: page.id, kind: "component", name: "Tab", source: "<button>{{label}}</button>" } },
+      { t: "node.put", id: "tabs", node: { pageId: page.id, kind: "component", name: "Tabs", source: "<div><slot></slot></div>" } },
+      { t: "node.put", id: "bar", node: { pageId: page.id, kind: "component", name: "Toolbar", source: "<nav><x-tab label=\"A\"></x-tab></nav>" } },
+      { t: "node.put", id: "uses-tabs", node: { pageId: page.id, kind: "frame", source: "<x-tabs></x-tabs>" } },
+      { t: "node.put", id: "uses-tab", node: { pageId: page.id, kind: "frame", source: "<X-Tab label=\"One\"></X-Tab>" } },
+      { t: "node.put", id: "uses-bar", node: { pageId: page.id, kind: "frame", source: "<x-toolbar></x-toolbar>" } },
+    ]);
+    const rev = (id: string) => room.node(id)!.rev;
+    const before = { tabs: rev("uses-tabs"), tab: rev("uses-tab"), bar: rev("uses-bar") };
+    await apply([{ t: "node.put", id: "tab", node: { source: "<button class=\"px-4\">{{label}}</button>" } }]);
+    expect(rev("uses-tabs")).toBe(before.tabs);
+    expect(rev("uses-tab")).toBe(before.tab + 1);
+    expect(rev("uses-bar")).toBe(before.bar + 1);
+  });
 });

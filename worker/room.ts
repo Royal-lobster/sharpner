@@ -518,6 +518,9 @@ export class FileRoom extends DurableObject<Env> {
    */
   private putNode(id: string, input: NodeInput, touched: Set<string>, design: { tags: Set<string>; tokens: boolean }): boolean {
     let cur = this.node(id);
+    // A partial put for a node that is gone, such as a drag move that lands after another member's
+    // delete, must not recreate it as a blank frame. Creations always name their page.
+    if (!cur && input.pageId === undefined) return false;
     const pageId = input.pageId ?? cur?.pageId ?? this.pages()[0]!.id;
     if (!this.pages().some((p) => p.id === pageId)) throw new Error(`Unknown page ${pageId}`);
     const kind = cur?.kind ?? (KINDS.includes(input.kind!) ? input.kind! : "frame");
@@ -644,15 +647,16 @@ export class FileRoom extends DurableObject<Env> {
       for (let grew = true; grew;) {
         grew = false;
         for (const c of comps) {
-          if (!tags.has(c.tag) && [...tags].some((t) => c.html.includes(`<${t}`))) {
+          if (!tags.has(c.tag) && instanceTags(c.html).some((t) => tags.has(t))) {
             tags.add(c.tag);
             grew = true;
           }
         }
       }
+      // instr() only narrows the scan; `<x-tab` also matches `<x-tabs>`, so confirm exact tags.
       for (const t of tags) {
-        for (const r of this.sql.exec<{ id: string }>(`SELECT id FROM nodes WHERE kind IN ('frame', 'component') AND instr(source, ?) > 0`, `<${t}`)) {
-          users.add(r.id);
+        for (const r of this.sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind IN ('frame', 'component') AND instr(lower(source), ?) > 0`, `<${t}`)) {
+          if (instanceTags(r.source).includes(t)) users.add(r.id);
         }
       }
     }
@@ -988,7 +992,10 @@ export class FileRoom extends DurableObject<Env> {
         return false;
       }
       if (n.kind === "image") {
-        const old = thumbKeys(cur);
+        // An image's src and supplied preview come from clients and can name any file's objects. Delete
+        // only a preview this node rendered earlier, never the one just uploaded.
+        const old = thumbKeys({ thumbLo: cur.thumbLo, thumbHi: null })
+          .filter((key) => key.startsWith(`${fileId}/t/${n.id}-`) && !uploaded.includes(key));
         this.sql.exec(`UPDATE nodes SET thumb_lo = ?, thumb_hi = ?, thumb_rev = ?, thumb_tries = 0 WHERE id = ?`, fileUrl(`${key}-lo.webp`), n.src, n.rev, n.id);
         if (old.length) this.ctx.waitUntil(this.env.FILES.delete(old));
       } else {
