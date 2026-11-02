@@ -56,10 +56,14 @@ use a development instance for local work.
 ## Verify changes
 
 ```sh
+[ -f wrangler.jsonc ] || cp wrangler.example.jsonc wrangler.jsonc
 pnpm test
 pnpm typecheck
 pnpm build
 ```
+
+Type checking needs a `wrangler.jsonc`. In a new worktree, copy the example file;
+never copy a deployer's `wrangler.jsonc`, which targets production.
 
 Tests run in Node and use at most four workers. Type checking regenerates ignored
 Worker resource types; `worker/env.d.ts` declares the secrets and optional browser
@@ -75,7 +79,9 @@ For UI changes, also check the actual app at desktop and narrow mobile widths,
 keyboard navigation, focus restoration, and reduced-motion settings. Capture
 interaction changes in a short video when useful. Keep verification media outside
 the checkout and attach it to the pull request; do not commit recordings or test
-screenshots.
+screenshots. Agents and people can launch an isolated, production-free instance,
+sign in a verification member and connect an agent over MCP with the
+[`verify-sharpner` skill](.agents/skills/verify-sharpner/SKILL.md).
 
 For startup changes, measure direct file opens and cached refreshes through a
 visible, fully revealed canvas preview, as well as the workspace file grid. Include

@@ -1,5 +1,11 @@
 # Instant variants with bounded browser documents
 
+> 2026-11-02: historical experiment log. Theme switching and the per-theme preview
+> cache were removed (#33); screens render their authored HTML and each node keeps one
+> preview pair. Mentions of cached themes or theme pairs below describe the earlier
+> design. Commands and paths refer to the named experiment branch or the author's
+> machine. Check the code before you rely on a mechanism described here.
+
 Cached themes are already URL swaps. This experiment addresses new content/theme
 pairs by retaining normal HTML documents, with bounded server rendering for
 durable images. The owner's gate is **under three seconds for an uncached visible

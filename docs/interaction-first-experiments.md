@@ -1,5 +1,11 @@
 # Motion and interaction as part of every screen
 
+> 2026-11-02: historical experiment log. Theme switching and the per-theme preview
+> cache were removed (#33); screens render their authored HTML and each node keeps one
+> preview pair. Mentions of cached themes or theme pairs below describe the earlier
+> design. Commands and paths refer to the named experiment branch or the author's
+> machine. Check the code before you rely on a mechanism described here.
+
 ## Decision
 
 Treat frames and components as capable of behavior. A screen's source and theme

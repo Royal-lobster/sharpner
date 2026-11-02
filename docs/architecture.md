@@ -25,22 +25,33 @@ edits and fan out changes.
 | `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
 | `src/room.ts` | Realtime client, optimistic edits, and demand-loaded sources |
 | `src/thumbnail-cache.ts` | Bounded image loading and decoded-pixel budget |
+| `src/preview-loader.ts` | Batched preview transport and request backpressure |
 | `src/touch-gestures.ts` | Touch navigation state machine |
 | `src/components/ui/` | shadcn/ui primitives |
 | `worker/index.ts` | HTTP routes and authenticated browser entry points |
 | `worker/auth.ts` | Clerk verification and session/machine permission checks |
+| `worker/oauth.ts` | OAuth protected-resource metadata and the MCP authorization challenge |
 | `worker/accounts.ts` | Clerk identity projections and webhook reconciliation |
 | `worker/data.ts` | Workspace-scoped D1 queries and file operations |
+| `worker/assets.ts` | Asset and preview-batch delivery from R2 |
+| `worker/viewer-access.ts` | Fencing for share-link lookups that race a viewer revocation |
 | `worker/room.ts` | Per-file persistence, realtime sync, and preview queue |
 | `worker/comments.ts` | Transactional SQLite comment storage and anchor lifecycle |
 | `worker/mcp.ts` | Agent tools and input validation |
+| `worker/skills/sharpner/` | The skill and references agents read through `read_skill` |
+| `worker/friction.ts` | Agent friction reports, deduplication, and ranking |
 | `worker/render.ts` | Shared document loading, compiled thumbnail CSS, and single-capture previews |
 | `worker/thumbnail-queue.ts` | Shared browser admission, fair file/workspace turns, and automatic rendering budgets |
+| `worker/thumbnail-policy.ts` | Automatic preview budgets and queue limits, including the temporary `BACKFILL` exception |
+| `worker/thumbnail-css.ts`, `worker/render-fonts.ts` | Compiled Tailwind CSS and prepared fonts for rendered previews |
 | `shared/types.ts` | Wire messages, documents, and design-system composition |
 | `shared/session-principal.ts` | Immutable Clerk identity binding across HTTP, socket init, and SDK |
 | `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
 | `shared/specimens.ts` | Component and token-sheet presentations |
+| `shared/themes.ts` | Theme names declared in token CSS |
+| `shared/bake-theme.ts` | Writes a former theme selection into HTML, for the theme-removal migration |
+| `shared/thumbnails.ts` | Preview selection for a node |
 
 Read [CONTEXT.md](../CONTEXT.md) for the vocabulary before changing the file model.
 A workspace controls membership; a file contains pages; a page contains nodes.
