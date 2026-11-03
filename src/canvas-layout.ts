@@ -5,7 +5,7 @@ import type { Room } from "./room";
 
 function pageGeometry(room: Room, pageId: string) {
   const frames = room.pageNodes(pageId);
-  const rects = layoutRects(frames, (node) => room.heightOf(node), room.dragging);
+  const rects = layoutRects(frames, (node) => room.heightOf(node));
   const catalogs = catalogSectionIds(frames);
   return {
     frames, rects, catalogs,
@@ -21,17 +21,16 @@ type Navigation = { navigationRects: NonNullable<Geometry["bounds"]>[]; navigati
 
 /** One active page per canvas. Camera, presence and preview loads reuse world geometry. */
 export class CanvasLayout {
-  private geometry: { pageId: string; revision: number; dragging: Set<string>; value: Geometry } | null = null;
+  private geometry: { pageId: string; revision: number; value: Geometry } | null = null;
   private view: { geometry: Geometry; comments: number; activeCommentId: string | null; width: number; height: number; value: Navigation } | null = null;
 
   constructor(private room: Room) {}
 
   page(pageId: string): Geometry {
     const cached = this.geometry;
-    if (cached?.pageId === pageId && cached.revision === this.room.dataRevision &&
-      cached.dragging.size === this.room.dragging.size && [...this.room.dragging].every((id) => cached.dragging.has(id))) return cached.value;
+    if (cached?.pageId === pageId && cached.revision === this.room.dataRevision) return cached.value;
     const value = pageGeometry(this.room, pageId);
-    this.geometry = { pageId, revision: this.room.dataRevision, dragging: new Set(this.room.dragging), value };
+    this.geometry = { pageId, revision: this.room.dataRevision, value };
     this.view = null;
     return value;
   }

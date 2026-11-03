@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
-import { createFile, fileFor, MAX_UPLOAD, newShareToken, putFile, room, setLibrary, sharedFile, workspaceFiles, workspaceFor } from "./data";
+import { createFile, fileFor, newShareToken, room, sharedFile, workspaceFiles, workspaceFor } from "./data";
 import { mcp } from "./mcp";
 import { oauth } from "./oauth";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
@@ -110,10 +110,11 @@ api.patch("/files/:id", async (c) => {
   const file = await fileFor(c.env, c.get("user").id, c.req.param("id"));
   if (!file) return c.json({ error: "not found" }, 404);
   const body = await c.req.json<{ name?: string; libraryId?: string | null }>();
+  // Members view the canvas; agents link a library with the set_library tool.
+  if (body.libraryId !== undefined) return c.json({ error: "Ask an agent to change the file's library" }, 403);
   if (body.name !== undefined) {
     await c.env.DB.prepare(`UPDATE files SET name = ? WHERE id = ?`).bind(body.name.trim().slice(0, 120) || file.name, file.id).run();
   }
-  if (body.libraryId !== undefined) await setLibrary(c.env, file, body.libraryId);
   return c.body(null, 204);
 });
 
@@ -220,23 +221,6 @@ api.get("/files/:id/ws", async (c) => {
   const principal = sessionPrincipal(c.get("identity"));
   if (principal) headers.set("x-session-principal", JSON.stringify(principal));
   return room(c.env, file.id).fetch(new Request(c.req.url, { headers }));
-});
-
-/** Uploads an image (and an optional low-res preview made in the browser) to R2. */
-api.post("/files/:id/assets", async (c) => {
-  const file = await fileFor(c.env, c.get("user").id, c.req.param("id"));
-  if (!file) return c.json({ error: "not found" }, 404);
-  const form = await c.req.formData();
-  const urls: Record<string, string> = {};
-  for (const field of ["file", "preview"]) {
-    const upload = form.get(field);
-    if (!(upload instanceof File)) continue;
-    if (!upload.type.startsWith("image/")) return c.json({ error: "Only images can be uploaded" }, 400);
-    if (upload.size > MAX_UPLOAD) return c.json({ error: "Images must be under 25 MB" }, 413);
-    urls[field] = await putFile(c.env, file.id, await upload.arrayBuffer(), upload.type);
-  }
-  if (!urls.file) return c.json({ error: "Missing file" }, 400);
-  return c.json({ src: urls.file, preview: urls.preview ?? urls.file });
 });
 
 // Optional agent keys are Clerk user-scoped keys. OAuth is the primary MCP connection.

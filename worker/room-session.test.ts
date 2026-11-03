@@ -121,15 +121,23 @@ describe("FileRoom member session issuer", () => {
     expect(server.close).not.toHaveBeenCalled();
   });
 
-  it("keeps current-instance members eligible to write, read and appear as peers", async () => {
+  it("keeps current-instance members eligible to read and appear as peers", async () => {
     const ws = socket();
-    const { room, apply } = fixture(ws);
-    const ops = [{ t: "page.put", page: { id: "page", name: "Page", sort: 0 } }];
-    await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: "ops", ops }));
+    const { room } = fixture(ws);
     await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: "source", ids: ["node"] }));
-    expect(apply).toHaveBeenCalledWith("file", "https://sharpner.example", ops, member);
     expect(JSON.parse(ws.send.mock.calls[0]![0])).toEqual({ type: "source", items: [{ id: "node", rev: 1, source: "<p>Saved design</p>" }] });
     expect(room.peers()).toEqual([{ ...member, pageId: null, selection: [], cursor: null, cid: "member" }]);
+    expect(ws.close).not.toHaveBeenCalled();
+  });
+
+  it("refuses canvas edits from a member's browser and resyncs that tab", async () => {
+    const ws = socket();
+    const { room, apply } = fixture(ws);
+    for (const ops of [[{ t: "node.put", id: "node", node: { x: 40, y: 80 } }], [{ t: "node.del", ids: ["node"] }], [{ t: "page.del", id: "page" }]]) {
+      await room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify({ type: "ops", ops }));
+    }
+    expect(apply).not.toHaveBeenCalled();
+    expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw).type)).toEqual(["init", "init", "init"]);
     expect(ws.close).not.toHaveBeenCalled();
   });
 

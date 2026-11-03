@@ -1,10 +1,10 @@
 import { selectThumbnail } from "../shared/thumbnails";
-import { descendantsOf, layoutHeight } from "../shared/layout";
+import { layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
   componentTag, mergeDesignSystems, emptyBrand,
-  type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Op, type Page, type Peer, type Presence, type ServerMsg,
+  type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Page, type Peer, type Presence, type ServerMsg,
 } from "../shared/types";
 
 type Status = "connecting" | "open" | "offline" | "gone" | "denied";
@@ -48,8 +48,6 @@ export class Room {
   agentDone = new Map<string, number>();
   /** Nodes that appeared after load (id -> when), so they can materialize instead of popping in. */
   appeared = new Map<string, number>();
-  /** Nodes being dragged locally; server echoes for them are ignored until the drag ends. */
-  dragging = new Set<string>();
   version = 0;
   /** Geometry, page membership and measured heights; cursor traffic does not invalidate layout. */
   dataRevision = 0;
@@ -311,7 +309,6 @@ export class Room {
         if (msg.pageDels) for (const pageId of msg.pageDels) this.forgetPage(pageId);
         if (msg.nodeDels) for (const id of msg.nodeDels) this.forgetNode(id);
         for (const n of msg.nodes ?? []) {
-          if (this.dragging.has(n.id)) continue;
           if (!this.nodes.has(n.id)) {
             this.appeared.set(n.id, performance.now());
             this.later(() => { this.appeared.delete(n.id); this.emit(); }, 1500);
@@ -477,7 +474,6 @@ export class Room {
     this.visibleSources.delete(id);
     this.wanted.delete(id);
     this.inflight.delete(id);
-    this.dragging.delete(id);
     this.agentActivity.delete(id);
     this.agentDone.delete(id);
     this.appeared.delete(id);
@@ -540,63 +536,6 @@ export class Room {
     const thread = await api<CommentDetail>(`/files/${this.fileId}/comments${path}`, { method, json });
     if (!this.closed) { this.upsertComment(thread); this.emit(); }
     return thread;
-  }
-
-  send(ops: Op[]) {
-    for (const op of ops) this.applyLocal(op);
-    if (ops.some((op) => op.t !== "cover.set")) this.changedData();
-    this.reconcileSources();
-    this.emit();
-    this.sendRaw({ type: "ops", ops });
-  }
-
-  /** Moves nodes locally without sending (used while dragging). */
-  moveLocal(positions: Map<string, { x: number; y: number }>) {
-    for (const [id, p] of positions) {
-      const n = this.nodes.get(id);
-      if (n) this.nodes.set(id, { ...n, ...p });
-    }
-    if (positions.size) this.changedData();
-    this.emit();
-  }
-
-  private applyLocal(op: Op) {
-    switch (op.t) {
-      case "page.put":
-        if (op.page.kind === "design-system") this.pages = this.pages.map((p) => p.id !== op.page.id && p.kind === "design-system" ? { ...p, kind: "canvas" } : p);
-        this.upsertPage(op.page);
-        break;
-      case "brand.set":
-        this.brand = { ...this.brand, ...op.brand };
-        break;
-      case "page.del":
-        this.forgetPage(op.id);
-        break;
-      case "node.put": {
-        const cur = this.nodes.get(op.id);
-        const { source: _source, ...meta } = op.node;
-        if (cur) this.nodes.set(op.id, selectThumbnail({ ...cur, ...meta }));
-        else if (meta.pageId) {
-          this.nodes.set(op.id, {
-            id: op.id, pageId: meta.pageId, parentId: meta.parentId ?? null, kind: meta.kind ?? "frame", name: meta.name ?? "Frame",
-            x: meta.x ?? 0, y: meta.y ?? 0, width: meta.width ?? 400, height: meta.height ?? null,
-            layout: meta.layout ?? (meta.kind === "section" ? "auto" : "free"),
-            order: meta.order ?? Math.max(0, ...[...this.nodes.values()].map((n) => n.order ?? 0)) + 1,
-            measuredHeight: null, src: meta.src ?? null, thumbLo: meta.thumbLo ?? meta.src ?? null, thumbHi: meta.src ?? null, rev: 0,
-          });
-        }
-        const node = this.nodes.get(op.id);
-        if (node) this.updateDesignNode(node);
-        if (this.coverNodeId === op.id && node?.kind !== "frame" && node?.kind !== "image") this.coverNodeId = null;
-        break;
-      }
-      case "cover.set":
-        this.coverNodeId = op.id;
-        break;
-      case "node.del":
-        for (const id of [...op.ids, ...descendantsOf([...this.nodes.values()], op.ids)]) this.forgetNode(id);
-        break;
-    }
   }
 
   private upsertPage(p: Page) {

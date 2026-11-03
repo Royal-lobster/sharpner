@@ -107,8 +107,8 @@ export type ComponentDef = { tag: string; html: string };
 export type DesignSystem = { tokens: string; components: ComponentDef[] };
 export type LibraryInfo = { fileId: string; name: string; design: DesignSystem; catalog?: DesignCatalog };
 
+/** Browsers only view and present. Canvas changes come from agents through MCP. */
 export type ClientMsg =
-  | { type: "ops"; ops: Op[] }
   | { type: "presence"; presence: Presence }
   | { type: "source"; ids: string[] };
 

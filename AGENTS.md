@@ -1,6 +1,6 @@
 # Sharpner agent guide
 
-Sharpner is a shared infinite canvas where people and coding agents design product UI.
+Sharpner is a shared infinite canvas where coding agents design product UI and people review it.
 It is one Cloudflare Worker (Hono) and a React 19 single-page app. Use the terms in
 [CONTEXT.md](CONTEXT.md) for every name, message and doc. Read
 [CONTRIBUTING.md](CONTRIBUTING.md) for conventions and
@@ -81,6 +81,8 @@ Report what you did not verify. A passing unit test does not prove a UI change.
   first-camera-fit guard when you change the realtime client or the renderer.
 - Scope every operation to a current workspace member. Browser sessions and agent
   credentials keep separate entry points. Mutating MCP tools go through `access().apply`.
+- Members only view the canvas: browser sockets never apply canvas edits, and the editor offers no
+  drag, delete, upload, page, cover or library controls. Only agents change a canvas, through MCP.
 - Screens render their authored HTML; Sharpner never applies a theme to a screen.
   Specimens render in dark when the tokens declare a `dark` theme.
 - `worker/mcp-discovery.test.ts` enforces the MCP text budgets and checks that every

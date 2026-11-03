@@ -69,4 +69,20 @@ describe("authenticated file bootstrap", () => {
     expect(await response.json()).toEqual({ error: "not found" });
     expect(mocks.workspaceFor).not.toHaveBeenCalled();
   });
+
+  it("lets a member rename a file but not change its library or upload into its canvas", async () => {
+    const patch = (json: unknown) => app.request("https://sharpner.example/api/files/file_design", {
+      method: "PATCH", headers: { authorization: "Bearer session_fixture", origin: "https://sharpner.example", "content-type": "application/json" }, body: JSON.stringify(json),
+    }, env);
+    expect((await patch({ name: "Renamed" })).status).toBe(204);
+    const library = await patch({ libraryId: "file_library" });
+    expect(library.status).toBe(403);
+    expect(await library.json()).toEqual({ error: "Ask an agent to change the file's library" });
+    const form = new FormData();
+    form.set("file", new File([new Uint8Array([137, 80, 78, 71])], "pasted.png", { type: "image/png" }));
+    const upload = await app.request("https://sharpner.example/api/files/file_design/assets", {
+      method: "POST", headers: { authorization: "Bearer session_fixture", origin: "https://sharpner.example" }, body: form,
+    }, env);
+    expect(upload.status).toBe(404);
+  });
 });

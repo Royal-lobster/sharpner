@@ -11,7 +11,7 @@ The tenant: a group of members who share files and libraries.
 _Avoid_: Team, organization, org, tenant
 
 **Member**:
-A person who belongs to a workspace, either as an owner or a regular member.
+A person who belongs to a workspace, either as an owner or a regular member. Members view the canvas, select designs, comment and share; they change the canvas only by asking an agent.
 _Avoid_: User (when the workspace relationship matters), collaborator, seat
 
 **Invite**:
@@ -53,7 +53,7 @@ A node showing an uploaded picture.
 _Avoid_: Asset, photo
 
 **Cover**:
-The preview that represents a file in the workspace. A member or agent can choose a frame or image explicitly; otherwise Sharpner selects a preview automatically. A designed cover is usually a 16:9 frame on a Cover page, and stays an ordinary editable node.
+The preview that represents a file in the workspace. An agent can choose a frame or image explicitly; otherwise Sharpner selects a preview automatically. A designed cover is usually a 16:9 frame on a Cover page, and stays an ordinary editable node.
 _Avoid_: Thumbnail (when referring to the chosen design rather than its rendered image), cover node kind
 
 **Section**:
@@ -131,6 +131,7 @@ _Avoid_: Components page, styles page
 - A **File** may use one **Library**, which must be a **File** in the same **Workspace**.
 - A **File**'s **Design system** is its **Library**'s **Tokens** and **Components** plus its own; its own win when names collide.
 - A **Frame** uses **Components** through **Instances** and styles itself with **Tokens**.
+- Only an **Agent** changes a canvas: its pages, nodes, cover, Brand and library. A **Member**'s browser cannot.
 - An **Agent connection** lets an **Agent** act as exactly one **Member** and see that member's **Selection**; it cannot grant access beyond that member's workspaces.
 
 ## Example dialogue

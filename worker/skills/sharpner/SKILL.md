@@ -5,7 +5,7 @@ description: Create and edit UI designs, design systems, and canvas comments in 
 
 # Design in Sharpner
 
-Members see edits live. Re-read content after another member changes it. Preserve their edits.
+Members see edits live but only view the canvas; they ask agents for changes. Re-read content after another agent changes it. Preserve its work.
 
 ## Find the work
 

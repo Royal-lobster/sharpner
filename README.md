@@ -6,8 +6,8 @@
 
 **A shared canvas for people and coding agents.**
 
-Give your agent room to design. Browse the result, arrange screens, and explore
-ideas together on an infinite canvas. The designs are HTML, the changes are live,
+Give your agent room to design. Browse the result, select screens to point your
+agent at, and comment on an infinite canvas. Only agents change the canvas. The designs are HTML, the changes are live,
 and the whole app runs on Cloudflare.
 
 [Open Sharpner](https://sharpner.app) · [Run locally](CONTRIBUTING.md#run-locally) · [Connect an agent](docs/agents.md) · [Contribute](CONTRIBUTING.md)

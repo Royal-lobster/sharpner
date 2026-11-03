@@ -108,7 +108,7 @@ read_skill({ path: "references/screens.md" })
 The skill uses `get_app_state` to find the member's file and selection.
 Use `list_pages` for navigation, `get_file({ fileId, pageId })` for a page,
 and `read_nodes` for sources. Describe new pages and sections so later agents
-can find the work. Members can edit page descriptions in the Pages panel.
+can find the work. Members read page descriptions in the Pages panel.
 
 Startup instructions identify the service and skill tool. Clients control when
 tool definitions enter context. Discovery tests limit startup text to 400
@@ -135,8 +135,7 @@ The saved choice follows edits and preview regeneration; deleting its node,
 section or page restores automatic selection. Pass `nodeId: null` to reset it
 explicitly. The screen guide includes cover composition guidance.
 
-Members can select a frame or image and choose **Use as file cover** in the selection bar.
-**File → Use automatic cover** clears that choice.
+Members cannot change the cover in the browser; they ask an agent to call `set_cover`.
 
 Create screens inside sections without coordinates to use automatic layout.
 Read sources before editing, then inspect screenshots to check the result.

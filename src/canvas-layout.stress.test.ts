@@ -70,25 +70,21 @@ describe.skipIf(import.meta.env.MODE !== "stress")("canvas layout stress", () =>
     const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
     for (let step = 0; step < 1000; step++) {
       const id = `screen-${random() % 1000}`;
-      switch (step % 7) {
-        case 0: room.moveLocal(new Map([[id, { x: random() % 5000 - 2500, y: random() % 5000 - 2500 }]])); break;
-        case 1: room.send([{ t: "node.put", id, node: { width: 100 + random() % 900, height: 100 + random() % 1200 } }]); break;
-        case 2: room.send([{ t: "node.put", id, node: { parentId: random() % 2 ? `section-${random() % 24}` : null, order: random() % 1000 } }]); break;
-        case 3: room.send([{ t: "node.put", id, node: { height: null } }]); room.setHeight(id, 50 + random() % 1800); break;
-        case 4: room.dragging.clear(); room.dragging.add(id); break;
-        case 5: room.dragging.clear(); break;
-        case 6: {
-          const node = room.nodes.get(id)!;
-          Socket.current.receive({ type: "sync", nodes: [{ ...node, rev: node.rev + 1, measuredHeight: 350 }], by: null });
-          break;
-        }
+      const node = room.nodes.get(id)!;
+      const sync = (patch: Partial<typeof node>) => Socket.current.receive({ type: "sync", nodes: [{ ...node, ...patch }], by: null });
+      switch (step % 5) {
+        case 0: sync({ x: random() % 5000 - 2500, y: random() % 5000 - 2500 }); break;
+        case 1: sync({ width: 100 + random() % 900, height: 100 + random() % 1200 }); break;
+        case 2: sync({ parentId: random() % 2 ? `section-${random() % 24}` : null, order: random() % 1000 }); break;
+        case 3: sync({ height: null }); room.setHeight(id, 50 + random() % 1800); break;
+        case 4: sync({ rev: node.rev + 1, measuredHeight: 350 }); break;
       }
       const actual = layout.page("page");
       expect(layout.page("page")).toBe(actual);
       // The existing uncached layout is an independent oracle for cache invalidation, not new geometry logic.
       if (step % 10 === 0 || step === 999) {
         const frames = room.pageNodes("page");
-        const expected = layoutRects(frames, (node) => room.heightOf(node), room.dragging);
+        const expected = layoutRects(frames, (node) => room.heightOf(node));
         const catalogs = catalogSectionIds(frames);
         expect(actual.rects).toEqual(expected);
         expect(actual.bounds).toEqual(union([...expected.values()]));

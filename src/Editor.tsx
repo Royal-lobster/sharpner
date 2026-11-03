@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconAlignLeft, IconPencil as Pencil, IconPlus as Plus, IconTrash as Trash2, IconSparkles, IconKeyboard, IconLibrary, IconMessageCircle, IconPhoto, IconPhotoCheck, IconPlayerPlay } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
-import { DESCRIPTION_MAX, type CommentAnchor, type CommentThread, type Page } from "../shared/types";
+import type { CommentAnchor, CommentThread } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canInteract } from "./canvas-render-plan";
@@ -28,9 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { Separator } from "@/components/ui/separator";
 import { claimFileStartup, type FileMeta } from "./file-startup";
-import { Field, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Item, ItemGroup, ItemActions } from "@/components/ui/item";
+import { Item, ItemGroup } from "@/components/ui/item";
 import { Kbd } from "@/components/ui/kbd";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 
@@ -136,19 +134,17 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const desktop = useDesktop();
   const { file, workspace } = meta;
   const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes } = useCanvasLocation(file.id, room);
-  const [renaming, setRenaming] = useState<string | null>(null);
   const [open, setOpen] = useState<"pages" | "file" | "share" | "people" | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [commentMode, setCommentMode] = useState(false);
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [draftComment, setDraftComment] = useState<CommentAnchor | null>(null);
   const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
-  const [dialog, setDialog] = useState<"library" | "help" | null>(null);
+  const [dialog, setDialog] = useState<"help" | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
   const fileTrigger = useRef<HTMLButtonElement>(null);
   const commentsTrigger = useRef<HTMLButtonElement>(null);
   const pendingFileAction = useRef<(() => void) | null>(null);
-  const cancelRename = useRef(false);
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
   const page = room.pages.find((p) => p.id === pageId) ?? room.pages[0];
@@ -201,13 +197,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     ? <Notice title="This link isn’t shared anymore" message="Ask someone in the workspace for a new link." action={<Button asChild size="lg"><a href="/">Open Sharpner</a></Button>} />
     : <Notice title="No access" message="You no longer have access to this file." action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
 
-  const addPage = () => {
-    const id = crypto.randomUUID();
-    room.send([{ t: "page.put", page: { id, name: `Page ${room.pages.length + 1}`, sort: Math.max(0, ...room.pages.map((p) => p.sort)) + 1 } }]);
-    selectPage(id);
-    setRenaming(id);
-  };
-
   const renameFile = async () => {
     const name = await askText({ title: "Rename file", label: "File name", initial: file.name, confirm: "Rename" });
     if (!name || name === file.name) return;
@@ -222,25 +211,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const counts = new Map<string, number>();
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = liveSelection.map((id) => room.nodes.get(id)!);
-  const coverCandidate = selected.length === 1 && (selected[0]!.kind === "frame" || selected[0]!.kind === "image") ? selected[0]! : null;
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
-  const describePage = async (p: Page) => {
-    const description = await askText({
-      title: `Describe “${p.name}”`, label: "Description", initial: p.description ?? "", confirm: "Save",
-      message: "What this page holds and when to look at it. Agents read it to find their way around the file.",
-      multiline: true, optional: true, maxLength: DESCRIPTION_MAX,
-    });
-    if (description !== null && description !== (p.description ?? "")) room.send([{ t: "page.put", page: { id: p.id, name: p.name, sort: p.sort, description } }]);
-  };
-  const deletePage = async (p: { id: string; name: string }) => {
-    const n = counts.get(p.id) ?? 0;
-    const ok = await askConfirm({
-      title: `Delete “${p.name}”?`, confirm: "Delete page", danger: true,
-      message: n ? `Its ${n === 1 ? "design" : `${n} designs`} will be removed for everyone. This can’t be undone.` : "This page is empty.",
-    });
-    if (ok) room.send([{ t: "page.del", id: p.id }]);
-  };
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
@@ -256,16 +228,10 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
             <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
             <span className="selection-agents">visible to agents</span>
-            {(coverCandidate || playable) && <Separator orientation="vertical" className="selection-divider" />}
+            {playable && <Separator orientation="vertical" className="selection-divider" />}
             {playable && <Tooltip><TooltipTrigger asChild>
               <Button variant="ghost" size="sm" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}><IconPlayerPlay aria-hidden />Interact</Button>
             </TooltipTrigger><TooltipContent side="bottom">Try clicks, typing and scrolling. Nothing you do is saved.</TooltipContent></Tooltip>}
-            {coverCandidate && (room.coverNodeId === coverCandidate.id
-              ? <Tooltip><TooltipTrigger asChild><span className="selection-cover-on" role="img" aria-label="File cover"><IconPhotoCheck aria-hidden /></span></TooltipTrigger><TooltipContent side="bottom">This is the file cover</TooltipContent></Tooltip>
-              : <Tooltip><TooltipTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" className="selection-action" aria-label="Use as file cover" disabled={room.status !== "open"}
-                    onClick={() => room.send([{ t: "cover.set", id: coverCandidate.id }])}><IconPhoto aria-hidden /></Button>
-                </TooltipTrigger><TooltipContent side="bottom">Use as file cover</TooltipContent></Tooltip>)}
           </div>
         )}
         {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
@@ -302,8 +268,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <DropdownMenuSeparator />
               {!readOnly && <>
                 <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => void renameFile(); }}><Pencil aria-hidden />Rename file…</DropdownMenuItem>
-                {(meta.files.length > 0 || file.library_id) && <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("library"); }}><IconLibrary aria-hidden />Design system…</DropdownMenuItem>}
-                {room.coverNodeId && <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => room.send([{ t: "cover.set", id: null }])}><IconPhoto aria-hidden />Use automatic cover</DropdownMenuItem>}
                 <DropdownMenuSeparator />
               </>}
               <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("help"); }}><IconKeyboard aria-hidden />Canvas controls</DropdownMenuItem>
@@ -312,9 +276,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <span className="sr-only" role="status">{status}</span>
           <Separator orientation="vertical" className="dock-divider" />
           <DockPanel label="Pages" count={room.pages.length} open={open === "pages"} onOpenChange={toggle("pages")} className="dock-pages" side="bottom"
-            action={!readOnly && <Button variant="secondary" size="sm" onClick={addPage}><Plus aria-hidden />Add page</Button>}
-            // Escape while renaming cancels the rename instead of closing the panel.
-            onEscapeKeyDown={(e) => { if (renaming) { e.preventDefault(); cancelRename.current = true; setRenaming(null); } }}
             trigger={
               <Button variant="ghost" className="dock-button dock-page-button">
                 <FileText className="size-4" aria-hidden />
@@ -325,32 +286,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             <ItemGroup className="page-list gap-1">
               {room.pages.map((p) => (
                 <Item role="listitem" size="xs" key={p.id} className={cn("page-item flex-nowrap gap-1 p-0", p.id === page?.id && "bg-muted")}>
-                  {renaming === p.id ? (
-                    <Input autoFocus aria-label="Page name" defaultValue={p.name} enterKeyHint="done" onFocus={(e) => { cancelRename.current = false; e.currentTarget.select(); }}
-                      onBlur={(e) => {
-                        setRenaming(null);
-                        const name = e.target.value.trim();
-                        // Without a description the server keeps the current one, even if an agent just changed it.
-                        if (!cancelRename.current && name && name !== p.name) room.send([{ t: "page.put", page: { id: p.id, name, sort: p.sort } }]);
-                      }}
-                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
-                    />
-                  ) : (
-                    <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
-                      <span className="page-option-text">
-                        <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
-                        {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
-                      </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
-                    </Button>
-                  )}
-                  {!readOnly && renaming !== p.id && <ItemActions className="page-actions">
-                    <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`Page options for ${p.name}`}><IconLibrary aria-hidden /></Button></DropdownMenuTrigger><DropdownMenuContent>
-                      <DropdownMenuItem disabled={room.status !== "open"} onSelect={() => { room.send([{ t: "page.put", page: { id: p.id, name: p.name, sort: p.sort, kind: p.kind === "design-system" ? "canvas" : "design-system" } }]); selectNodes([]); setOpen(null); }}> {p.kind === "design-system" ? "Use as regular page" : "Use as Design System page"}</DropdownMenuItem>
-                    </DropdownMenuContent></DropdownMenu>
-                    <IconAction label={`Rename ${p.name}`} onClick={() => setRenaming(p.id)}><Pencil aria-hidden /></IconAction>
-                    <IconAction label={`Describe ${p.name}`} onClick={() => void describePage(p)}><IconAlignLeft aria-hidden /></IconAction>
-                    {room.pages.length > 1 && <IconAction label={`Delete ${p.name}`} onClick={() => void deletePage(p)}><Trash2 aria-hidden /></IconAction>}
-                  </ItemActions>}
+                  <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
+                    <span className="page-option-text">
+                      <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
+                      {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
+                    </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
+                  </Button>
                 </Item>
               ))}
             </ItemGroup>
@@ -395,7 +336,6 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           </DockPanel>
         </ButtonGroup></nav>
       </div>}
-      {!readOnly && <LibraryDialog file={file} files={meta.files} open={dialog === "library"} onOpenChange={(next) => setDialog(next ? "library" : null)} onChange={(libraryId) => onChange({ library_id: libraryId })} />}
       <ResponsiveDialog title="Canvas controls" open={dialog === "help"} onOpenChange={(next) => setDialog(next ? "help" : null)}>
         <div className="canvas-help">
           <div className="touch-help">
@@ -406,7 +346,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Fit</dt><dd>Fit button, or double-tap a design</dd>
               <dt>Interact</dt><dd>Try a design’s clicks and typing; Stop returns to the canvas</dd>
             </dl>
-            {!readOnly && <p>Designs can’t be moved by touch, so navigating never rearranges a page.</p>}
+            {!readOnly && <p>The canvas is view only. Ask an agent to add, move or remove designs.</p>}
           </div>
           <div className="keyboard-help">
             <dl>
@@ -415,12 +355,11 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
               <dt>Interact</dt><dd>Try a design’s clicks and typing; <Kbd>Esc</Kbd> stops, Reset starts again</dd>
               {!readOnly && <>
-                <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag</dd>
-                <dt>Images</dt><dd>Drop or paste</dd>
-                <dt>Delete</dt><dd>⌫</dd>
+                <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag, to show designs to agents</dd>
                 <dt>Comment</dt><dd><Kbd>C</Kbd>, then click a spot</dd>
               </>}
             </dl>
+            {!readOnly && <p>The canvas is view only. Ask an agent to add, move or remove designs.</p>}
           </div>
         </div>
       </ResponsiveDialog>
@@ -471,54 +410,6 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
         <div className="dock-panel-body">{children}</div>
       </DrawerContent>
     </Drawer>
-  );
-}
-
-function IconAction({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground max-sm:size-11 pointer-coarse:size-11" aria-label={label} onClick={onClick}>{children}</Button>
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function LibraryDialog({ file, files, open, onOpenChange, onChange }: {
-  file: FileInfo; files: FileMeta["files"]; open: boolean; onOpenChange: (open: boolean) => void; onChange: (libraryId: string | null) => void;
-}) {
-  const [libraryId, setLibraryId] = useState(file.library_id ?? "");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) setLibraryId(file.library_id ?? ""); }, [open, file.library_id]);
-  const save = async () => {
-    setBusy(true);
-    try {
-      await api(`/files/${file.id}`, { method: "PATCH", json: { libraryId: libraryId || null } });
-      onChange(libraryId || null);
-      onOpenChange(false);
-      const name = files.find((f) => f.id === libraryId)?.name;
-      toast(name ? `Using ${name}'s design system` : "Using this file's own design system", { tone: "success" });
-    } catch (error) { toast((error as Error).message, { tone: "error" }); }
-    finally { setBusy(false); }
-  };
-  return (
-    <ResponsiveDialog title="Design system" description="Reuse another file’s tokens and components." open={open} onOpenChange={onOpenChange}
-      footer={<>
-        <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancel</Button>
-        <Button type="submit" form="file-library-form" disabled={busy || libraryId === (file.library_id ?? "")}>{busy ? "Saving…" : "Save"}</Button>
-      </>}>
-      <form id="file-library-form" onSubmit={(event) => { event.preventDefault(); if (!busy && libraryId !== (file.library_id ?? "")) void save(); }}>
-        <Field>
-          <FieldLabel htmlFor="file-library">Source file</FieldLabel>
-          <NativeSelect id="file-library" data-autofocus className="w-full" value={libraryId} disabled={busy} onChange={(event) => setLibraryId(event.target.value)}>
-            <NativeSelectOption value="">This file</NativeSelectOption>
-            {file.library_id && !files.some((f) => f.id === file.library_id) && <NativeSelectOption value={file.library_id} disabled>Linked file unavailable</NativeSelectOption>}
-            {files.map((f) => <NativeSelectOption key={f.id} value={f.id}>{f.name}</NativeSelectOption>)}
-          </NativeSelect>
-        </Field>
-      </form>
-    </ResponsiveDialog>
   );
 }
 

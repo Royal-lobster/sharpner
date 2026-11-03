@@ -20,7 +20,7 @@ const pageDescription = z.string().max(DESCRIPTION_MAX)
 const sectionDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Sections only. Describe the contents and purpose in one or two sentences. Empty clears it.");
 
-const INSTRUCTIONS = `Use Sharpner for shared UI design and canvas feedback. Call read_skill() before edits. Use get_app_state to find the member's file and selection. Preserve other members' edits.`;
+const INSTRUCTIONS = `Use Sharpner for shared UI design and canvas feedback. Call read_skill() before edits. Use get_app_state to find the member's file and selection. Preserve other agents' work.`;
 
 export const mcp = new Hono<AppEnv>();
 

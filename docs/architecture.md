@@ -23,7 +23,7 @@ edits and fan out changes.
 | `src/live-frame.tsx` | Sandboxed live documents and no-flicker document swaps |
 | `src/InteractionFrame.tsx`, `shared/interaction-document.ts` | Disposable viewer-local playback and its input/resource policy |
 | `src/canvas-navigation.ts` | Content bounds, fitted overview, and camera constraints |
-| `src/room.ts` | Realtime client, optimistic edits, and demand-loaded sources |
+| `src/room.ts` | Realtime client, presence, and demand-loaded sources; it never sends canvas edits |
 | `src/thumbnail-cache.ts` | Bounded image loading and decoded-pixel budget |
 | `src/preview-loader.ts` | Batched preview transport and request backpressure |
 | `src/touch-gestures.ts` | Touch navigation state machine |
@@ -66,7 +66,7 @@ Brand metadata (`name`, image `logoUrl`, `guidelines`, `voice`) remains in room 
 
 - **Token sheets** (`kind: "tokens"`) contain Tailwind v4 CSS. For example, `@theme { --color-primary: #4f46e5; }` makes `bg-primary` available in every frame. Token sheets render as visual specimens. Named `[data-theme="dark"]`, `[data-theme="uwu"]`, or other equality selectors override token values; existing `.dark` overrides also work. These are theme contexts that screens opt into by writing `data-theme` (or a class) on their own root HTML. Sharpner never applies or switches a theme: there is no file-wide theme (removed 2026-11-01), no per-frame `theme` field and no component theme overrides (both removed 2026-11-02), and no document theme script, per-theme thumbnail cache or live-iframe theme hot-swap. A migration baked each formerly themed frame's theme into its HTML roots (`data-theme` and class on `<html>`/`<body>`) and renamed each component theme override to a standalone component named `"<Name> (<Theme>)"`. Theme names are still discovered from merged token CSS, including the library, and `get_design_system` lists them. Token sheets render a specimen comparing the default Light pane and every declared theme. Components hold one definition per tag; instances expand with it. Themes can change colors, fonts, radii, and shadows; scoped feature CSS can add decoration, while structural alternatives are separate components or screens. Web-font `@import url(...)` declarations become stylesheet links.
 - **Components** (`kind: "component"`) contain reusable HTML. The name sets the tag: `Button/Primary` becomes `<x-button-primary>`. `{{label|Continue}}` takes an instance's `label` attribute or its default; `<slot></slot>` takes the instance's children. Components can compose other components. Tags are file-wide and names must remain unique, so feature components use a prefix such as `Portfolio/AssetRow` → `<x-portfolio-assetrow>`. Placement on a feature page conveys ownership, not visibility. Components have one definition per tag; theme differences go in token values or scoped CSS, and structural alternatives are separate components. Variants such as Primary/Ghost are distinct from themes such as Light/Dark/UwU.
-- **Libraries** are ordinary files. A file can use one library from its own workspace, selected in file options or with `set_library`. The library contributes its own token sheets and components; the consuming file's definitions take precedence. Library edits update dependent files and regenerate affected thumbnails. Libraries export all their own definitions regardless of page, so use a dedicated foundations-and-primitives file to share across products. Libraries do not re-export their own linked libraries.
+- **Libraries** are ordinary files. A file can use one library from its own workspace, linked with `set_library`. The library contributes its own token sheets and components; the consuming file's definitions take precedence. Library edits update dependent files and regenerate affected thumbnails. Libraries export all their own definitions regardless of page, so use a dedicated foundations-and-primitives file to share across products. Libraries do not re-export their own linked libraries.
 
 ```html
 <x-card title="Assets">
@@ -81,20 +81,20 @@ Agents call `read_skill()` before edits. It returns [SKILL.md](../worker/skills/
 
 ## Rendering and loading
 
-Workspace cards use a file's **cover**. A member or agent can pin an ordinary
-frame or image with the shared `cover.set` operation (`set_cover` over MCP).
+Workspace cards use a file's **cover**. An agent can pin an ordinary
+frame or image with the `cover.set` operation (`set_cover` over MCP).
 The FileRoom stores the chosen node ID in metadata and resolves its latest
 preview through the existing thumbnail pipeline, mirroring the resulting URL
 into D1's `files.cover`. The choice survives edits and room hibernation; a
 pending first preview uses an automatic fallback without losing the pin.
 Deleting the chosen node, its containing section or its page clears the choice.
 `get_file` reports the choice and URL, while socket init/sync messages carry
-`coverNodeId` to keep member controls current. Agent-authored covers conventionally
+`coverNodeId` to keep the canvas current. Agent-authored covers conventionally
 live as fixed 1600 × 900 HTML frames on a described Cover page.
 
 Each mounted canvas keeps one world-layout snapshot. Camera movement, presence,
 source delivery, preview loading and agent effects reuse its rectangles and
-catalog labels. Node/page changes, measured heights and exact drag membership
+catalog labels. Node/page changes and measured heights
 invalidate it. Changing pages replaces the snapshot instead of retaining a
 geometry cache for every visited page. Painting remains Canvas 2D with DOM/live
 HTML promotion at close zoom.
@@ -223,7 +223,7 @@ File sockets retain the verified session JWT's expiry and session ID. The browse
 
 Migration `0002` adds the Clerk links without deleting historical users, workspaces, memberships, invites, files, or old key rows. Unlinked legacy rows do not grant access. Old cookies, GitHub/dev sign-in routes, and local agent keys are no longer accepted; names and logins never automatically claim historical data. See [the identity and OAuth decision](adr/0002-clerk-workspaces-and-oauth.md).
 
-View links use a random 256-bit capability in `/s/:token`, enabled or revoked from file options. Migration `0003` adds the per-file share token. Anonymous viewer sockets accept source reads only, omit member identities and presence, and recheck token access on connection and source requests. Revocation fences upgrades already in flight as well as closing accepted sockets. A one-hour socket lease forces periodic revalidation without a resident timer. Anyone holding an enabled link can view the file's design content and inherited design system.
+View links use a random 256-bit capability in `/s/:token`, enabled or revoked from file options. Migration `0003` adds the per-file share token. Member sockets accept presence and source reads; the canvas is view only in the browser, and a stray edit message is refused with a fresh `init`. Agents change the canvas through MCP. Anonymous viewer sockets accept source reads only, omit member identities and presence, and recheck token access on connection and source requests. Revocation fences upgrades already in flight as well as closing accepted sockets. A one-hour socket lease forces periodic revalidation without a resident timer. Anyone holding an enabled link can view the file's design content and inherited design system.
 
 ## Decisions
 

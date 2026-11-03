@@ -153,14 +153,16 @@ const start = (nodes: CanvasNode[], socket = Socket.instances.at(-1)!) => {
 const sourceIds = (socket: Socket) => socket.sent.flatMap((message) => message.type === "source" ? message.ids : []);
 const tick = () => vi.advanceTimersByTimeAsync(0);
 const supply = (socket: Socket, id: string, source = `<p>${id}</p>`, rev = 1) => socket.receive({ type: "source", items: [{ id, source, rev }] });
+/** An agent's change, as the server broadcasts it. Members never edit the canvas themselves. */
+const synced = (socket: Socket, id: string, patch: Partial<CanvasNode>) =>
+  socket.receive({ type: "sync", nodes: [{ ...(room.nodes.get(id) ?? node(id)), ...patch }], by: null });
 
 describe("file cover selection", () => {
-  it("syncs cover choices across members and reconnects without invalidating layout", () => {
+  it("syncs cover choices and reconnects without invalidating layout", () => {
     const socket = start([node("cover"), node("other")]);
     const revision = room.dataRevision;
-    room.send([{ t: "cover.set", id: "cover" }]);
+    socket.receive({ type: "sync", coverNodeId: "cover", by: null });
     expect(room.coverNodeId).toBe("cover");
-    expect(socket.sent.at(-1)).toEqual({ type: "ops", ops: [{ t: "cover.set", id: "cover" }] });
     expect(room.dataRevision).toBe(revision);
     socket.receive({ type: "sync", coverNodeId: "other", by: null });
     expect(room.coverNodeId).toBe("other");
@@ -171,14 +173,21 @@ describe("file cover selection", () => {
     expect(room.coverNodeId).toBe("cover");
   });
 
-  it("clears a local cover when deleting its containing section or page", () => {
-    start([node("section", { kind: "section" }), node("cover", { parentId: "section" })]);
-    room.send([{ t: "cover.set", id: "cover" }]);
-    room.send([{ t: "node.del", ids: ["section"] }]);
+  it("clears the cover when its node or page is deleted", () => {
+    const socket = start([node("section", { kind: "section" }), node("cover", { parentId: "section" })]);
+    socket.receive({ type: "sync", coverNodeId: "cover", by: null });
+    socket.receive({ type: "sync", nodeDels: ["section", "cover"], by: null });
     expect(room.coverNodeId).toBeNull();
-    room.send([{ t: "node.put", id: "replacement", node: { pageId: "page_two" } }, { t: "cover.set", id: "replacement" }]);
-    room.send([{ t: "page.del", id: "page_two" }]);
+    synced(socket, "replacement", { pageId: "page_two" });
+    socket.receive({ type: "sync", coverNodeId: "replacement", by: null });
+    socket.receive({ type: "sync", pageDels: ["page_two"], by: null });
     expect(room.coverNodeId).toBeNull();
+  });
+
+  it("has no way to send a canvas edit to the server", () => {
+    const socket = start([node("screen")]);
+    expect("send" in room).toBe(false);
+    expect(socket.sent.every((message) => message.type === "presence" || message.type === "source")).toBe(true);
   });
 });
 
@@ -200,17 +209,17 @@ describe("cached canvas layout", () => {
     expect(geometry.rects.get("screen")).toEqual({ x: 0, y: 0, w: 400, h: 600 });
   });
 
-  it("refreshes geometry after optimistic movement, resize, deletion and creation", () => {
-    start([node("screen")]);
+  it("refreshes geometry after an agent moves, resizes, deletes and creates designs", () => {
+    const socket = start([node("screen")]);
     const layout = new CanvasLayout(room), before = layout.page("page_one");
-    room.moveLocal(new Map([["screen", { x: 80, y: 100 }]]));
+    synced(socket, "screen", { x: 80, y: 100 });
     expect(layout.page("page_one")).not.toBe(before);
     expect(layout.page("page_one").rects.get("screen")).toEqual({ x: 80, y: 100, w: 400, h: 600 });
-    room.send([{ t: "node.put", id: "screen", node: { width: 500, height: 700 } }]);
+    synced(socket, "screen", { width: 500, height: 700 });
     expect(layout.page("page_one").rects.get("screen")).toEqual({ x: 80, y: 100, w: 500, h: 700 });
-    room.send([{ t: "node.del", ids: ["screen"] }]);
+    socket.receive({ type: "sync", nodeDels: ["screen"], by: null });
     expect(layout.page("page_one").rects.size).toBe(0);
-    room.send([{ t: "node.put", id: "replacement", node: { pageId: "page_one", x: -40, y: 20, width: 100, height: 200 } }]);
+    synced(socket, "replacement", { x: -40, y: 20, width: 100, height: 200 });
     expect(layout.page("page_one").rects.get("replacement")).toEqual({ x: -40, y: 20, w: 100, h: 200 });
   });
 
@@ -238,42 +247,17 @@ describe("cached canvas layout", () => {
     expect(layout.page("page_one").rects.get("auto")?.h).toBe(300);
   });
 
-  it("invalidates when a drag starts or ends without a geometry revision", () => {
-    start([node("group", { kind: "section", width: 480, height: null }), node("child", { parentId: "group", x: 200, y: 300, width: 100, height: 100 })]);
-    const layout = new CanvasLayout(room), before = layout.page("page_one"), revision = room.dataRevision;
-    expect(before.rects.get("group")).toEqual({ x: 72, y: 172, w: 356, h: 356 });
-    room.dragging.add("child");
-    const floating = layout.page("page_one");
-    expect(floating.rects.get("group")).toEqual({ x: 0, y: 0, w: 480, h: 280 });
-    room.dragging.clear();
-    const dropped = layout.page("page_one");
-    expect(dropped).not.toBe(floating);
-    expect(dropped.rects.get("group")).toEqual(before.rects.get("group"));
-    expect(room.dataRevision).toBe(revision);
-  });
-
-  it("compares exact drag membership even when serialized IDs would collide", () => {
-    start([node("group", { kind: "section", height: null }), ...["a,b", "c", "a", "b,c"].map((id, i) => node(id, { parentId: "group", x: i * 1000 }))]);
-    const layout = new CanvasLayout(room);
-    room.dragging.add("a,b"); room.dragging.add("c");
-    const first = layout.page("page_one");
-    room.dragging.clear(); room.dragging.add("a"); room.dragging.add("b,c");
-    const second = layout.page("page_one");
-    expect(second).not.toBe(first);
-    expect(second.rects.get("group")).not.toEqual(first.rects.get("group"));
-  });
-
   it("refreshes catalog labels and partitions after component and section edits", () => {
-    start([node("catalog", { kind: "section", layout: "auto", height: null }), node("button", { kind: "component", name: "Button/Primary", parentId: "catalog", width: 180, height: 40 })]);
+    const socket = start([node("catalog", { kind: "section", layout: "auto", height: null }), node("button", { kind: "component", name: "Button/Primary", parentId: "catalog", width: 180, height: 40 })]);
     const layout = new CanvasLayout(room);
     expect(layout.page("page_one").catalogs.has("catalog")).toBe(true);
     expect(layout.page("page_one").families.map((label) => label.family)).toEqual(["Button"]);
-    room.send([{ t: "node.put", id: "button", node: { name: "Input/Text" } }]);
+    synced(socket, "button", { name: "Input/Text" });
     expect(layout.page("page_one").families.map((label) => label.family)).toEqual(["Input"]);
-    room.send([{ t: "node.put", id: "button", node: { kind: "frame", parentId: null } }]);
+    synced(socket, "button", { kind: "frame", parentId: null });
     expect(layout.page("page_one").catalogs.size).toBe(0);
     expect(layout.page("page_one").families).toEqual([]);
-    room.send([{ t: "node.put", id: "catalog", node: { kind: "frame", width: 200, height: 300 } }]);
+    synced(socket, "catalog", { kind: "frame", width: 200, height: 300 });
     expect(layout.page("page_one").sections).toHaveLength(0);
     expect(layout.page("page_one").nodes).toHaveLength(2);
   });
@@ -295,7 +279,7 @@ describe("cached canvas layout", () => {
     const socket = start([node("screen", { x: 100, y: 200 })]), layout = new CanvasLayout(room);
     socket.receive({ type: "comments", threads: [{ ...feedback, anchor: { pageId: "page_one", nodeId: "screen", x: 10, y: 20 } }] });
     expect(layout.navigation("page_one", viewport).navigationRects).toContainEqual({ x: 110, y: 220, w: 1, h: 1 });
-    room.moveLocal(new Map([["screen", { x: 1000, y: -2000 }]]));
+    synced(socket, "screen", { x: 1000, y: -2000 });
     expect(layout.navigation("page_one", viewport).navigationRects).toContainEqual({ x: 1010, y: -1980, w: 1, h: 1 });
     const geometry = layout.page("page_one"), wide = layout.navigation("page_one", viewport);
     const narrow = layout.navigation("page_one", { w: 390, h: 400 });
@@ -464,12 +448,11 @@ describe("canvas source working set", () => {
     expect(room.sources.has("kept")).toBe(true);
   });
 
-  it.each(["remote", "local"] as const)("forgets all cached node data when a page is deleted %s", async (mode) => {
+  it("forgets all cached node data when a page is deleted", async () => {
     const socket = start([node("kept"), node("removed", { pageId: "page_two" })]);
     room.needSources(["kept", "removed"]); await tick();
     supply(socket, "kept"); supply(socket, "removed"); room.setHeight("removed", 850);
-    if (mode === "remote") socket.receive({ type: "sync", pageDels: ["page_two"], by: null });
-    else room.send([{ t: "page.del", id: "page_two" }]);
+    socket.receive({ type: "sync", pageDels: ["page_two"], by: null });
     expect(room.nodes.has("removed")).toBe(false);
     expect(room.sources.has("removed")).toBe(false);
     expect(room.heights.has("removed")).toBe(false);
@@ -532,7 +515,7 @@ describe("canvas source working set", () => {
     expect(room.dataRevision).toBe(revision);
     expect(room.pageNodes("page_one")).toBe(page);
     expect(room.design()).toBe(design);
-    room.moveLocal(new Map([["screen", { x: 80, y: 100 }]]));
+    synced(socket, "screen", { x: 80, y: 100 });
     expect(room.dataRevision).toBeGreaterThan(revision);
     expect(room.pageNodes("page_one")).not.toBe(page);
     expect(room.pageNodes("page_one").find((item) => item.id === "screen")?.x).toBe(80);
@@ -549,16 +532,12 @@ describe("canvas source working set", () => {
   });
 });
 
-
 describe("Design System page and Brand synchronization", () => {
-  it("keeps partial Brand edits and restores the previous page to canvas when selecting another Design System page", () => {
+  it("follows the server's Brand and single Design System page", () => {
     const socket = start([]);
     const page = room.pages[0]!;
-    room.send([{ t: "brand.set", brand: { name: "FraxNet", voice: ["Direct"] } }]);
-    room.send([{ t: "brand.set", brand: { guidelines: "Paper and ink" } }]);
+    socket.receive({ type: "sync", pages: [{ id: "second", name: "System", sort: 1, kind: "design-system" }], brand: { name: "FraxNet", logoUrl: "", voice: ["Direct"], guidelines: "Paper and ink" }, by: null });
     expect(room.brand).toMatchObject({ name: "FraxNet", voice: ["Direct"], guidelines: "Paper and ink" });
-    room.send([{ t: "page.put", page: { ...page, kind: "design-system" } }]);
-    room.send([{ t: "page.put", page: { id: "second", name: "System", sort: 1, kind: "design-system" } }]);
     expect(room.pages.filter((p) => p.kind === "design-system").map((p) => p.id)).toEqual(["second"]);
     socket.receive({ type: "sync", pages: [{ ...page, kind: "design-system" }, { id: "second", name: "System", sort: 1 }], brand: { name: "Updated", logoUrl: "", voice: [], guidelines: "Shared" }, by: null });
     expect(room.pages.filter((p) => p.kind === "design-system").map((p) => p.id)).toEqual([page.id]);

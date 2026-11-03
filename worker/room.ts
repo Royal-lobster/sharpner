@@ -1081,13 +1081,10 @@ export class FileRoom extends DurableObject<Env> {
       return;
     }
     if (!this.currentSession(ws, att)) return;
-    if (msg.type === "ops") {
-      try {
-        await this.apply(att.fileId, att.origin, msg.ops, att.actor);
-      } catch (err) {
-        console.warn("rejected ops", String(err));
-        await this.sendInit(ws, att); // resync so the sender's optimistic state doesn't drift
-      }
+    if ((msg as { type: string }).type === "ops") {
+      // Members view the canvas; only agents change it, through MCP. A tab opened before that rule
+      // may still send an edit: refuse it and resync so its optimistic change is undone.
+      await this.sendInit(ws, att);
     } else if (msg.type === "source") {
       const self = this;
       const ids = msg.ids.slice(0, 50);

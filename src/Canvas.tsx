@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, descendantsOf, dropOrders, familyOf, isManaged, union, type Rect } from "../shared/layout";
-import { previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem, type Op } from "../shared/types";
+import { AUTO_ROW_GAP, CATALOG_GUTTER, CATALOG_ROW_GAP, contains, familyOf, type Rect } from "../shared/layout";
+import { previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type CommentThread, type DesignSystem } from "../shared/types";
 import { commentPoint } from "../shared/comments";
 import { componentName } from "../shared/specimens";
-import { colorFor, uploadImage } from "./api";
+import { colorFor } from "./api";
 import { toast } from "./toast";
 import { Avatar } from "./Avatar";
 import { ThumbnailCache, thumbnailSource } from "./thumbnail-cache";
@@ -114,7 +114,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   const layout = useMemo(() => new CanvasLayout(room), [room]);
   const { frames, rects, catalogs, sections, nodes, families } = layout.page(pageId);
   const rectOf = (f: CanvasNode) => rects.get(f.id)!;
-  const topLevel = () => frames.filter((f) => !f.parentId).map(rectOf);
   const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId);
   const navigationRef = useRef(navigation);
   navigationRef.current = navigation;
@@ -238,16 +237,14 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     return innermostSection(w.x, w.y);
   };
 
-  const innermostSection = (x: number, y: number, exclude?: Set<string>) => {
+  const innermostSection = (x: number, y: number) => {
     let best: CanvasNode | null = null;
     for (const s of sections) {
-      if (exclude?.has(s.id) || !contains(rectOf(s), x, y)) continue;
+      if (!contains(rectOf(s), x, y)) continue;
       if (!best || rectOf(s).w * rectOf(s).h < rectOf(best).w * rectOf(best).h) best = s;
     }
     return best?.id ?? null;
   };
-
-
 
   // ---- visibility & level of detail -----------------------------------------
 
@@ -386,9 +383,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
         onSelect(nodes.map((f) => f.id));
       } else if (e.key === "Escape") {
         onSelect([]);
-      } else if ((e.key === "Delete" || e.key === "Backspace") && selectionRef.current.length) {
-        room.send([{ t: "node.del", ids: selectionRef.current }]);
-        onSelect([]);
       }
     };
     const up = (e: KeyboardEvent) => e.code === "Space" && setSpaceDown(false);
@@ -400,11 +394,11 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     };
   });
 
-  // ---- pointer: pan, select, move, marquee ------------------------------------
+  // ---- pointer: pan, select, marquee ------------------------------------------
+  // Members only view the canvas: dragging a design pans, it never moves it. Agents rearrange designs.
 
   const gesture = useRef<
-    | { kind: "pan"; sx: number; sy: number; moved: boolean }
-    | { kind: "move"; sx: number; sy: number; moved: boolean; start: Map<string, { x: number; y: number }>; anchors: Map<string, { x: number; y: number }>; roots: string[]; sentAt: number }
+    | { kind: "pan"; sx: number; sy: number; moved: boolean; hit?: boolean }
     | { kind: "marquee"; wx: number; wy: number; base: string[] }
     | null
   >(null);
@@ -422,7 +416,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     onPlaceComment?.({ pageId, nodeId, x: point.x - (rect?.x ?? 0), y: point.y - (rect?.y ?? 0) });
   };
 
-  // Touch navigates and selects but never moves nodes: a resting or second finger can't drag a design.
+  // Touch navigates and selects.
   const touch = useRef(new TouchNavigator());
   const onTouch = (e: React.PointerEvent, phase: "down" | "move" | "up" | "cancel") => {
     const { sx, sy } = local(e);
@@ -457,84 +451,15 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     if (commentMode && !readOnly && e.button === 0 && !spaceDown) return placeComment(sx, sy);
     const hit = navigationOnly ? null : hitTest(sx, sy);
     rootRef.current!.setPointerCapture(e.pointerId);
-    if (navigationOnly || e.button === 1 || spaceDown || (!hit && !e.shiftKey)) {
-      gesture.current = { kind: "pan", sx, sy, moved: false };
-    } else if (!hit) {
+    if (!navigationOnly && e.button === 0 && !spaceDown && !hit && e.shiftKey) {
       const w = toWorld(sx, sy);
       gesture.current = { kind: "marquee", wx: w.x, wy: w.y, base: selection };
-    } else {
-      const id = hit;
-      let next = selection;
-      if (e.shiftKey) next = selection.includes(id) ? selection.filter((s) => s !== id) : [...selection, id];
-      else if (!selection.includes(id)) next = [id];
-      onSelect(next);
-      // Sections carry their contents. Only "roots" (not inside another moving section) are sent:
-      // the server moves a section's contents along with it.
-      const inside = descendantsOf(frames, next);
-      const roots = next.filter((sid) => !inside.has(sid));
-      const start = new Map([...next, ...inside].flatMap((sid) => {
-        const f = room.nodes.get(sid);
-        const r = f && rectOf(f);
-        return r ? [[sid, { x: r.x, y: r.y }] as const] : [];
-      }));
-      const anchors = new Map(roots.flatMap((sid) => { const f = room.nodes.get(sid); return f ? [[sid, { x: f.x, y: f.y }] as const] : []; }));
-      gesture.current = { kind: "move", sx, sy, moved: false, start, anchors, roots, sentAt: 0 };
+      return;
     }
-  };
-
-  const sendMoves = (roots: string[], dropped: boolean, anchors: Map<string, { x: number; y: number }>, start: Map<string, { x: number; y: number }>, point?: { x: number; y: number }) => {
-    const moving = new Set(room.dragging);
-    const { frames: currentFrames, rects: currentRects } = layout.page(pageId);
-    const destinations = new Map<string, string | null>();
-    const orders = new Map<string, number>();
-    if (dropped) {
-      for (const id of roots) {
-        const f = room.nodes.get(id);
-        if (!f) continue;
-        const r = currentRects.get(id)!;
-        // Use the release point, so a large screen can be dropped into a smaller group by its handle.
-        const at = point ?? { x: r.x + r.w / 2, y: r.y + r.h / 2 };
-        destinations.set(id, innermostSection(at.x, at.y, moving));
-      }
-      const groups = new Map<string | null, string[]>();
-      for (const [id, parentId] of destinations) {
-        const f = room.nodes.get(id)!;
-        if (parentId ? room.nodes.get(parentId)?.layout === "auto" : f.kind === "section" && f.layout === "auto") {
-          (groups.get(parentId) ?? groups.set(parentId, []).get(parentId)!).push(id);
-        }
-      }
-      for (const [parentId, ids] of groups) {
-        const at = point ?? currentRects.get(ids[0]!)!;
-        for (const [id, order] of dropOrders(currentFrames, currentRects, ids, parentId, pageId, at)) orders.set(id, order);
-      }
+    if (hit && e.button === 0 && !spaceDown) {
+      onSelect(e.shiftKey ? (selection.includes(hit) ? selection.filter((s) => s !== hit) : [...selection, hit]) : selection.includes(hit) ? selection : [hit]);
     }
-    const ops: Op[] = roots.flatMap((id) => {
-      const f = room.nodes.get(id);
-      if (!f) return [];
-      // Managed nodes float locally while dragged; commit their new order only on release.
-      if (!dropped && (f.kind === "section" || isManaged(f, room.nodes))) return [];
-      const op: Op & { t: "node.put" } = { t: "node.put", id, node: { x: f.x, y: f.y } };
-      const parentId = dropped ? destinations.get(id) ?? null : f.parentId;
-      // Stored coordinates can differ from visible ones (section padding or automatic ancestors).
-      // Same-parent movement sends a delta; reparenting materializes visible coordinates on the server.
-      if (parentId === f.parentId) {
-        const anchor = anchors.get(id)!, from = start.get(id)!;
-        op.node.x = anchor.x + f.x - from.x;
-        op.node.y = anchor.y + f.y - from.y;
-      }
-      if (dropped) {
-        // Dropping into (or out of) a section re-parents the node.
-        if (parentId !== f.parentId) op.node.parentId = parentId;
-        if (orders.has(id)) op.node.order = orders.get(id);
-        // Reordering page sections keeps the layout's anchor stable.
-        if (!parentId && f.kind === "section" && f.layout === "auto") Object.assign(op.node, anchors.get(id));
-      }
-      return [op];
-    });
-    // A precision rebalance occasionally includes stationary siblings; commit it with the drop.
-    const rootIds = new Set(roots);
-    for (const [id, order] of orders) if (!rootIds.has(id)) ops.push({ t: "node.put", id, node: { order } });
-    if (ops.length) room.send(ops);
+    gesture.current = { kind: "pan", sx, sy, moved: false, hit: !!hit };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -550,16 +475,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       g.sx = sx;
       g.sy = sy;
       setCam((c) => ({ ...c, x: c.x + dx, y: c.y + dy }));
-    } else if (g.kind === "move") {
-      const dx = (sx - g.sx) / camRef.current.z, dy = (sy - g.sy) / camRef.current.z;
-      if (!g.moved && Math.hypot(sx - g.sx, sy - g.sy) < 3) return;
-      if (!g.moved) for (const id of g.start.keys()) room.dragging.add(id);
-      g.moved = true;
-      room.moveLocal(new Map([...g.start].map(([id, p]) => [id, { x: Math.round(p.x + dx), y: Math.round(p.y + dy) }])));
-      if (performance.now() - g.sentAt > 100) {
-        g.sentAt = performance.now();
-        sendMoves(g.roots, false, g.anchors, g.start);
-      }
     } else {
       const w = toWorld(sx, sy);
       const r = { x: Math.min(g.wx, w.x), y: Math.min(g.wy, w.y), w: Math.abs(w.x - g.wx), h: Math.abs(w.y - g.wy) };
@@ -577,12 +492,8 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const g = gesture.current;
     gesture.current = null;
     setMarquee(null);
-    if (g?.kind === "pan" && !g.moved && !navigationOnly) onSelect([]);
-    if (g?.kind === "move" && g.moved) {
-      const { sx, sy } = local(e);
-      sendMoves(g.roots, true, g.anchors, g.start, toWorld(sx, sy));
-      for (const id of g.start.keys()) room.dragging.delete(id);
-    }
+    // A click on empty canvas clears the selection; a click on a design selected it on pointer down.
+    if (g?.kind === "pan" && !g.moved && !g.hit && !navigationOnly) onSelect([]);
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
@@ -591,54 +502,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const id = hitTest(e.clientX - b.left, e.clientY - b.top);
     const f = id && room.nodes.get(id);
     if (f) fitTo([rectOf(f)], f.kind === "section" ? 1 : 4);
-  };
-
-  // ---- images: drop & paste ---------------------------------------------------
-
-  const placeImages = useCallback(async (files: File[], at: { x: number; y: number }) => {
-    let x = at.x;
-    const placed: Rect[] = [];
-    const images = files.filter((f) => f.type.startsWith("image/"));
-    if (!images.length) return placed;
-    const done = toast(`Uploading ${images.length === 1 ? images[0]!.name : `${images.length} images`}…`, { sticky: true });
-    for (const file of images) {
-      try {
-        const img = await uploadImage(fileId, file);
-        const width = Math.min(img.width, 1200);
-        const height = Math.round(img.height * (width / img.width));
-        room.send([{ t: "node.put", id: crypto.randomUUID(), node: {
-          kind: "image", pageId, name: file.name.replace(/\.[^.]+$/, "") || "Image",
-          src: img.src, thumbLo: img.preview, x: Math.round(x), y: Math.round(at.y), width, height,
-        } }]);
-        placed.push({ x: Math.round(x), y: Math.round(at.y), w: width, h: height });
-        x += width + 40;
-      } catch (err) {
-        toast(`Upload failed: ${(err as Error).message}`, { tone: "error" });
-      }
-    }
-    done(placed.length ? `Added ${placed.length === 1 ? "image" : `${placed.length} images`}` : null);
-    return placed;
-  }, [fileId, pageId, room]);
-
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const files = [...(e.clipboardData?.files ?? [])];
-      if (navigationOnly || !files.length || (e.target as HTMLElement).closest?.("input, textarea")) return;
-      e.preventDefault();
-      // Pasted images go to the right of everything on the page (dropped ones land where dropped).
-      const all = topLevel();
-      const at = all.length ? { x: union(all).x + union(all).w + 80, y: union(all).y } : { x: 0, y: 0 };
-      placeImages(files, at).then((placed) => placed.length && fitTo(placed, 1));
-    };
-    addEventListener("paste", onPaste);
-    return () => removeEventListener("paste", onPaste);
-  });
-
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    if (navigationOnly) return;
-    const b = rootRef.current!.getBoundingClientRect();
-    placeImages([...e.dataTransfer.files], toWorld(e.clientX - b.left, e.clientY - b.top));
   };
 
   // ---- render -----------------------------------------------------------------
@@ -674,8 +537,6 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       onLostPointerCapture={(e) => { if (e.pointerType === "touch") onTouch(e, "cancel"); }}
       onPointerLeave={() => room.setPresence({ cursor: null })}
       onDoubleClick={onDoubleClick}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
     >
       <canvas ref={rasterRef} className="raster" style={{ width: size.w, height: size.h }} />
       <div
@@ -739,7 +600,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
           <Empty className="flex-none fade-in"><EmptyHeader>
             <EmptyMedia variant="icon"><IconLayout aria-hidden /></EmptyMedia>
             <EmptyTitle>This page is empty</EmptyTitle>
-            <EmptyDescription>{readOnly ? "Designs appear here as soon as they’re added." : "Ask your agent to design something here, or drop in an image."}</EmptyDescription>
+            <EmptyDescription>{readOnly ? "Designs appear here as soon as they’re added." : "Ask your agent to design something here."}</EmptyDescription>
           </EmptyHeader></Empty>
         </div>
       )}
