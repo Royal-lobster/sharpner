@@ -18,8 +18,9 @@ const VERIFY_EMAIL = "sharpner-verify+clerk_test@example.com";
 const VERIFY_ORG = "Sharpner Verify";
 const DEFAULT_PORT = 5199;
 // The browser may reach only the local app, the Clerk development instance, the Tailwind CDN that frames
-// load, and Google Fonts, which agent-authored design tokens import.
-const ALLOWED_DOMAINS = "127.0.0.1,localhost,*.clerk.accounts.dev,*.accounts.dev,img.clerk.com,cdn.jsdelivr.net,fonts.googleapis.com,fonts.gstatic.com";
+// load, Google Fonts and unpkg (fonts and icon fonts that agent-authored tokens import), and Unsplash photos,
+// which designs use as images. All are read-only and none is production.
+const ALLOWED_DOMAINS = "127.0.0.1,localhost,*.clerk.accounts.dev,*.accounts.dev,img.clerk.com,cdn.jsdelivr.net,fonts.googleapis.com,fonts.gstatic.com,unpkg.com,images.unsplash.com";
 // Restores WebSocket.OPEN and friends, which the allowlist wrapper drops. See browser-init.js.
 const INIT_SCRIPT = path.join(SKILL, "scripts", "browser-init.js");
 const SOCKETS_OK = "WebSocket.OPEN === 1 && WebSocket.CLOSED === 3";

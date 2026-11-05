@@ -24,6 +24,19 @@ describe("component specimens", () => {
     expect(fixed).toContain('<x-button-primary></x-button-primary>');
   });
 
+  it("lays the default instance out at the node's full width, as a frame of that width does", () => {
+    const html = renderedHtml({ kind: "component", name: "Trade/Position" }, '<section class="w-full">{{label|Sell}}</section>');
+    const rule = (selector: string) => html.match(new RegExp(`${selector.replace(/[.>*]/g, "\\$&")}\\{([^}]*)\\}`))?.[1] ?? "";
+    // No side padding: a 390px component gets 390px, so it wraps, truncates and overflows only where it would in use.
+    expect(rule(".sp-component-stage")).toContain("padding:12px 0");
+    expect(rule(".sp-component-stage")).toContain("grid-template-columns:minmax(0,1fr)");
+    // Normal flow, not a centring grid: block roots fill the width instead of shrinking to fit or being cut off at the
+    // left. Only inline-level roots are centred, and the instance's own text starts from the start.
+    expect(rule(".sp-component-instance")).toMatch(/display:flow-root;.*width:100%;text-align:center/);
+    expect(rule(".sp-component-instance>*")).toBe("text-align:start");
+    expect(html).not.toMatch(/place-items|justify-items|fit-content/);
+  });
+
   it("escapes authored names in the specimen", () => {
     const html = renderedHtml({ kind: "component", name: 'Button/<img src=x onerror="bad()">' }, '<button>Go</button>');
     expect(html).not.toContain('<img');

@@ -15,14 +15,19 @@ export function componentName(name: string) {
 
 /*
  * A component is shown as itself and nothing else: its default instance on its design system's own background,
- * with a little room around it. The canvas marks the node as a component (label and outline) and catalogs can set
- * variants out as a table, so the preview carries no card chrome or caption. Tag and props come from MCP.
+ * with a little room above and below it. The canvas marks the node as a component (label and outline) and catalogs
+ * can set variants out as a table, so the preview carries no card chrome or caption. Tag and props come from MCP.
+ *
+ * The instance is laid out the way a frame of the node's width lays it out: in normal flow at the full width, so
+ * block roots fill it and wrap, truncate and overflow as they do where the component is used. Inline-level roots,
+ * such as a button or badge, are centred on their line; the instance's own text alignment starts from the start.
  */
 const componentStyles = `<style>
 .sp-component{box-sizing:border-box;display:flex;min-height:0;background:var(--color-background,#fff);color:var(--color-foreground,#242822);font:16px/1.5 var(--font-sans,ui-sans-serif,system-ui,sans-serif)}
 .sp-component *{box-sizing:border-box}
-.sp-component-stage{display:grid;flex:1;place-items:center;min-width:0;padding:12px}
-.sp-component-instance{display:grid;place-items:center;min-width:0;max-width:100%;width:100%}
+.sp-component-stage{display:grid;flex:1;grid-template-columns:minmax(0,1fr);align-items:center;min-width:0;padding:12px 0}
+.sp-component-instance{display:flow-root;min-width:0;width:100%;text-align:center}
+.sp-component-instance>*{text-align:start}
 .sp-component--fixed{height:100vh}
 .sp-component--fixed .sp-component-stage{min-height:0;overflow:hidden}
 </style>`;

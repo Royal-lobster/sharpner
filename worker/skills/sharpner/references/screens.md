@@ -14,6 +14,7 @@ Use custom HTML for layout and unique content. Extract repeated feature markup i
 - Put screens left to right in flow order. Keep related states together. Use `order` to change sequence.
 - Use viewport widths of 1440 for desktop, 1280 for compact desktop, 768 for tablet, or 390 for mobile.
 - Use a fixed mobile height of 844. Omit desktop height to fit content.
+- A frame without a height has a viewport as tall as its content, so `fixed` bars and `vh` sizes use the whole page. To show a fixed bar on the first screen, set the frame height.
 
 Sharpner renders exactly the HTML you write; it never applies a theme. For a themed screen, put `data-theme="<name>"` on the root element (names from `get_design_system.themes`). To compare themes, make separate screens, each with its own root theme.
 

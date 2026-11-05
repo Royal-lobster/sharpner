@@ -82,3 +82,62 @@ describe("single-capture thumbnail tiers", () => {
     expect(result.lo).toBe(result.hi);expect(page.screenshot).toHaveBeenCalledTimes(1);expect(page.evaluate).not.toHaveBeenCalled();
   });
 });
+
+describe("auto-height frame viewport", () => {
+  /**
+   * A tab whose body height depends on the viewport the way a laid-out page does: `content` is the flow height,
+   * `minScreen` adds min-height:100vh, and `grows` adds a 100vh block above that content. A fixed bottom bar adds
+   * nothing to the body; it sits `bar` px above the bottom of the viewport.
+   */
+  function layoutTab(page: { content: number; minScreen?: boolean; grows?: boolean }) {
+    let viewport = { width: 800, height: 600, deviceScaleFactor: 1 };
+    const body = () => page.grows ? viewport.height + page.content : page.minScreen ? Math.max(page.content, viewport.height) : page.content;
+    let evaluations = 0;
+    const tab = {
+      goto: vi.fn(async () => {}),
+      viewport: () => viewport,
+      setViewport: vi.fn(async (next: { width: number; height: number }) => { viewport = { ...next, deviceScaleFactor: 1 }; }),
+      setContent: vi.fn(async () => {}),
+      // The first evaluation reads the document's classes for the Tailwind pass; every later one measures the body.
+      evaluate: vi.fn(async () => evaluations++ === 0 ? { css: "", classes: [] } : body()),
+    };
+    return { tab: tab as unknown as Page, calls: tab, viewport: () => viewport };
+  }
+  const design = { tokens: "", components: [] };
+
+  it("lays an auto-height frame out in a viewport as tall as its content, as the live canvas iframe is", async () => {
+    const { loadFrame } = await import("./render");
+    const { tab, calls, viewport } = layoutTab({ content: 2337 });
+    const size = await loadFrame(tab, { html: "<main></main>", width: 390, height: null }, "https://sharpner.test", design);
+    expect(size).toEqual({ width: 390, measured: 2337, height: 2337 });
+    // A bar fixed 84px above the bottom therefore lands at the end of the page, not 84px above y=800.
+    expect(viewport()).toMatchObject({ width: 390, height: 2337 });
+    expect(calls.setViewport.mock.calls.map(([v]) => v)).toEqual([{ width: 390, height: 800 }, { width: 390, height: 2337 }]);
+  });
+
+  it("fits short frames too, and settles at once when 100vh content already fills the first viewport", async () => {
+    const { loadFrame } = await import("./render");
+    const short = layoutTab({ content: 300 });
+    expect(await loadFrame(short.tab, { html: "<p></p>", width: 390, height: null }, "https://sharpner.test", design)).toMatchObject({ height: 300 });
+    expect(short.viewport().height).toBe(300);
+    const screen = layoutTab({ content: 500, minScreen: true });
+    expect(await loadFrame(screen.tab, { html: "<p></p>", width: 390, height: null }, "https://sharpner.test", design)).toMatchObject({ height: 800 });
+    expect(screen.calls.setViewport).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a fixed-height frame's viewport, and the first layout for content that never settles", async () => {
+    const { loadFrame } = await import("./render");
+    const fixed = layoutTab({ content: 2000 });
+    expect(await loadFrame(fixed.tab, { html: "<p></p>", width: 390, height: 844 }, "https://sharpner.test", design)).toMatchObject({ height: 844 });
+    expect(fixed.calls.setViewport.mock.calls.map(([v]) => v)).toEqual([{ width: 390, height: 844 }]);
+    // A viewport-high section above 200px of content grows with every fitting pass, so the 800px layout stays.
+    const growing = layoutTab({ content: 200, grows: true });
+    const size = await loadFrame(growing.tab, { html: "<p></p>", width: 390, height: null }, "https://sharpner.test", design);
+    expect(growing.calls.setViewport.mock.calls.map(([v]) => v.height)).toEqual([800, 1000, 1200, 1400, 800]);
+    expect(size).toMatchObject({ measured: 1000, height: 1000 });
+    // Taller than the capture limit: the viewport stops at 8000px and the content no longer changes with it.
+    const long = layoutTab({ content: 9000 });
+    expect(await loadFrame(long.tab, { html: "<p></p>", width: 390, height: null }, "https://sharpner.test", design)).toMatchObject({ measured: 9000, height: 8000 });
+    expect(long.viewport().height).toBe(8000);
+  });
+});

@@ -57,6 +57,43 @@ const RENDERED = `kind IN ('frame', 'component', 'tokens')`;
 const PENDING_IMAGES = `kind = 'image' AND thumb_rev < rev AND thumb_tries < ${THUMB_MAX_TRIES}`;
 const isRendered = (k: NodeKind) => k === "frame" || k === "component" || k === "tokens";
 
+/**
+ * Whether HTML can lay out differently once a preview's viewport is fitted to its content: fixed boxes, sticky
+ * bottoms, and sizes in viewport-height units. A minimum height of the viewport cannot: the page either settles at
+ * its content height or keeps growing, and then the preview keeps its first layout. Widths do not change either.
+ */
+function viewportDependent(html: string) {
+  const sized = html.replace(/\b(?:min-h|w|min-w|max-w)-(?:screen|[dsl]vh|\[[^\]]*\])[\w-]*/gi, "").replace(/min-height\s*:[^;"'}]*/gi, "");
+  return /\bfixed\b|\bsticky\b[^{}"'<>]{0,120}\bbottom|\bbottom[^{}"'<>]{0,120}\bsticky\b/i.test(sized)
+    || /-screen\b|\d[dsl]?v(?:h|b|min|max)\b|\b[dsl]vh\b/i.test(sized);
+}
+
+/**
+ * Auto-height frames whose own HTML, or any component it uses, can lay out differently in a taller viewport.
+ * A tag this file does not define comes from its library, which this room cannot read, so it counts too.
+ */
+function viewportDependentFrames(sql: SqlStorage) {
+  const sources = new Map(sql.exec<{ name: string; source: string }>(`SELECT name, source FROM nodes WHERE kind = 'component'`)
+    .toArray().map((c) => [componentTag(c.name), c.source]));
+  const known = new Map<string, boolean>();
+  const depends = (html: string, path: Set<string>): boolean => {
+    if (viewportDependent(html)) return true;
+    for (const [, tag] of html.toLowerCase().matchAll(/<(x-[a-z0-9-]+)/g)) {
+      if (path.has(tag!)) continue;
+      let found = known.get(tag!);
+      if (found === undefined) {
+        const source = sources.get(tag!);
+        found = source === undefined || depends(source, new Set([...path, tag!]));
+        known.set(tag!, found);
+      }
+      if (found) return true;
+    }
+    return false;
+  };
+  return sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'frame' AND height IS NULL`)
+    .toArray().filter((f) => depends(f.source, new Set())).map((f) => f.id);
+}
+
 /** Schema migrations for each room's SQLite storage. Append only; each runs once per room. */
 const MIGRATIONS = [
   `CREATE TABLE pages (id TEXT PRIMARY KEY, name TEXT NOT NULL, sort REAL NOT NULL);
@@ -237,6 +274,16 @@ const MIGRATIONS = [
     const fileId = sql.exec<{ v: string }>(`SELECT v FROM meta WHERE k = 'fileId'`).toArray()[0]?.v;
     if (!fileId || !REFRESHED_FILES.has(fileId)) return;
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE ${RENDERED}`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
+  // Component previews lay the default instance out at the node's full width, as a frame of that width does, and
+  // auto-height previews fit their viewport to the content, as the live canvas iframe does. Every component
+  // re-renders once, and so does every auto-height frame whose layout can depend on the viewport height.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'fullWidthPreviews'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('fullWidthPreviews', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'component'`);
+    for (const id of viewportDependentFrames(sql)) sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE id = ?`, id);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
 ];

@@ -4,6 +4,10 @@ import { frameDocument } from "../shared/types";
 import type { RenderDesign } from "./render-fonts";
 
 const MAX_HEIGHT = 8000;
+/** Viewport height an auto-height frame first lays out in, before it is fitted to its content. */
+const AUTO_VIEWPORT = 800;
+/** Layout passes allowed to fit that viewport to content that keeps changing with it. */
+const FIT_PASSES = 3;
 
 /** Chunked encoding avoids argument/stack limits for large captures. */
 export function bytesToBase64(bytes: Uint8Array) {
@@ -21,6 +25,10 @@ const tailwindCss = (input: string, candidates: string[]) => thumbnailCss(input,
 /**
  * Loads HTML into a browser tab at its viewport width and waits for fonts and Tailwind.
  * Returns the height to capture (fixed height, or measured content height for auto frames).
+ *
+ * The canvas shows an auto-height frame live in an iframe as tall as its content, so `position: fixed`,
+ * sticky bottoms and viewport units resolve against the whole frame there. Previews and screenshots lay it
+ * out the same way: the viewport is fitted to the measured height until the content settles.
  */
 export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null }, base: string, design: RenderDesign) {
   const width = Math.max(1, Math.round(f.width));
@@ -33,7 +41,7 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
   const seedCss = await tailwindCss(cssSource, candidates);
   // Fresh windows prevent custom element definitions and authored scripts leaking between nodes.
   await page.goto("about:blank");
-  const viewportHeight = Math.round(f.height ?? 800), viewport = page.viewport();
+  const viewportHeight = Math.round(f.height ?? AUTO_VIEWPORT), viewport = page.viewport();
   if (viewport?.width !== width || viewport.height !== viewportHeight || (viewport.deviceScaleFactor ?? 1) !== 1) {
     await page.setViewport({ width, height: viewportHeight });
   }
@@ -45,7 +53,7 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
     classes: [...new Set([...document.querySelectorAll("[class]")].flatMap((el) => [...el.classList]))],
   }));
   const compiled = await tailwindCss(css, classes);
-  const measured = await page.evaluate(async ({ css, changed }) => {
+  let measured = await page.evaluate(async ({ css, changed }) => {
     if (!changed) {
       document.body.getBoundingClientRect();
       await document.fonts.ready;
@@ -70,7 +78,25 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
     }))]);
     return Math.ceil(document.body.getBoundingClientRect().height);
   }, { css: compiled, changed: compiled !== seedCss });
+  if (f.height == null) measured = await fitViewport(page, width, measured);
   return { width, measured, height: Math.min(MAX_HEIGHT, Math.max(1, Math.round(f.height ?? measured))) };
+}
+
+/** Resizes the viewport to the content height until the content stops changing with it, and returns that height. */
+async function fitViewport(page: BrowserPage, width: number, measured: number) {
+  const measure = () => page.evaluate(() => Math.ceil(document.body.getBoundingClientRect().height));
+  for (let pass = 0; pass < FIT_PASSES; pass++) {
+    const height = Math.min(MAX_HEIGHT, Math.max(1, measured));
+    if (page.viewport()?.height === height) return measured;
+    await page.setViewport({ width, height });
+    const next = await measure();
+    if (next === measured) return next;
+    measured = next;
+  }
+  // Content that grows with its viewport, such as a viewport-high section inside a longer page, never settles; the
+  // live iframe keeps growing it as well. The preview keeps the first layout rather than one step of that growth.
+  await page.setViewport({ width, height: AUTO_VIEWPORT });
+  return measure();
 }
 
 export async function capture(page: BrowserPage, width: number, height: number, opts: { type: "jpeg" | "webp"; scale: number; quality?: number; transparent?: boolean }) {
