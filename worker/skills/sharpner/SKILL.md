@@ -50,7 +50,7 @@ Sharpner places every node. You can't set a position. Order, size and grouping d
 - Screens wrap after about four desktop or thirteen phone widths. Other nodes wrap after four previews.
 - Consecutive sibling sections tile in columns, top to bottom. Sections with screens form a landscape block. Other sections fill about √n columns.
 - A node between sections starts a new row. Keep sibling sections together to tile them.
-- Sections with only components form catalogs. Each family gets a row and one label. Name variants `Family/Row/Column` to show a family as a table with row and column headers. A tall catalog stacks its families in columns so it grows about as wide as it is tall. Keep its variants together.
+- Sections with only components form catalogs. Each family gets a row and one label; small families share a row. Variants show every compared theme and each listed prop value (`{{size|md|sm,md,lg}}`) side by side under table headers. A tall catalog stacks its families in columns so it grows about as wide as it is tall. Keep its variants together.
 - The page arranges its top-level nodes the same way. `sectionId: null` moves a node there. `pageId` moves it to another page.
 
 ## Address comments when asked

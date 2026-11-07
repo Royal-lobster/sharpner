@@ -103,15 +103,23 @@ One use of a component inside a frame or another component.
 _Avoid_: Ref, copy, clone
 
 **Prop**:
-A named value an instance passes to its component, with a default.
+A named value an instance passes to its component, with a default. A prop can list its values, `{{size|md|sm,md,lg}}`; a catalog shows each one.
 _Avoid_: Attribute, parameter, argument, override
+
+**Example**:
+A named set of prop values on a component, such as "Long label", that a catalog shows under its variant.
+_Avoid_: Story, demo, state board
+
+**Usage note**:
+A component's one-line description of when and how to use its family, shown by the family name in a catalog.
+_Avoid_: Docs, guideline (Brand holds the guidelines)
 
 **Slot**:
 The place in a component where an instance's own content goes.
 _Avoid_: Children area, outlet, placeholder
 
 **Variant**:
-A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can restyle every variant. Variants named `Family/Row/Column`, such as `Button/Secondary/Large`, show as a table in a catalog.
+A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can restyle every variant. In a catalog, each variant is a row of cells: every compared theme times every listed prop value. Variants named `Family/Row/Column`, such as `Button/Secondary/Large`, show as a table of variants instead.
 _Avoid_: State component, flavor
 
 **Library**:

@@ -9,7 +9,8 @@ import { openBrowser, openTab, releaseBrowser } from "./browser-session";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
 import { sourceBatches, type SourceItem } from "../shared/source-batches";
-import { layoutHeight, layoutRects } from "../shared/layout";
+import { catalogSectionIds, childrenOf, familyRuns, layoutHeight, layoutRects } from "../shared/layout";
+import { familySpecimens, parseExamples, specimenThemes, specimenWidth, type ComponentExample, type Specimen } from "../shared/catalog-specimens";
 import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
@@ -35,7 +36,7 @@ type Attachment = {
   shareToken?: string;
 };
 const VIEWER: Actor = { id: "link-viewer", name: "Viewer", avatar: null };
-type NodeRow = Omit<CanvasNode, "thumbnails"> & { thumbnails: string };
+type NodeRow = Omit<CanvasNode, "thumbnails" | "specimen" | "examples"> & { thumbnails: string; specimen: string | null; examples: string | null };
 type BrowserTab = Awaited<ReturnType<Awaited<ReturnType<typeof puppeteer.launch>>["newPage"]>>;
 /** What one automatic turn did; see FileRoom.renderThumbnails. */
 export type TurnResult = { more: boolean; browserMs: number; rendered: number; retryAt?: number; warm?: string | null };
@@ -50,10 +51,10 @@ const THUMB_MAX_TRIES = THUMBNAIL_POLICY.maxTries;
 const MAX_SOLO = 500;
 // `layout` is 'auto' on every section. It stays in node metadata for tabs loaded before that, which read it.
 const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
-  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev, thumb_theme AS thumbTheme,
+  src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev, thumb_theme AS thumbTheme, specimen, examples,
   (SELECT json_group_object(t.theme, json_object('rev', t.rev, 'lo', t.thumb_lo, 'hi', t.thumb_hi, 'measuredHeight', t.measured_h))
    FROM node_thumbnails t WHERE t.node_id = nodes.id AND t.thumb_lo IS NOT NULL) AS thumbnails`;
-/** Node rows with their descriptions (only sections have one). */
+/** Node rows with their descriptions (sections and components have one). */
 const NODES = `nodes LEFT JOIN descriptions d ON d.id = nodes.id`;
 const KINDS: NodeKind[] = ["frame", "image", "component", "section", "tokens"];
 const DEFAULT_NAME: Record<NodeKind, string> = { frame: "Frame", image: "Image", component: "Component", section: "Section", tokens: "Tokens" };
@@ -292,6 +293,15 @@ const MIGRATIONS = [
     for (const id of viewportDependentFrames(sql)) sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE id = ?`, id);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Catalog specimens show every compared theme and listed prop value side by side, plus authored examples. The
+  // room derives each catalog component's cells once it opens (see refreshSpecimens), which bumps their revisions.
+  // Idempotent, because an older deployment can lower the recorded version and run it again.
+  (sql: SqlStorage) => {
+    const columns = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(nodes)`).toArray().map((c) => c.name));
+    if (!columns.has("specimen")) sql.exec(`ALTER TABLE nodes ADD COLUMN specimen TEXT`);
+    if (!columns.has("examples")) sql.exec(`ALTER TABLE nodes ADD COLUMN examples TEXT`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */
@@ -339,6 +349,12 @@ export class FileRoom extends DurableObject<Env> {
       else m(this.sql);
     }
     this.setMeta("schema", String(MIGRATIONS.length));
+    if (this.meta("specimensStale")) {
+      // The library is not loaded yet; its tokens only matter when it declares the themes, and the next edit or
+      // library change refreshes with it.
+      if (this.refreshSpecimens().size) this.setMeta("thumbReconcile", "1");
+      this.setMeta("specimensStale", "");
+    }
     if (this.sql.exec(`SELECT 1 FROM pages LIMIT 1`).toArray().length === 0) {
       this.sql.exec(`INSERT INTO pages (id, name, sort) VALUES (?, ?, ?)`, crypto.randomUUID(), "Page 1", 0);
     }
@@ -364,9 +380,46 @@ export class FileRoom extends DurableObject<Env> {
     return row ? this.nodeMeta(row) : null;
   }
 
-  private nodeMeta<T extends NodeRow>(row: T): Omit<T, "thumbnails"> & CanvasNode {
+  private nodeMeta<T extends NodeRow>(row: T): Omit<T, "thumbnails" | "specimen" | "examples"> & CanvasNode {
     const thumbnails = JSON.parse(row.thumbnails ?? "{}") as ThemeThumbnails;
-    return selectThumbnail(meta({ ...row, thumbnails: isRendered(row.kind) ? thumbnails : undefined, thumbTheme: isRendered(row.kind) ? row.thumbTheme : undefined }));
+    const { specimen, examples, ...rest } = row;
+    const component = row.kind === "component" ? {
+      ...(specimen ? { specimen: JSON.parse(specimen) as Specimen } : {}),
+      ...(examples ? { examples: JSON.parse(examples) as ComponentExample[] } : {}),
+    } : {};
+    const node = { ...rest, ...component, thumbnails: isRendered(row.kind) ? thumbnails : undefined, thumbTheme: isRendered(row.kind) ? row.thumbTheme : undefined };
+    return selectThumbnail(meta(node as unknown as CanvasNode)) as Omit<T, "thumbnails" | "specimen" | "examples"> & CanvasNode;
+  }
+
+  /**
+   * Derives the cells of every component in a catalog section from its family, its props and the themes the tokens
+   * declare, and stores them. A component whose cells change renders again. Returns the ids that changed.
+   */
+  private refreshSpecimens(): Set<string> {
+    const nodes = this.nodes();
+    const catalogs = catalogSectionIds(nodes);
+    const sources = new Map(this.sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'component'`).toArray().map((r) => [r.id, r.source]));
+    const tokens = mergeDesignSystems(this.library?.design, this.ownDesignSystem()).tokens;
+    const themes = specimenThemes(tokens);
+    const next = new Map<string, Specimen | null>();
+    const kids = childrenOf(nodes);
+    for (const id of catalogs) {
+      const members = (kids.get(id) ?? []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id));
+      for (const { start, end, table } of familyRuns(members.map((m) => m.name))) {
+        const family = members.slice(start, end);
+        familySpecimens(family.map((m) => ({ id: m.id, name: m.name, width: m.width, source: sources.get(m.id) ?? "" })), themes, !!table)
+          .forEach((spec, i) => next.set(family[i]!.id, spec));
+      }
+    }
+    const changed = new Set<string>();
+    for (const n of nodes) {
+      if (n.kind !== "component") continue;
+      const spec = next.get(n.id) ?? null;
+      if (JSON.stringify(spec) === JSON.stringify(n.specimen ?? null)) continue;
+      this.sql.exec(`UPDATE nodes SET specimen = ?, rev = rev + 1, thumb_tries = 0 WHERE id = ?`, spec ? JSON.stringify(spec) : null, n.id);
+      changed.add(n.id);
+    }
+    return changed;
   }
 
   /** Pages with their nodes' metadata (no sources). */
@@ -566,6 +619,9 @@ export class FileRoom extends DurableObject<Env> {
         }
       }
       for (const id of this.invalidate(design.tokens, design.tags)) touched.nodes.add(id);
+      const specimens = this.refreshSpecimens();
+      for (const id of specimens) touched.nodes.add(id);
+      if (specimens.size) renderChanged = true;
       if (design.tokens || design.tags.size) {
         this.setMeta("designRev", String(Number(this.meta("designRev") ?? 0) + 1));
         renderChanged = true;
@@ -634,7 +690,8 @@ export class FileRoom extends DurableObject<Env> {
     if (!this.pages().some((p) => p.id === pageId)) throw new Error(`Unknown page ${pageId}`);
     const kind = cur?.kind ?? (KINDS.includes(input.kind!) ? input.kind! : "frame");
     if (input.order !== undefined && !Number.isFinite(input.order)) throw new Error("Order must be a finite number");
-    if (input.description && kind !== "section") throw new Error("Only sections and pages have descriptions");
+    if (input.description && kind !== "section" && kind !== "component") throw new Error("Only sections, components and pages have descriptions");
+    if (input.examples !== undefined && kind !== "component") throw new Error("Only components have examples");
     // Moving to another page leaves the section unless a new one is given.
     const parentId = input.parentId !== undefined ? input.parentId : pageId !== cur?.pageId ? null : cur?.parentId ?? null;
     if (parentId) this.checkParent(id, parentId, pageId);
@@ -670,8 +727,12 @@ export class FileRoom extends DurableObject<Env> {
     }
 
     const specimenChanged = (kind === "component" || kind === "tokens") && next.name !== cur?.name;
+    const examples = kind !== "component" ? null
+      : input.examples !== undefined ? parseExamples(input.examples, next.source) : cur?.examples ?? [];
+    const examplesJson = examples?.length ? JSON.stringify(examples) : null;
+    const examplesChanged = kind === "component" && examplesJson !== (cur?.examples?.length ? JSON.stringify(cur.examples) : null);
     const changed = !cur || next.source !== cur.source || next.width !== cur.width || next.height !== cur.height || next.src !== cur.src
-      || specimenChanged;
+      || specimenChanged || examplesChanged;
     const rev = changed ? (cur?.rev ?? 0) + 1 : cur!.rev;
     if (kind === "component" && (changed || next.name !== cur?.name)) {
       design.tags.add(componentTag(next.name));
@@ -691,7 +752,9 @@ export class FileRoom extends DurableObject<Env> {
       next.src, thumbLo, thumbHi, rev, isRendered(kind) ? cur?.thumbRev ?? 0 : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source,
     );
     if (cur?.thumbTheme !== undefined) this.sql.exec(`UPDATE nodes SET thumb_theme = ? WHERE id = ?`, cur.thumbTheme, id);
-    if (kind === "section" && input.description !== undefined) this.describe(str(id), input.description);
+    // REPLACE cleared the derived cells; refreshSpecimens restores them and bumps the revision if they differ.
+    this.sql.exec(`UPDATE nodes SET specimen = ?, examples = ? WHERE id = ?`, cur?.specimen ? JSON.stringify(cur.specimen) : null, examplesJson, id);
+    if ((kind === "section" || kind === "component") && input.description !== undefined) this.describe(str(id), input.description);
     return changed && (isRendered(kind) || kind === "image" && !thumbLo);
   }
 
@@ -804,6 +867,7 @@ export class FileRoom extends DurableObject<Env> {
     const library = await this.libraryInfo();
     this.broadcast({ type: "library", library });
     const bumped = this.invalidate(tokens, new Set(tags));
+    for (const id of this.refreshSpecimens()) bumped.add(id);
     const stale: string[] = [];
     this.reconcileThumbnails(stale);
     if (stale.length) this.ctx.waitUntil(this.env.FILES.delete([...new Set(stale)]));
@@ -897,16 +961,20 @@ export class FileRoom extends DurableObject<Env> {
   private pendingThumbnails(limit: number = THUMB_BATCH, design?: DesignSystem) {
     return this.sql.exec<{
       id: string; kind: NodeKind; name: string; source: string; src: string | null;
-      width: number; height: number | null; rev: number; measuredHeight: number | null;
+      width: number; height: number | null; rev: number; measuredHeight: number | null; specimen: string | null; examples: string | null;
     }>(
-      `SELECT n.id, n.kind, n.name, n.source, n.src, n.width, n.height, n.rev, n.measured_h AS measuredHeight
+      `SELECT n.id, n.kind, n.name, n.source, n.src, n.width, n.height, n.rev, n.measured_h AS measuredHeight, n.specimen, n.examples
        FROM nodes n JOIN node_thumbnails t ON t.node_id = n.id AND t.rev = n.rev
        WHERE t.thumb_lo IS NULL AND t.tries < ${THUMB_MAX_TRIES}
          AND t.theme = '' AND (? OR n.id = ?)
        ORDER BY n.page_id IN (SELECT value FROM json_each(?)) DESC, t.tries, n.sort, n.id LIMIT ?`,
       1, this.coverRequest(),
       JSON.stringify(this.viewedPages()), limit,
-    ).toArray().map((n) => ({ ...n, html: renderedHtml(n, n.source, design) }));
+    ).toArray().map(({ specimen, examples, ...row }) => {
+      const n = { ...row, specimen: row.kind === "component" && specimen ? JSON.parse(specimen) as Specimen : null, examples: examples ? JSON.parse(examples) as ComponentExample[] : [] };
+      // The document is laid out at the node's own width; a catalog specimen spans its cells.
+      return { ...n, width: specimenWidth(n), html: renderedHtml(n, n.source, design) };
+    });
   }
 
   private pendingImages(limit: number) {
@@ -976,7 +1044,7 @@ export class FileRoom extends DurableObject<Env> {
             const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
             for (const n of nodes) {
               if (stopped) break;
-              const size = await loadFrame(tab, { ...n, html: renderedHtml(n, this.node(n.id)!.source, design) }, origin, design);
+              const size = await loadFrame(tab, { ...n, width: specimenWidth(n), html: renderedHtml(n, this.node(n.id)!.source, design) }, origin, design);
               const scale = Math.min(1, 1600 / Math.max(size.width, size.height));
               const bytes = await capture(tab, size.width, size.height, { type: "jpeg", scale });
               content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: bytesToBase64(bytes), mimeType: "image/jpeg" });

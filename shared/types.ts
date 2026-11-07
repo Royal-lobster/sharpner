@@ -1,5 +1,6 @@
 // Shapes shared by the browser, the worker, and the FileRoom Durable Object. Vocabulary: see CONTEXT.md.
 import { componentSpecimen, tokenSpecimen } from "./specimens";
+import { catalogSpecimen, specimenThemes, type ComponentExample, type Specimen } from "./catalog-specimens";
 import { themeNames } from "./themes";
 import type { ThemeThumbnails } from "./thumbnails";
 import type { SessionPrincipal } from "./session-principal";
@@ -59,6 +60,10 @@ export type CanvasNode = {
   thumbTheme?: string;
   /** Cached pairs, including stale rasters retained during content edits. */
   thumbnails?: ThemeThumbnails;
+  /** Components in a catalog: the cells their specimen shows, derived by the FileRoom. Absent elsewhere. */
+  specimen?: Specimen | null;
+  /** Components: authored examples, named prop sets the catalog shows under the cells. */
+  examples?: ComponentExample[];
 };
 
 /** Whether the node's raster previews show its current revision (missing on older clients' metadata). */
@@ -68,6 +73,8 @@ export const previewCurrent = (node: Pick<CanvasNode, "rev" | "thumbRev" | "thum
 /** Fields a client or agent may set. `source` is HTML for frames and components, CSS for token sheets. */
 export type NodeInput = Partial<Pick<CanvasNode, "pageId" | "parentId" | "kind" | "name" | "order" | "description" | "width" | "height" | "src" | "thumbLo">> & {
   source?: string;
+  /** Components only; null or [] removes them. */
+  examples?: ComponentExample[] | null;
 };
 
 export type Op =
@@ -158,7 +165,7 @@ connectedCallback(){document.readyState==="loading"?document.addEventListener("D
 x(){if(this._x)return;this._x=1;if(this.parentElement&&this.parentElement.closest(t))return;
 const h=d;
 const kids=this.innerHTML;this.style.display="contents";
-this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^}]*))?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
+this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^|}]*)(?:\|[^}]*)?)?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
 }});})()</script>`;
 };
 
@@ -200,10 +207,12 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
 }
 
 /**
- * Screens retain their source; design-system nodes get a consistent specimen presentation. Components
- * render in dark when the design system's tokens define a dark theme.
+ * Screens retain their source; design-system nodes get a consistent specimen presentation. A component in a catalog
+ * shows its cells: every compared theme and listed prop value side by side. Elsewhere it renders in dark when the
+ * design system's tokens define a dark theme.
  */
-export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "height">>, source: string, design?: Pick<DesignSystem, "tokens">) {
+export function renderedHtml(n: Pick<CanvasNode, "kind" | "name"> & Partial<Pick<CanvasNode, "width" | "height" | "specimen" | "examples">>, source: string, design?: Pick<DesignSystem, "tokens">) {
+  if (n.kind === "component" && n.specimen) return catalogSpecimen({ ...n, width: n.width ?? 400 }, componentTag(n.name), n.specimen, specimenThemes(design?.tokens ?? ""));
   if (n.kind === "component") return componentSpecimen(n.name, componentTag(n.name), n.height, !!design && themeNames(design.tokens).includes("dark"));
   if (n.kind === "tokens") return tokenSpecimen(source, n.name);
   return source;

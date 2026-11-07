@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AUTO_GAP, AUTO_ROW_GAP, AUTO_ROW_WIDTH, balancedStarts, CATALOG_COLUMN_GAP, CATALOG_GAP, CATALOG_GUTTER, CATALOG_TALL, CATALOG_PAD, CATALOG_ROW_GAP, catalogLabels, catalogSectionIds, FLOW_TILE_ASPECT, layoutHeight, layoutRects, type Rect, SECTION_GAP, SECTION_PAD, sectionColumns, TABLE_HEAD, TABLE_PAD_X, TABLE_PAD_Y, tileFlows, tileSections } from "./layout";
 import type { CanvasNode } from "./types";
+import { PACK_GAP, SPEC_TIER } from "./layout";
+import { CELL_PAD_X, type Specimen } from "./catalog-specimens";
 
 const node = (id: string, patch: Partial<CanvasNode> = {}): CanvasNode => ({
   id, pageId: "page", parentId: null, kind: "frame", name: id, x: 0, y: 0,
@@ -49,13 +51,13 @@ describe("component catalogs", () => {
     expect(familyLabels(nodes, rects)).toHaveLength(1);
   });
 
-  /** `count` families of two 200 × 120 variants each. */
+  /** `count` families of two 400 × 120 variants each: too wide to share a row. */
   const families = (count: number) => [section("chips"), ...Array.from({ length: count }, (_, i) => [
-    component(`f${i}-a`, `Family ${i}/A`, i * 2), component(`f${i}-b`, `Family ${i}/B`, i * 2 + 1),
+    component(`f${i}-a`, `Family ${i}/A`, i * 2, { width: 400 }), component(`f${i}-b`, `Family ${i}/B`, i * 2 + 1, { width: 400 }),
   ]).flat()];
 
   it("keeps a catalog that isn't much taller than wide in one column", () => {
-    // Five rows are 5 × 120 + 4 × 64 = 856 tall against a 240 + 440 = 680 wide column: under the threshold.
+    // Five rows are 5 × 120 + 4 × 64 = 856 tall against a 240 + 840 = 1080 wide column: under the threshold.
     const rects = rectsOf(families(5));
     expect(new Set([...rects].filter(([id]) => id.endsWith("-a")).map(([, r]) => r.x))).toEqual(new Set([CATALOG_PAD + CATALOG_GUTTER]));
     expect(rects.get("chips")!.h - 2 * CATALOG_PAD).toBeLessThanOrEqual((rects.get("chips")!.w - 2 * CATALOG_PAD) * CATALOG_TALL);
@@ -71,7 +73,7 @@ describe("component catalogs", () => {
     // Columns are as tall as each other within one row, and the second starts past the first's widest row and gutter.
     const heights = columns.map((x) => firsts.filter((r) => r.x === x).length);
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
-    expect(columns[1]! - columns[0]!).toBe(2 * 200 + CATALOG_GAP + CATALOG_COLUMN_GAP + CATALOG_GUTTER);
+    expect(columns[1]! - columns[0]!).toBe(2 * 400 + CATALOG_GAP + CATALOG_COLUMN_GAP + CATALOG_GUTTER);
     // The catalog is closer to square than one column would be.
     const box = rects.get("chips")!;
     expect(box.h / box.w).toBeLessThan(CATALOG_TALL);
@@ -97,7 +99,7 @@ describe("component catalogs", () => {
       component("pl", "Button/Primary/Large", 1, { width: 160, height: 56 }),
       component("gd", "Button/Ghost/Default", 2, { width: 100, height: 40 }),
       component("gl", "Button/Ghost/Large", 3, { width: 140, height: 56 }),
-      component("tab", "Tab/Active", 4, { width: 200, height: 90 })];
+      component("tab", "Tab/Active", 4, { width: 900, height: 90 })];
     const rects = rectsOf(nodes);
     const left = CATALOG_PAD + CATALOG_GUTTER, second = left + 120 + 2 * TABLE_PAD_X;
     const row1 = CATALOG_PAD + TABLE_HEAD + TABLE_PAD_Y, row2 = row1 + 56 + 2 * TABLE_PAD_Y, bottom = row2 + 56 + TABLE_PAD_Y;
@@ -123,6 +125,48 @@ describe("component catalogs", () => {
       { kind: "row", text: "Ghost", x: CATALOG_PAD + TABLE_PAD_X, y: row2 + 28, w: CATALOG_GUTTER - 3 * TABLE_PAD_X },
       { kind: "family", text: "Tab", x: CATALOG_PAD, y: bottom + CATALOG_ROW_GAP, w: CATALOG_GUTTER - 24 },
     ]);
+  });
+
+  it("shares a row between small families, naming each block after the first above itself", () => {
+    const nodes = [section("chips"), component("check", "Checkbox/Default", 0, { description: "One choice per line." }),
+      component("radio", "Radio/Default", 1), component("wide", "Card/Default", 2, { width: 900 })];
+    const rects = rectsOf(nodes), left = CATALOG_PAD + CATALOG_GUTTER;
+    expect(rects.get("check")).toMatchObject({ x: left, y: CATALOG_PAD });
+    expect(rects.get("radio")).toMatchObject({ x: left + 200 + PACK_GAP, y: CATALOG_PAD });
+    expect(rects.get("wide")).toMatchObject({ x: left, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP });
+    expect(catalogLabels(nodes, rects, catalogSectionIds(nodes)).labels).toEqual([
+      { kind: "family", text: "Checkbox", x: CATALOG_PAD, y: CATALOG_PAD, w: CATALOG_GUTTER - 24, note: "One choice per line.", noteBelow: true },
+      { kind: "family", text: "Radio", x: left + 200 + PACK_GAP, y: CATALOG_PAD, w: 200 },
+      { kind: "family", text: "Card", x: CATALOG_PAD, y: CATALOG_PAD + 120 + CATALOG_ROW_GAP, w: CATALOG_GUTTER - 24 },
+    ]);
+  });
+
+  it("stacks a family of specimens under a header of theme and value names", () => {
+    const cw = 136 + 2 * CELL_PAD_X;
+    const specimen: Specimen = { cellWidth: cw, axis: "size", columns: ["dark", "light"].flatMap((theme) => ["sm", "md"].map((value) => ({ theme, value }))) };
+    const nodes = [section("chips"),
+      component("p", "Button/Primary", 0, { width: 136, height: 64, specimen, description: "One primary per view." }),
+      component("g", "Button/Ghost", 1, { width: 120, height: 56, specimen })];
+    const rects = rectsOf(nodes), left = CATALOG_PAD + CATALOG_GUTTER, top = CATALOG_PAD + 2 * SPEC_TIER;
+    // Each specimen spans its cells; rows sit flush, since specimens rule their own cells.
+    expect(rects.get("p")).toEqual({ x: left, y: top, w: 4 * cw, h: 64 });
+    expect(rects.get("g")).toEqual({ x: left, y: top + 64, w: 4 * cw, h: 56 });
+    const { labels, tables, cells } = catalogLabels(nodes, rects, catalogSectionIds(nodes));
+    expect([...cells]).toEqual(["p", "g"]);
+    expect(tables).toEqual([{
+      x: CATALOG_PAD, y: CATALOG_PAD, w: CATALOG_GUTTER + 4 * cw, h: 2 * SPEC_TIER + 120, head: top,
+      rows: [CATALOG_PAD + SPEC_TIER, top + 64], columns: [left],
+      headColumns: [{ x: left + cw, top: CATALOG_PAD + SPEC_TIER }, { x: left + 2 * cw, top: CATALOG_PAD }, { x: left + 3 * cw, top: CATALOG_PAD + SPEC_TIER }],
+    }]);
+    expect(labels.filter((l) => l.kind !== "column")).toEqual([
+      { kind: "family", text: "Button", x: CATALOG_PAD, y: CATALOG_PAD, w: CATALOG_GUTTER + 4 * cw, note: "One primary per view." },
+      { kind: "group", text: "Dark", x: left + TABLE_PAD_X, y: CATALOG_PAD + SPEC_TIER / 2, w: 2 * cw - TABLE_PAD_X },
+      { kind: "group", text: "Light", x: left + 2 * cw + TABLE_PAD_X, y: CATALOG_PAD + SPEC_TIER / 2, w: 2 * cw - TABLE_PAD_X },
+      { kind: "row", text: "Primary", x: CATALOG_PAD + TABLE_PAD_X, y: top + 32, w: CATALOG_GUTTER - 3 * TABLE_PAD_X },
+      { kind: "row", text: "Ghost", x: CATALOG_PAD + TABLE_PAD_X, y: top + 64 + 28, w: CATALOG_GUTTER - 3 * TABLE_PAD_X },
+    ]);
+    expect(labels.filter((l) => l.kind === "column").map((l) => [l.text, l.x, l.y])).toEqual(
+      ["sm", "md", "sm", "md"].map((text, k) => [text, left + k * cw + TABLE_PAD_X, CATALOG_PAD + SPEC_TIER * 1.5]));
   });
 
   it("keeps a family a row when any variant lacks a column or two variants share a cell", () => {

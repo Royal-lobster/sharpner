@@ -227,15 +227,20 @@ describe("raster labels", () => {
   }));
   const labels = (f: ReturnType<typeof fixture>) => f.fillText.mock.calls.map(([text]) => text as string);
 
-  it("hides nested labels together once the row gap can't hold them, even where the section padding still could", () => {
+  it("moves nested labels inside their nodes together once the row gap can't hold them, even where the section padding still could", () => {
     const f = fixture();
     // Ten 700px screens wrap into two rows. At 17.5% the 128px padding fits a label but the 120px row gap does not.
     const wide = Array.from({ length: 10 }, (_, i) => ({ ...screens[0]!, id: `w${i}`, name: `Wide ${i}`, order: i, width: 700, height: 600 }));
     f.paint(0.175, [flow, ...wide]);
-    expect(labels(f)).toEqual(["Checkout"]);
+    // Every name is still painted, each as a chip on a scrim inside its screen.
+    expect(labels(f)).toEqual([...wide.map(s => s.name), "Checkout"]);
+    const inside = f.fillText.mock.calls.slice(0, wide.length).map(([, , y]) => y as number);
     f.fillText.mockClear();
     f.paint(0.19, [flow, ...wide]);
     expect(labels(f)).toEqual([...wide.map(s => s.name), "Checkout"]);
+    const above = f.fillText.mock.calls.slice(0, wide.length).map(([, , y]) => y as number);
+    // A chip sits below its screen's top edge; a label above sits over it.
+    inside.forEach((y, i) => expect(y).toBeGreaterThan(above[i]! * 0.175 / 0.19));
     f.cache.dispose(); f.highCache.dispose();
   });
 

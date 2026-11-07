@@ -84,7 +84,9 @@ Report what you did not verify. A passing unit test does not prove a UI change.
 - Members only view the canvas: browser sockets never apply canvas edits, and the editor offers no
   drag, delete, upload, page, cover or library controls. Only agents change a canvas, through MCP.
 - Screens render their authored HTML; Sharpner never applies a theme to a screen.
-  Specimens render in dark when the tokens declare a `dark` theme.
+  A catalog specimen shows its variant in Dark and Light side by side when the tokens declare one as an
+  alternative to the default, and one cell per listed prop value; elsewhere specimens render in dark when the
+  tokens declare a `dark` theme. Cells come from `shared/catalog-specimens.ts` and the FileRoom's `specimen` column.
 - `worker/mcp-discovery.test.ts` enforces the MCP text budgets and checks that every
   reference linked from the skill is served. Keep it green.
 - Never commit screenshots, recordings or other verification media.

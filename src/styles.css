@@ -448,8 +448,13 @@ body:has(.editor) { --toast-offset: 84px; }
   position: absolute; left: 0; bottom: 100%; transform-origin: 0 100%; transform: scale(var(--inv));
   padding-bottom: 6px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted-text); white-space: nowrap; max-width: calc(100% / var(--inv)); overflow: hidden; text-overflow: ellipsis;
 }
-.world.crowded .frame.nested .frame-label { visibility: hidden; }
-.world.catalog-crowded .frame.catalog-item .frame-label { visibility: hidden; }
+/* Where the gap above can't hold a label, it moves inside the node's top-left corner as a chip, as the raster layer draws it. */
+.world.crowded .frame.nested .frame-label, .world.catalog-crowded .frame.catalog-item .frame-label {
+  bottom: auto; top: calc(4px * var(--inv)); left: calc(4px * var(--inv)); transform-origin: 0 0; z-index: 2;
+  padding: 1px 6px; border-radius: 5px; background: rgb(18 16 14 / 0.82); box-shadow: 0 0 0 1px rgb(255 240 215 / 0.1);
+  max-width: calc((100% - 8px * var(--inv)) / var(--inv));
+}
+.world.crowded .frame.nested:not(.component, .tokens, .selected) .frame-label, .world.catalog-crowded .frame.catalog-item:not(.component, .tokens, .selected) .frame-label { color: var(--text); }
 .frame.component .frame-label { color: #c084fc; }
 .frame.tokens .frame-label { color: #f9a8d4; }
 .frame:hover .frame-label { color: var(--text); }

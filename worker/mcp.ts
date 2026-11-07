@@ -8,6 +8,7 @@ import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, w
 import { layoutHeight, layoutRects, type Rect } from "../shared/layout";
 import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type NodeInput, type Op, type Page } from "../shared/types";
 import { themeNames } from "../shared/themes";
+import { propAxes } from "../shared/catalog-specimens";
 import skill from "./skills/sharpner/SKILL.md?raw";
 import designSystemGuide from "./skills/sharpner/references/design-system.md?raw";
 import screensGuide from "./skills/sharpner/references/screens.md?raw";
@@ -19,6 +20,13 @@ const pageDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Describe the page's contents and purpose in one or two sentences. Empty clears it.");
 const sectionDescription = z.string().max(DESCRIPTION_MAX)
   .describe("Sections only. Describe the contents and purpose in one or two sentences. Empty clears it.");
+const nodeDescription = z.string().max(DESCRIPTION_MAX)
+  .describe("Sections: contents and purpose in one or two sentences. Components: a one-line usage note catalogs show by the family name. Empty clears it.");
+const componentExamples = z.array(z.object({
+  name: z.string().min(1).max(60),
+  props: z.record(z.string(), z.string()).describe("Values for props the component declares"),
+  width: z.number().min(16).max(2000).optional(),
+})).max(8).nullable().describe("Components only: named prop sets catalogs show under the variants. null removes them.");
 
 const INSTRUCTIONS = `Use Sharpner for shared UI design and canvas feedback. Call read_skill() before edits. Use get_app_state to find the member's file and selection. Preserve other agents' work.`;
 
@@ -58,6 +66,11 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const abs = (url: string | null) => (url?.startsWith("/") ? origin + url : url);
   const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 1) }] });
   const propsOf = (html: string) => [...new Set([...html.matchAll(/\{\{\s*([\w-]+)/g)].map((m) => m[1]!))];
+  /** Props that list their values, which catalogs show as columns. */
+  const valuesOf = (html: string) => {
+    const axes = propAxes(html);
+    return axes.length ? { values: Object.fromEntries(axes.map((a) => [a.name, a.values])) } : {};
+  };
   const pageKind = z.enum(["canvas", "design-system"]);
 
   server.registerTool("get_app_state", {
@@ -289,6 +302,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         const n = node(tag);
         return {
           tag, name: n?.name, nodeId: n?.id, page: n?.page, pageId: n?.pageId, primitive: n?.primitive ?? false, props: propsOf(c.html), slot: /<slot[\s>/]/i.test(c.html),
+          ...valuesOf(c.html), ...(n?.description ? { note: n.description } : {}), ...(n?.examples?.length ? { examples: n.examples.map((e) => e.name) } : {}),
           source, ...(source === "library" ? { libraryFileId: id } : {}),
         };
       });
@@ -409,6 +423,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         previewUrl: z.string().optional().describe("Small image preview. Omit to generate one if Browser Rendering is available."),
         width: z.number().positive().optional().describe("Viewport width in px. Default 400; token sheets default to 960."),
         height: z.number().positive().nullish().describe("Fixed height in px; omit to fit content"),
+        description: z.string().max(DESCRIPTION_MAX).optional().describe("Components: a one-line usage note"),
+        examples: componentExamples.optional(),
       })).min(1).max(20),
     },
   }, async ({ fileId, pageId, sectionId, nodes }) => {
@@ -421,7 +437,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
       const base = { kind, pageId: page.id, parentId: sectionId ?? null, name: n.name, width };
       const node: NodeInput = kind === "image"
         ? { ...base, src: n.imageUrl, thumbLo: n.previewUrl ?? null, height: n.height ?? width }
-        : { ...base, source: n.source, height: n.height ?? null };
+        : { ...base, source: n.source, height: n.height ?? null, ...(n.description !== undefined && { description: n.description }), ...(n.examples !== undefined && { examples: n.examples }) };
       return { id: crypto.randomUUID(), ...node };
     });
     await apply(created.map(({ id, ...node }) => ({ t: "node.put", id, node })));
@@ -460,6 +476,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         order: node.order,
         ...nodeGeometry(node, rects),
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
+        ...(node.kind === "component" && node.description ? { description: node.description } : {}),
+        ...(node.examples?.length ? { examples: node.examples } : {}),
       };
     }));
   });
@@ -474,10 +492,11 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         sectionId: z.string().nullable().optional(),
         order: z.number().finite().optional().describe("Sibling order. Lower values come first. New nodes append."),
         name: z.string().optional(),
-        description: sectionDescription.optional(),
+        description: nodeDescription.optional(),
         source: z.string().optional(),
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
+        examples: componentExamples.optional(),
       })).min(1).max(50),
     },
   }, async ({ fileId, updates }) => {
@@ -573,12 +592,15 @@ function buildServer(env: Env, identity: Identity, origin: string) {
 }
 
 /** Tool responses expose computed bounds, while heightMode retains the node's authored sizing choice. */
-function nodeGeometry(node: { id: string; height?: number | null }, rects: ReadonlyMap<string, Rect>) {
+function nodeGeometry(node: { id: string; height?: number | null; kind?: string; width?: number }, rects: ReadonlyMap<string, Rect>) {
   const rect = rects.get(node.id)!;
+  // A catalog specimen spans its cells; width stays the component's own, the one to set.
+  const cells = node.kind === "component" && node.width !== undefined && rect.w !== node.width;
   return {
     x: rect.x,
     y: rect.y,
-    width: rect.w,
+    width: cells ? node.width! : rect.w,
+    ...(cells ? { cellsWidth: rect.w } : {}),
     height: rect.h,
     heightMode: node.height == null ? "auto" : "fixed",
   };

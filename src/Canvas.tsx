@@ -4,6 +4,8 @@ import { previewCurrent, renderedHtml, type CanvasNode, type CommentAnchor, type
 import { commentPoint } from "../shared/comments";
 import { scopeDesign } from "../shared/component-scope";
 import { componentName } from "../shared/specimens";
+import { specimenWidth } from "../shared/catalog-specimens";
+import type { SectionContents } from "./canvas-layout";
 import { colorFor } from "./api";
 import { toast } from "./toast";
 import { Avatar } from "./Avatar";
@@ -125,7 +127,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useEffect(() => () => reportMarquee.current?.(null), []);
 
   const layout = useMemo(() => new CanvasLayout(room), [room]);
-  const { frames, rects, catalogs, sections, nodes, labels: catalogLabels, tables: catalogTables, tableCells } = layout.page(pageId);
+  const { frames, rects, catalogs, sections, nodes, labels: catalogLabels, tables: catalogTables, tableCells, sectionContents } = layout.page(pageId);
   const rectOf = (f: CanvasNode) => rects.get(f.id)!;
   const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId);
   const navigationRef = useRef(navigation);
@@ -531,7 +533,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useLayoutEffect(() => {
     if (rasterRef.current) {
       paintRaster(rasterRef.current, size, cam, visibleSections, rasterFrames, selected, peerSelections, catalogs,
-        { labels: catalogLabels, tables: catalogTables, cells: tableCells }, { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current,
+        { labels: catalogLabels, tables: catalogTables, cells: tableCells, contents: sectionContents }, { agent: room.agentActivity, done: room.agentDone, appeared: room.appeared, now: performance.now(), reducedMotion }, thumbnailCache.current,
         { cache: highPreviewCache.current, enabled: prefetchPreviews, settled });
     }
   });
@@ -703,7 +705,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
     <div
       className={cls}
       data-frame={f.id}
-      style={{ left: x, top: y, width: f.width, height, ["--peer" as string]: peerColor }}
+      style={{ left: x, top: y, width: specimenWidth(f), height, ["--peer" as string]: peerColor }}
     >
       {label && <div className="frame-label">{label}</div>}
       {agent && <div className="agent-chip"><span className="aperture" />{agent}</div>}
@@ -711,12 +713,12 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
         {!lo && !showLive && !playback && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {showLive && <LiveFrame id={f.id} html={html} design={usedDesign} width={f.width} height={height} />}
+        {showLive && <LiveFrame id={f.id} html={html} design={usedDesign} width={specimenWidth(f)} height={height} />}
         {playback && (html === undefined
           ? <InteractionLoading onTimeout={() => playback.stop("timeout")} />
           // A new key is a new session: Reset, or any change to what the design renders.
-          : <InteractionFrame key={`${f.rev}:${f.width}:${designKey(usedDesign)}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`}
-              html={html} design={usedDesign} width={f.width} height={height} onStop={playback.stop} />)}
+          : <InteractionFrame key={`${f.rev}:${specimenWidth(f)}:${designKey(usedDesign)}:${playback.reset}`} id={f.id} title={`Interact with ${f.name}`}
+              html={html} design={usedDesign} width={specimenWidth(f)} height={height} onStop={playback.stop} />)}
         {(agent || settling) && <AgentSheen />}
       </div>
       {(agent || settling) && <Trace doneAt={doneAt} />}
@@ -786,6 +788,7 @@ function Trace({ doneAt }: { doneAt: number | undefined }) {
 // ---- raster layer -------------------------------------------------------------
 
 const COLORS = {
+  text: "#ece7df",
   select: "oklch(0.72 0.14 275)", accent: "oklch(0.82 0.17 78)", muted: "#aca397", box: "#24201c", edge: "rgba(255,240,215,0.08)",
   component: "#c084fc", componentEdge: "rgba(192,132,252,0.6)", tableRule: "rgba(255,240,215,0.14)", tokens: "#f9a8d4", section: "rgba(255,236,200,0.035)", sectionEdge: "rgba(255,240,215,0.08)", sectionText: "#dcd7cf",
   placeholder: "#171412",
@@ -818,7 +821,7 @@ export function paintRaster(
   selected: Set<string>,
   peers: Map<string, string>,
   catalogs: ReadonlySet<string>,
-  catalog: { labels: CatalogLabel[]; tables: CatalogTable[]; cells: ReadonlySet<string> },
+  catalog: { labels: CatalogLabel[]; tables: CatalogTable[]; cells: ReadonlySet<string>; contents?: ReadonlyMap<string, SectionContents> },
   fx: { agent: Map<string, unknown>; done: Map<string, number>; appeared: Map<string, number>; now: number; reducedMotion: boolean },
   thumbnails: ThumbnailCache | null,
   upgrades?: { cache: ThumbnailCache | null; enabled: boolean; settled: boolean },
@@ -862,7 +865,7 @@ export function paintRaster(
     const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y;
     const distance = (x + screenWidth / 2 - size.w / 2) ** 2 + (y + r.h * cam.z / 2 - size.h / 2) ** 2;
     // Match the renderer: smaller frames are never enlarged to 1280px when captured.
-    const side = Math.min(1280, Math.max(1, Math.round(f.width)));
+    const side = Math.min(1280, Math.max(1, Math.round(specimenWidth(f))));
     return [{ url: hi, pixels: side * side * r.h / Math.max(1, r.w), priority: (selected.has(f.id) ? 1e9 : 0) + visibleArea * 100 - distance }];
   }));
 
@@ -898,6 +901,11 @@ export function paintRaster(
       for (const cx of t.columns) {
         const sx = Math.round(cx * cam.z + cam.x) + 0.5;
         ctx.moveTo(sx, y); ctx.lineTo(sx, y + h);
+      }
+      // Specimens rule between their own cells, so these stop at the header.
+      for (const c of t.headColumns ?? []) {
+        const sx = Math.round(c.x * cam.z + cam.x) + 0.5;
+        ctx.moveTo(sx, c.top * cam.z + cam.y); ctx.lineTo(sx, t.head * cam.z + cam.y);
       }
     }
     ctx.stroke();
@@ -953,41 +961,101 @@ export function paintRaster(
     const doneAt = fx.done.get(f.id);
     if (!fx.reducedMotion && doneAt !== undefined) traceClose(ctx, x, y, sw, sh, fx.now, doneAt);
     const label = nodeLabel(f, catalogs, catalog.cells);
-    if (label && sw >= 60 && (!f.parentId || labelsFit(catalogs.has(f.parentId) ? CATALOG_ROW_GAP : AUTO_ROW_GAP, cam.z))) {
-      ctx.fillStyle = selected.has(f.id) ? COLORS.select : f.kind === "component" ? COLORS.component : f.kind === "tokens" ? COLORS.tokens : COLORS.muted;
-      ctx.fillText(fitLabel(ctx, label, sw), x, y - nodeBaseline);
+    if (label) {
+      const color = selected.has(f.id) ? COLORS.select : f.kind === "component" ? COLORS.component : f.kind === "tokens" ? COLORS.tokens : null;
+      // A label sits above its node while the gap holds it, then moves inside as a chip rather than disappearing.
+      if (!f.parentId || labelsFit(catalogs.has(f.parentId) ? CATALOG_ROW_GAP : AUTO_ROW_GAP, cam.z)) {
+        if (sw >= 60) {
+          ctx.fillStyle = color ?? COLORS.muted;
+          ctx.fillText(fitLabel(ctx, label, sw), x, y - nodeBaseline);
+        }
+      } else labelChip(ctx, label, x, y, sw, color ?? COLORS.text);
     }
   }
 
   lastPainted.set(canvas, paintedNow);
 
   // Family names head their catalog block in the gutter, on the same line as the variant labels or table column
-  // headers beside them. Table row names sit in the gutter, centred on their row.
-  if (labelsFit(CATALOG_ROW_GAP, cam.z)) {
-    for (const { kind, text, x, y, w } of catalog.labels) {
-      if (kind !== "family" && !labelsFit(TABLE_HEAD, cam.z)) continue;
-      const room = w * cam.z;
-      if (room < (kind === "column" ? 32 : 48)) continue;
-      const sx = x * cam.z + cam.x, sy = y * cam.z + cam.y;
-      if (sy + LABEL_ROOM < 0 || sy - LABEL_ROOM > size.h || sx > size.w || sx + room < 0) continue;
-      ctx.font = kind === "family" ? LABEL_FONT.family : LABEL_FONT.node;
-      ctx.fillStyle = kind === "family" ? COLORS.sectionText : COLORS.muted;
-      if (kind !== "family") {
-        ctx.textBaseline = "middle";
-        ctx.fillText(fitLabel(ctx, text, room), sx, sy);
-        ctx.textBaseline = "alphabetic";
-      } else ctx.fillText(fitLabel(ctx, text, room), sx, sy - labelBaseline(ctx));
+  // headers beside them, with the family's usage note under or after the name. Table row names sit in the gutter,
+  // centred on their row; specimen tables also name their theme groups. Zoomed out, family names become chips.
+  const roomy = labelsFit(CATALOG_ROW_GAP, cam.z);
+  for (const { kind, text, x, y, w, note, noteBelow } of catalog.labels) {
+    if (!roomy && kind !== "family") continue;
+    if (kind !== "family" && !labelsFit(TABLE_HEAD, cam.z)) continue;
+    const room = w * cam.z;
+    const sx = x * cam.z + cam.x, sy = y * cam.z + cam.y;
+    if (sy + LABEL_ROOM * 4 < 0 || sy - LABEL_ROOM > size.h || sx > size.w || sx + room < 0) continue;
+    if (!roomy) { ctx.font = LABEL_FONT.family; labelChip(ctx, text, sx, sy, room, COLORS.sectionText); continue; }
+    if (room < (kind === "column" ? 32 : 48)) continue;
+    ctx.font = kind === "family" || kind === "group" ? LABEL_FONT.family : LABEL_FONT.node;
+    ctx.fillStyle = kind === "family" || kind === "group" ? COLORS.sectionText : COLORS.muted;
+    if (kind !== "family") {
+      ctx.textBaseline = "middle";
+      ctx.fillText(fitLabel(ctx, text, room), sx, sy);
+      ctx.textBaseline = "alphabetic";
+      continue;
     }
+    const name = fitLabel(ctx, text, room), baseline = sy - labelBaseline(ctx);
+    ctx.fillText(name, sx, baseline);
+    if (!note) continue;
+    const nameWidth = ctx.measureText(name).width;
+    ctx.font = LABEL_FONT.node;
+    ctx.fillStyle = COLORS.muted;
+    if (noteBelow) wrapText(ctx, note, room, 3).forEach((line, i) => ctx.fillText(line, sx, sy + 14 + i * 16));
+    else if (room - nameWidth > 48) ctx.fillText(fitLabel(ctx, note, room - nameWidth - 12), sx + nameWidth + 12, baseline);
   }
 
-  // Section titles last, so neighbouring sections' contents never cover them.
+  // Section titles last, so neighbouring sections' contents never cover them. A nested title the gap can't hold
+  // moves inside its section; a section whose contents are too small to label counts them instead.
   ctx.font = LABEL_FONT.section;
   const sectionBaseline = labelBaseline(ctx);
   for (const { node: f, rect: r, screenWidth: sw } of sections) {
-    if (sw < 80 || f.parentId && !labelsFit(AUTO_ROW_GAP, cam.z)) continue;
-    ctx.fillStyle = selected.has(f.id) ? COLORS.select : peers.get(f.id) ?? COLORS.sectionText;
-    ctx.fillText(fitLabel(ctx, f.name, sw), r.x * cam.z + cam.x, r.y * cam.z + cam.y - sectionBaseline);
+    if (sw < 80) continue;
+    const contents = catalog.contents?.get(f.id);
+    const title = contents && contents.width * cam.z < LABEL_CHIP_MIN ? `${f.name} · ${contents.count} ${contents.noun}` : f.name;
+    const color = selected.has(f.id) ? COLORS.select : peers.get(f.id) ?? COLORS.sectionText;
+    const x = r.x * cam.z + cam.x, y = r.y * cam.z + cam.y;
+    if (f.parentId && !labelsFit(AUTO_ROW_GAP, cam.z)) { labelChip(ctx, title, x, y, sw, color); ctx.font = LABEL_FONT.section; continue; }
+    ctx.fillStyle = color;
+    ctx.fillText(fitLabel(ctx, title, sw), x, y - sectionBaseline);
   }
+}
+
+/** Narrowest on-screen node that still shows its own label, as a chip. */
+const LABEL_CHIP_MIN = 28;
+
+/** A label inside a node's top-left corner, on a dark scrim so it reads over any design. Draws in the current font. */
+function labelChip(ctx: CanvasRenderingContext2D, label: string, x: number, y: number, width: number, color: string) {
+  if (width < LABEL_CHIP_MIN) return;
+  const text = fitLabel(ctx, label, width - 20);
+  if (!text) return;
+  const w = Math.min(width - 8, ctx.measureText(text).width + 12);
+  ctx.fillStyle = "rgba(18, 16, 14, 0.82)";
+  ctx.beginPath();
+  ctx.roundRect(Math.round(x + 4), Math.round(y + 4), Math.round(w), 18, 5);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 240, 215, 0.1)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, Math.round(x + 10), Math.round(y + 13));
+  ctx.textBaseline = "alphabetic";
+}
+
+/** Up to `max` lines of `text` that fit `width`, the last cut with an ellipsis. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number, max: number) {
+  const lines: string[] = [];
+  let line = "";
+  const words = text.split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    const next = line ? `${line} ${words[i]}` : words[i]!;
+    if (ctx.measureText(next).width <= width || !line) { line = next; continue; }
+    if (lines.length === max - 1) return [...lines, fitLabel(ctx, `${line} ${words.slice(i).join(" ")}`, width)];
+    lines.push(line);
+    line = words[i]!;
+  }
+  return line ? [...lines, fitLabel(ctx, line, width)] : lines;
 }
 
 // ---- agent "graphite trace" (canvas layer) ----------------------------------------
