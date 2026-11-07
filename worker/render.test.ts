@@ -105,6 +105,23 @@ describe("auto-height frame viewport", () => {
   }
   const design = { tokens: "", components: [] };
 
+  it("sends a document only the components it uses, and those components' own, as a live iframe gets", async () => {
+    const { loadFrame, documentDesign } = await import("./render");
+    const system = { tokens: "", fonts: "@font-face{}", components: [
+      { tag: "x-card", html: "<div><x-badge></x-badge></div>" },
+      { tag: "x-badge", html: "<span>New</span>" },
+      { tag: "x-screen-huge", html: "<main>" + "unused ".repeat(1000) + "</main>" },
+    ] };
+    expect(documentDesign("<x-card></x-card>", system)).toEqual({ tokens: "", fonts: "@font-face{}", components: system.components.slice(0, 2) });
+    // Tags built at runtime can't be followed, so such a document keeps the whole design.
+    expect(documentDesign("<script>document.createElement(`x-${kind}`)</script>", system)).toBe(system);
+    const { tab, calls } = layoutTab({ content: 100 });
+    await loadFrame(tab, { html: "<x-card></x-card>", width: 390, height: null }, "https://sharpner.test", system);
+    const doc = (calls.setContent.mock.calls[0] as unknown as [string])[0];
+    expect(doc).toContain('"x-badge"');
+    expect(doc).not.toContain("x-screen-huge");
+  });
+
   it("lays an auto-height frame out in a viewport as tall as its content, as the live canvas iframe is", async () => {
     const { loadFrame } = await import("./render");
     const { tab, calls, viewport } = layoutTab({ content: 2337 });

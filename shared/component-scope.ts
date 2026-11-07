@@ -70,7 +70,7 @@ const SCOPE_CHARS_PER_DESIGN = 4 * 1024 * 1024;
  * The design system with only the components `html` uses: each one whose tag appears anywhere in it, scripts
  * included, and each one those use in turn, in design order. HTML that builds tag names at runtime keeps
  * every component. A live or playback document built from this stays byte-identical when an unrelated
- * component changes, so its iframe and session survive. Thumbnails and screenshots keep the whole design.
+ * component changes, so its iframe and session survive. Thumbnails and screenshots scope their documents too.
  */
 export function scopeDesign(html: string, design: DesignSystem): DesignSystem {
   if (!design.components.length) return design;

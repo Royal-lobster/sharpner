@@ -136,7 +136,10 @@ appear in its HTML, scripts and nested components included. The match is textual
 so a tag inside a longer word (`x-row` in `flex-row`) also counts. An edit to a
 component the document never mentions builds the same document and keeps its
 iframe; HTML that builds tag names at runtime embeds them all. Thumbnails and
-screenshots still embed the whole design system. Overview admission remains bounded by
+screenshots scope each document the same way (`documentDesign` in `worker/render.ts`), so a
+sprite of 24 nodes no longer carries 24 copies of a design system that can hold hundreds of
+components; before this, a file with a large library and page-sized components exceeded the
+FileRoom's memory limit while rendering. Overview admission remains bounded by
 the policy above. See [live canvas experiments](live-canvas-rendering.md) for the
 measured alternatives and the larger interactive rendering plan.
 

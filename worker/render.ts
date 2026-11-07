@@ -1,6 +1,7 @@
 import type { Page as BrowserPage } from "@cloudflare/puppeteer";
 import { thumbnailCss } from "./thumbnail-css";
 import { frameDocument } from "../shared/types";
+import { scopeDesign } from "../shared/component-scope";
 import type { RenderDesign } from "./render-fonts";
 
 export const MAX_HEIGHT = 8000;
@@ -34,6 +35,7 @@ export const tailwindCss = (input: string, candidates: string[]) => thumbnailCss
  */
 export async function loadFrame(page: BrowserPage, f: { html: string; width: number; height: number | null }, base: string, design: RenderDesign) {
   const width = Math.max(1, Math.round(f.width));
+  design = documentDesign(f.html, design);
   // Seed styles before navigation, so fonts and CSS images load alongside document resources.
   // The DOM pass below covers classes/styles produced by props, slots and authored scripts.
   const { cssSource, candidates } = seedInput(f.html, base, design);
@@ -85,6 +87,16 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
  * What a document's first Tailwind pass compiles: its authored `text/tailwindcss` styles (tokens included) and the
  * classes written in its source and in the component definitions it may expand.
  */
+/**
+ * The part of the design system one document renders with: the components it uses, and the ones those use, as
+ * a live canvas iframe gets (see scopeDesign). Components it never mentions would only be defined, never drawn,
+ * so the capture is the same; a design system of hundreds of components no longer travels with every document.
+ */
+export function documentDesign(html: string, design: RenderDesign): RenderDesign {
+  const scoped = scopeDesign(html, design);
+  return scoped === design ? design : { ...scoped, ...(design.fonts !== undefined ? { fonts: design.fonts } : {}) };
+}
+
 export function seedInput(html: string, base: string, design: RenderDesign) {
   const initial = frameDocument(html, { base, design, compiledTailwind: true });
   const cssSource = [...initial.matchAll(/<style\b[^>]*type=["']text\/tailwindcss["'][^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join("\n");

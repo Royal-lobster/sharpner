@@ -1,6 +1,6 @@
 import type { Page as BrowserPage } from "@cloudflare/puppeteer";
 import { frameDocument } from "../shared/types";
-import { AUTO_VIEWPORT, bytesToBase64, capture, FIT_PASSES, hiScale, MAX_HEIGHT, seedInput, tailwindCss } from "./render";
+import { AUTO_VIEWPORT, bytesToBase64, capture, documentDesign, FIT_PASSES, hiScale, MAX_HEIGHT, seedInput, tailwindCss } from "./render";
 import { pruneFontFaces, type RenderDesign } from "./render-fonts";
 
 /**
@@ -100,13 +100,14 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   let mark = Date.now();
   const lap = (phase: keyof SpritePhases) => { const now = Date.now(); phases[phase] += now - mark; mark = now; };
   // Seed each distinct Tailwind source once, with the classes of every node that shares it.
-  const seeds = jobs.map((job) => seedInput(job.html, base, design));
+  const designs = jobs.map((job) => documentDesign(job.html, design));
+  const seeds = jobs.map((job, i) => seedInput(job.html, base, designs[i]!));
   const seedCss = new Map<string, Promise<string>>();
   for (const source of new Set(seeds.map((s) => s.cssSource))) {
     seedCss.set(source, tailwindCss(source, [...new Set(seeds.filter((s) => s.cssSource === source).flatMap((s) => s.candidates))]));
   }
   const seeded = await Promise.all(seeds.map((s) => seedCss.get(s.cssSource)!));
-  const docs = jobs.map((job, i) => frameDocument(job.html, { base, design, compiledTailwind: true, tailwindCss: seeded[i], fontCss: design.fonts ? FONT_MARK : undefined }));
+  const docs = jobs.map((job, i) => frameDocument(job.html, { base, design: designs[i], compiledTailwind: true, tailwindCss: seeded[i], fontCss: design.fonts ? FONT_MARK : undefined }));
   const sizes = jobs.map((job) => ({ w: roundWidth(job.width), h: Math.round(job.height ?? AUTO_VIEWPORT) }));
   // The Worker side: the first Tailwind pass and the documents.
   lap("seed");
