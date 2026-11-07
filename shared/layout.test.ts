@@ -169,6 +169,13 @@ describe("component catalogs", () => {
       ["sm", "md", "sm", "md"].map((text, k) => [text, left + k * cw + TABLE_PAD_X, CATALOG_PAD + SPEC_TIER * 1.5]));
   });
 
+  it("heads an empty default value \"default\"", () => {
+    const specimen: Specimen = { cellWidth: 168, axis: "size", columns: ["", "sm"].map((value) => ({ theme: "", value })) };
+    const nodes = [section("chips"), component("p", "Button/Primary", 0, { width: 136, height: 64, specimen })];
+    const { labels } = catalogLabels(nodes, rectsOf(nodes), catalogSectionIds(nodes));
+    expect(labels.filter((l) => l.kind === "column").map((l) => l.text)).toEqual(["default", "sm"]);
+  });
+
   it("keeps a family a row when any variant lacks a column or two variants share a cell", () => {
     const mixed = [section("chips"), component("a", "Button/Primary/Default", 0), component("b", "Button/Ghost", 1)];
     expect(catalogLabels(mixed, rectsOf(mixed), catalogSectionIds(mixed)).cells.size).toBe(0);

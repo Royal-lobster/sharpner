@@ -1,5 +1,5 @@
 import { componentName } from "./specimens";
-import { specimenWidth, type Specimen } from "./catalog-specimens";
+import { specimenWidth, valueLabel, type Specimen } from "./catalog-specimens";
 import type { CanvasNode } from "./types";
 
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -450,7 +450,7 @@ export function catalogLabels(frames: CanvasNode[], rects: ReadonlyMap<string, R
             k += n;
           }
         }
-        if (values) spec.columns.forEach((c, k) => labels.push({ kind: "column", text: c.value ?? "", x: left + k * cw + TABLE_PAD_X, y: y + (tiers === 2 ? SPEC_TIER * 1.5 : SPEC_TIER / 2), w: cw - TABLE_PAD_X }));
+        if (values) spec.columns.forEach((c, k) => labels.push({ kind: "column", text: c.value === null ? "" : valueLabel(c.value), x: left + k * cw + TABLE_PAD_X, y: y + (tiers === 2 ? SPEC_TIER * 1.5 : SPEC_TIER / 2), w: cw - TABLE_PAD_X }));
         for (const p of placed) {
           cells.add(p.node.id);
           labels.push({ kind: "row", text: componentName(p.node.name).variant, x: x + TABLE_PAD_X, y: p.rect.y + p.rect.h / 2, w: CATALOG_GUTTER - TABLE_PAD_X * 3 });

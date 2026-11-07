@@ -160,6 +160,14 @@ describe("catalog specimen document", () => {
     expect(catalogSpecimen({ name: "Button/Primary", width: 136, height: 40 }, "x-b", rowSpec!, specimenThemes(".dark{}")).match(/<div class="sp-cells">/g)).toHaveLength(1);
   });
 
+  it("labels an empty default value \"default\"", () => {
+    const source = `<button data-size="{{size||sm,lg}}" data-force="{{state||hover,active}}">x</button>`;
+    const [spec] = familySpecimens([{ id: "p", name: "Button/Primary", width: 136, source }], specimenThemes(""), false);
+    expect(spec!.columns.map((c) => c.value)).toEqual(["", "sm", "lg"]);
+    expect(catalogSpecimen({ name: "Button/Primary", width: 136 }, "x-b", spec!, specimenThemes("")).match(/<span class="sp-row-label">(\w+)<\/span>/g)![0]).toBe('<span class="sp-row-label">default</span>');
+    expect(specimenLegend(spec!)).toBe("Cells left to right: default, sm, lg. Rows top to bottom, by state: default, hover, active.");
+  });
+
   it("says which cell is which for agents reading a screenshot", () => {
     const source = `<button data-size="{{size|md|sm,md}}" data-state="{{state|rest|rest,hover}}">x</button>`;
     const [a, b] = familySpecimens([

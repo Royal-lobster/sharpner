@@ -30,6 +30,9 @@ const VALUE_MAX = 40;
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
+/** How a listed value reads in headers and row labels: an empty default, as in `{{state||hover,active}}`, reads "default". */
+export const valueLabel = (value: string) => value || "default";
+
 /** A prop that lists its values: `{{size|md|sm,md,lg}}`. The default joins the list if it is missing. */
 export type PropAxis = { name: string; def: string; values: string[] };
 export function propAxes(html: string): PropAxis[] {
@@ -175,7 +178,7 @@ export function catalogSpecimen(n: { name: string; width: number; height?: numbe
       ...(specimen.axis && c.value !== null ? { [specimen.axis]: c.value } : {}),
       ...(rows && row !== null ? { [rows.axis]: row } : {}),
     };
-    const label = row !== null && specimen.columns[k - 1]?.theme !== c.theme ? `<span class="sp-row-label">${escapeHtml(row)}</span>` : "";
+    const label = row !== null && specimen.columns[k - 1]?.theme !== c.theme ? `<span class="sp-row-label">${escapeHtml(valueLabel(row))}</span>` : "";
     const inner = blank.has(k) ? "" : `<div class="sp-instance" style="width:${n.width}px">${instance(tag, props)}</div>`;
     return `<div${themed(attrs.get(c.theme) ?? "", "sp-cell", `width:${specimen.cellWidth}px`)}>${label}${inner}</div>`;
   }).join("")}</div>`;
@@ -194,9 +197,9 @@ export function catalogSpecimen(n: { name: string; width: number; height?: numbe
 /** Says which cell is which, for an agent reading a screenshot of a catalog specimen. */
 export function specimenLegend(specimen: Specimen, examples?: ComponentExample[] | null): string {
   const blank = new Set(specimen.blank ?? []);
-  const cells = specimen.columns.map((c, k) => `${[c.theme, c.value].filter(Boolean).join(" ") || "default"}${blank.has(k) ? " (blank)" : ""}`);
+  const cells = specimen.columns.map((c, k) => `${[c.theme, c.value === null ? "" : valueLabel(c.value)].filter(Boolean).join(" ") || "default"}${blank.has(k) ? " (blank)" : ""}`);
   const parts = [`Cells left to right: ${cells.join(", ")}.`];
-  if (specimen.rows) parts.push(`Rows top to bottom, by ${specimen.rows.axis}: ${specimen.rows.values.join(", ")}.`);
+  if (specimen.rows) parts.push(`Rows top to bottom, by ${specimen.rows.axis}: ${specimen.rows.values.map(valueLabel).join(", ")}.`);
   if (examples?.length) parts.push(`Examples under each theme: ${examples.map((e) => e.name).join(", ")}.`);
   return parts.join(" ");
 }
