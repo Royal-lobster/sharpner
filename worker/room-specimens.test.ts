@@ -105,13 +105,13 @@ describe("catalog specimens in the FileRoom", () => {
     put("loose", { kind: "component", name: "Promo/Banner", source: button });
     refresh();
     const before = { primary: room.node("primary")!.rev, loose: room.node("loose")!.rev };
-    db.exec(`DELETE FROM meta WHERE k = 'catalogThemeClass'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'catalogThemeClass'; UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
     const reopened = open();
     expect(reopened.node("primary")!.rev).toBe(before.primary + 1);
     expect(reopened.node("loose")!.rev).toBe(before.loose);
     expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
     // Guarded: running it again changes nothing.
-    db.exec(`UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
+    db.exec(`UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
     expect(open().node("primary")!.rev).toBe(before.primary + 1);
   });
 
@@ -120,10 +120,27 @@ describe("catalog specimens in the FileRoom", () => {
     put("tokens", { kind: "tokens", source: `@theme { --text-xl: 20px; @keyframes pop { to { opacity: 1 } } }` });
     put("screen", { kind: "frame", source: "<p>Hi</p>" });
     const before = { tokens: room.node("tokens")!.rev, screen: room.node("screen")!.rev };
-    db.exec(`DELETE FROM meta WHERE k = 'nestedThemeTokens'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'nestedThemeTokens'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
     const reopened = open();
     expect(reopened.node("tokens")!.rev).toBe(before.tokens + 1);
     expect(reopened.node("screen")!.rev).toBe(before.screen);
+  });
+
+  it("renders every token sheet once more as Foundations, once, and leaves the rest alone", () => {
+    const { room, put, db, open } = fixture();
+    put("tokens", { kind: "tokens", source: `@theme { --color-primary: #d4ff00; --duration-fast: 120ms; }` });
+    put("screen", { kind: "frame", source: "<p>Hi</p>" });
+    put("primary", { kind: "component", name: "Button/Primary", source: button });
+    const before = { tokens: room.node("tokens")!.rev, screen: room.node("screen")!.rev, primary: room.node("primary")!.rev };
+    db.exec(`DELETE FROM meta WHERE k IN ('foundationsSheet', 'thumbReconcile'); UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    const reopened = open();
+    expect(reopened.node("tokens")!.rev).toBe(before.tokens + 1);
+    expect(reopened.node("screen")!.rev).toBe(before.screen);
+    expect(reopened.node("primary")!.rev).toBe(before.primary);
+    expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
+    // Guarded: running it again changes nothing.
+    db.exec(`UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    expect(open().node("tokens")!.rev).toBe(before.tokens + 1);
   });
 
   it("stores examples and usage notes on components and validates examples against their props", () => {

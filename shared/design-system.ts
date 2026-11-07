@@ -1,7 +1,13 @@
-import { themeNames } from "./themes";
+import { themeLabel, themeNames } from "./themes";
 import type { Brand } from "./types";
 
-export const COLOR_SLOTS = ["background", "foreground", "card", "popover", "primary", "primary-foreground", "secondary", "muted", "muted-foreground", "accent", "destructive", "border", "input", "ring", "card-foreground", "popover-foreground", "secondary-foreground", "accent-foreground", "destructive-foreground"];
+/** shadcn/ui's v4 theme colours, the slots a token sheet shows first: the core roles, five chart series and the sidebar. */
+export const COLOR_SLOT_GROUPS = {
+  base: ["background", "foreground", "card", "card-foreground", "popover", "popover-foreground", "primary", "primary-foreground", "secondary", "secondary-foreground", "muted", "muted-foreground", "accent", "accent-foreground", "destructive", "destructive-foreground", "border", "input", "ring"],
+  chart: ["chart-1", "chart-2", "chart-3", "chart-4", "chart-5"],
+  sidebar: ["sidebar", "sidebar-foreground", "sidebar-primary", "sidebar-primary-foreground", "sidebar-accent", "sidebar-accent-foreground", "sidebar-border", "sidebar-ring"],
+} as const;
+export const COLOR_SLOTS: string[] = Object.values(COLOR_SLOT_GROUPS).flat();
 
 /** Patch individual fields, so independent member/agent changes do not erase the other brand fields. */
 export function patchBrand(current: Brand, patch: Partial<Brand>): Brand {
@@ -24,7 +30,7 @@ export function patchBrand(current: Brand, patch: Partial<Brand>): Brand {
 export type FoundationToken = { name: string; description: string; utility: string; values: Record<string, string>; local: boolean };
 export function tokenUtility(name: string) {
   if (name.startsWith("--color-")) { const slot = name.slice(8); return `${slot.includes("foreground") || slot === "destructive" ? "text" : slot === "border" || slot === "input" ? "border" : slot === "ring" ? "ring" : "bg"}-${slot}`; }
-  for (const [prefix, utility] of [["font-weight-", "font-"], ["font-", "font-"], ["text-", "text-"], ["radius-", "rounded-"], ["shadow-", "shadow-"], ["spacing-", "p-"]]) if (name.startsWith(`--${prefix}`)) return utility + name.slice(prefix!.length + 2);
+  for (const [prefix, utility] of [["font-weight-", "font-"], ["font-", "font-"], ["text-", "text-"], ["radius-", "rounded-"], ["shadow-", "shadow-"], ["inset-shadow-", "inset-shadow-"], ["tracking-", "tracking-"], ["leading-", "leading-"], ["ease-", "ease-"], ["animate-", "animate-"], ["spacing-", "p-"]]) if (name.startsWith(`--${prefix}`)) return utility + name.slice(prefix!.length + 2);
   return name === "--spacing" ? "p-1" : name === "--radius" ? "rounded" : name === "--shadow" ? "shadow" : `var(${name})`;
 }
 
@@ -110,5 +116,159 @@ export function foundations(css: string, localCss = css, themes = themeNames(css
   const tokens: FoundationToken[] = [...names].map((name) => ({ name, description: descriptions.get(name) ?? "", utility: tokenUtility(name), local: localNames.has(name), values: Object.fromEntries(themes.flatMap((t) => vars[t]![name] ? [[t, vars[t]![name]!]] : [])) })).filter((t) => Object.keys(t.values).length);
   const slotOrder = (name: string) => { const i = COLOR_SLOTS.indexOf(name.slice(8)); return i < 0 ? COLOR_SLOTS.length : i; };
   const colors = tokens.filter((t) => t.name.startsWith("--color-")).sort((a, b) => slotOrder(a.name) - slotOrder(b.name) || a.name.localeCompare(b.name));
-  return { themes, vars, colors, type: tokens.filter((t) => /^--(?:font-|text-)/.test(t.name)), spacing: tokens.filter((t) => /^--spacing(?:-|$)/.test(t.name)), radii: tokens.filter((t) => /^--radius(?:-|$)/.test(t.name)), shadows: tokens.filter((t) => /^--shadow(?:-|$)/.test(t.name)) };
+  return { themes, vars, tokens, colors, type: tokens.filter((t) => /^--(?:font-|text-)/.test(t.name)), spacing: tokens.filter((t) => /^--spacing(?:-|$)/.test(t.name)), radii: tokens.filter((t) => /^--radius(?:-|$)/.test(t.name)), shadows: tokens.filter((t) => /^--shadow(?:-|$)/.test(t.name)) };
 }
+
+/**
+ * A column of a token sheet: one distinct theme, as a screen root in it sees the tokens. `key` is the theme the
+ * values come from ("" for the root default); `names` are every theme with exactly these values.
+ */
+export type SheetColumn = { key: string; names: string[]; label: string; scheme: "dark" | "light" | null; vars: Record<string, string> };
+
+const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+const declaresTheme = (css: string, theme: string) => new RegExp(String.raw`\.${theme}(?![\w-])|\[data-theme\s*=\s*["']?${theme}["']?\s*\]`).test(css);
+
+/**
+ * The themes a token sheet compares, as columns. A sheet that declares a light alternative and no dark one, like
+ * tupredices' `:root` with `.light`, is dark at its root; otherwise the root is Light, as in shadcn's `:root` with
+ * `.dark`. Themes whose values are identical share one column, named after all of them. Dark comes first, then
+ * Light, then the other themes in declaration order.
+ */
+export function sheetColumns(css: string): SheetColumn[] {
+  const plain = stripComments(css);
+  const rootDark = declaresTheme(plain, "light") && !declaresTheme(plain, "dark");
+  const keys = rootDark ? ["", ...themeNames(css)] : themeNames(css);
+  const { vars } = foundations(css, css, keys);
+  const groups: string[][] = [];
+  const signature = (key: string) => JSON.stringify(Object.entries(vars[key]!).filter(([, v]) => v).sort(([a], [b]) => a.localeCompare(b)));
+  for (const key of keys) {
+    const same = groups.find((group) => signature(group[0]!) === signature(key));
+    if (same) same.push(key); else groups.push([key]);
+  }
+  const named = (key: string) => key || "dark";
+  const columns = groups.map((group): SheetColumn => {
+    const names = [...new Set(group.map(named))];
+    const scheme = names.includes("dark") ? "dark" : names.includes("light") ? "light" : null;
+    return { key: group[0]!, names, label: names.map(themeLabel).join(" · "), scheme, vars: vars[group[0]!]! };
+  });
+  const rank = (column: SheetColumn) => column.scheme === "dark" ? 0 : column.scheme === "light" ? 1 : 2;
+  return columns.map((column, i) => ({ column, i })).sort((a, b) => rank(a.column) - rank(b.column) || a.i - b.i).map(({ column }) => column);
+}
+
+/** Substitutes `var()` references with the column's own values, so equal decisions compare equal. */
+export function resolveToken(value: string, vars: Record<string, string>): string {
+  let out = value;
+  for (let depth = 0; depth < 12 && out.includes("var("); depth++) {
+    const next = out.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*((?:[^()]|\([^()]*\))*))?\)/g, (m, name: string, fallback?: string) =>
+      vars[name] ? vars[name]! : fallback !== undefined ? fallback.trim() : m);
+    if (next === out) break;
+    out = next;
+  }
+  return out.toLowerCase().replace(/\s+/g, " ").replace(/\s*([(),/])\s*/g, "$1").trim();
+}
+
+/** A colour on the sheet. Paired with its `-foreground`, it shows "Aa" in that colour and the contrast in each theme. */
+export type SheetColor = { name: string; token: FoundationToken | null; foreground: string | null; foregroundToken: FoundationToken | null; same: string[] };
+export type SheetColorGroup = { name: string; items: SheetColor[] };
+export type SheetRamp = { name: string; steps: { step: number; name: string }[] };
+export type SheetTextSize = { token: FoundationToken; lineHeight: FoundationToken | null; px: number | null; display: boolean };
+export type SheetEase = { token: FoundationToken; curve: [number, number, number, number] | null };
+
+/** Milliseconds of a CSS time, or null. */
+export function durationMs(value: string) {
+  const m = /^(-?\d*\.?\d+)(ms|s)$/i.exec(value.trim());
+  return m ? Number(m[1]) * (m[2]!.toLowerCase() === "s" ? 1000 : 1) : null;
+}
+
+const EASE_KEYWORDS: Record<string, [number, number, number, number]> = {
+  linear: [0, 0, 1, 1], ease: [0.25, 0.1, 0.25, 1], "ease-in": [0.42, 0, 1, 1], "ease-out": [0, 0, 0.58, 1], "ease-in-out": [0.42, 0, 0.58, 1],
+};
+/** The cubic Bézier control points of a CSS easing function, mapping the keywords; null for steps() and linear(). */
+export function easeCurve(value: string): [number, number, number, number] | null {
+  const v = value.trim().toLowerCase();
+  if (EASE_KEYWORDS[v]) return EASE_KEYWORDS[v]!;
+  const m = /^cubic-bezier\(\s*([^)]*)\)$/.exec(v);
+  const points = m?.[1]!.split(",").map((n) => Number(n.trim()));
+  return points?.length === 4 && points.every(Number.isFinite) ? points as [number, number, number, number] : null;
+}
+
+/** Pixels of a declared length in px, rem or em (16px root), or null. */
+export function lengthPx(value: string) {
+  const m = /^(-?\d*\.?\d+)(px|rem|em)$/i.exec(value.trim());
+  return m ? Number(m[1]) * (m[2]!.toLowerCase() === "px" ? 1 : 16) : null;
+}
+
+const COLOR_VALUE = /^(?:#[\da-f]{3,8}|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(.*\)|(?!none|auto|inherit|initial|unset|normal|currentcolor)[a-z]+)$/i;
+/** Multiples of `--spacing` the sheet draws, the steps a layout uses most. */
+export const SPACING_STEPS = [1, 2, 3, 4, 6, 8, 12, 16];
+
+/**
+ * Everything a token sheet shows, read from its CSS. Colours put shadcn's slots first, with the ones the sheet does
+ * not declare flagged, then the product's additions grouped by their first name segment. Palette ramps are other
+ * custom properties in families of five or more numbered colour steps.
+ */
+export function tokenSheet(css: string) {
+  const columns = sheetColumns(css);
+  const { tokens } = foundations(css, css, columns.length ? columns.map((c) => c.key) : undefined);
+  const byName = new Map(tokens.map((t) => [t.name, t]));
+  const token = (name: string) => byName.get(name) ?? null;
+  const resolved = (name: string) => columns.map((c) => c.vars[name] ? resolveToken(c.vars[name]!, c.vars) : "");
+  const color = (name: string) => token(`--color-${name}`);
+  const colorNames = tokens.filter((t) => t.name.startsWith("--color-")).map((t) => t.name.slice(8));
+  const slotSet = new Set(COLOR_SLOTS);
+  const item = (name: string, foreground: string | null): SheetColor => ({ name, token: color(name), foreground, foregroundToken: foreground ? color(foreground) : null, same: [] });
+  const slots = Object.entries(COLOR_SLOT_GROUPS).map(([group, names]) => ({
+    name: group as keyof typeof COLOR_SLOT_GROUPS,
+    items: names.filter((name) => !(name.endsWith("-foreground") && slotSet.has(name.slice(0, -11)))).map((name) => item(name, slotSet.has(`${name}-foreground`) ? `${name}-foreground` : null)),
+  }));
+  const extra = colorNames.filter((name) => !slotSet.has(name));
+  const extraSet = new Set(extra);
+  const paired = new Set(extra.filter((name) => name.endsWith("-foreground") && extraSet.has(name.slice(0, -11))));
+  const additions: SheetColorGroup[] = [];
+  const declaredSlots = COLOR_SLOTS.filter((name) => color(name)).map((name) => ({ name, values: resolved(`--color-${name}`) }));
+  for (const name of extra.filter((name) => !paired.has(name))) {
+    const entry = item(name, extraSet.has(`${name}-foreground`) ? `${name}-foreground` : null);
+    const values = resolved(`--color-${name}`);
+    entry.same = declaredSlots.filter((slot) => slot.values.every((v, i) => v && v === values[i])).map((slot) => slot.name);
+    const group = name.split("-")[0]!;
+    const existing = additions.find((g) => g.name === group);
+    if (existing) existing.items.push(entry); else additions.push({ name: group, items: [entry] });
+  }
+  const families = new Map<string, { step: number; name: string }[]>();
+  for (const t of tokens) {
+    const m = /^--([a-z][\w-]*?)-(\d+)$/i.exec(t.name);
+    if (!m || t.name.startsWith("--color-")) continue;
+    families.set(m[1]!, [...families.get(m[1]!) ?? [], { step: Number(m[2]), name: t.name }]);
+  }
+  const ramps: SheetRamp[] = [...families].filter(([family, steps]) => steps.length >= 5
+      && !steps.some((s) => byName.has(`--color-${family}-${s.step}`))
+      && steps.every((s) => resolved(s.name).some((v) => COLOR_VALUE.test(v))))
+    .map(([name, steps]) => ({ name, steps: steps.sort((a, b) => a.step - b.step) }));
+  const own = (pattern: RegExp) => tokens.filter((t) => pattern.test(t.name) && !t.name.slice(2).includes("--"));
+  const first = (name: string) => resolved(name).find(Boolean) ?? "";
+  const hasDisplay = byName.has("--font-display");
+  const text = own(/^--text-(?!icon(?:-|$))/).map((t): SheetTextSize => {
+    const px = lengthPx(first(t.name));
+    const step = /^--text-(\d+)xl$/.exec(t.name)?.[1];
+    return { token: t, lineHeight: token(`${t.name}--line-height`), px, display: hasDisplay && ((px ?? 0) >= 24 || Number(step ?? 0) >= 2) };
+  }).map((size, i) => ({ size, i })).sort((a, b) => (b.size.px ?? -1) - (a.size.px ?? -1) || a.i - b.i).map(({ size }) => size);
+  return {
+    columns, tokens,
+    color: { slots, additions, declared: COLOR_SLOTS.filter((name) => color(name)).length, extra: extra.length },
+    ramps,
+    fonts: own(/^--font-(?!weight-)/),
+    weights: own(/^--font-weight-/),
+    tracking: own(/^--tracking-/),
+    text,
+    icons: own(/^--text-icon(?:-|$)/),
+    spacing: { base: token("--spacing"), steps: SPACING_STEPS, named: own(/^--spacing-/) },
+    radii: own(/^--radius(?:-|$)/),
+    shadows: own(/^--(?:inset-)?shadow(?:-|$)/),
+    motion: {
+      durations: own(/^--duration-/).map((t) => ({ token: t, ms: durationMs(first(t.name)) })),
+      eases: own(/^--ease-/).map((t): SheetEase => ({ token: t, curve: easeCurve(first(t.name)) })),
+      animations: own(/^--animate-/),
+    },
+  };
+}
+export type TokenSheet = ReturnType<typeof tokenSheet>;

@@ -7,6 +7,10 @@
 > design and the measurements taken under it. A migration baked each formerly
 > themed frame's theme into its HTML roots, so existing screens look the same.
 >
+> 2026-11-08: a token sheet shows every distinct theme inside each swatch (Dark
+> and Light side by side) as the file's foundations, replacing the dark-only pane
+> below. A migration rendered every token sheet once more.
+>
 > 2026-11-02, later: design-system specimens present the dark theme when the
 > tokens define one. A token sheet shows only its dark pane, and a component
 > specimen renders on dark document roots. A one-off migration made the IQ

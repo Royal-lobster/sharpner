@@ -322,6 +322,15 @@ const MIGRATIONS = [
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'tokens'`);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Token sheets render as Foundations: shadcn's colour slots then product additions, palette ramps, type, spacing,
+  // radius, shadow and motion, with every theme inside each swatch instead of a pane per theme. Every token sheet
+  // renders once more.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'foundationsSheet'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('foundationsSheet', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'tokens'`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

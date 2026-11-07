@@ -81,7 +81,7 @@ One named design decision, such as a color, font, radius, or spacing step, that 
 _Avoid_: Variable, style, constant
 
 **Token sheet**:
-A node that defines tokens for its file.
+A node that defines tokens for its file. Its preview is the file's foundations: shadcn's colour slots, then the product's own colours, palette ramps, type, spacing, radius, shadow and motion, each swatch showing every theme side by side.
 _Avoid_: Theme file, variables node, stylesheet
 
 **Theme**:

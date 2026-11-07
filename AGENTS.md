@@ -86,8 +86,9 @@ Report what you did not verify. A passing unit test does not prove a UI change.
 - Screens render their authored HTML; Sharpner never applies a theme to a screen.
   A catalog specimen (Design System page only) shows its variant in Dark and Light side by side when the tokens declare one as an
   alternative to the default, one cell per listed prop value, and a row per value of a
-  second listed prop; elsewhere specimens render in dark when the
+  second listed prop; elsewhere component specimens render in dark when the
   tokens declare a `dark` theme. Cells come from `shared/catalog-specimens.ts` and the FileRoom's `specimen` column.
+  A token sheet shows every distinct theme side by side inside each swatch (`tokenSheet` in `shared/design-system.ts`).
 - `worker/mcp-discovery.test.ts` enforces the MCP text budgets and checks that every
   reference linked from the skill is served. Keep it green.
 - Never commit screenshots, recordings or other verification media.
