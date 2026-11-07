@@ -10,7 +10,7 @@ import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
 import { sourceBatches, type SourceItem } from "../shared/source-batches";
 import { catalogSectionIds, childrenOf, familyRuns, layoutHeight, layoutRects } from "../shared/layout";
-import { familySpecimens, parseExamples, specimenThemes, specimenWidth, type ComponentExample, type Specimen } from "../shared/catalog-specimens";
+import { familySpecimens, parseExamples, specimenLegend, specimenThemes, specimenWidth, type ComponentExample, type Specimen } from "../shared/catalog-specimens";
 import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
@@ -304,6 +304,16 @@ const MIGRATIONS = [
   },
   // A family gets value columns only when every member lists the prop, so catalog cells are derived again.
   `INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1');`,
+  // A family's second listed prop adds a row of cells per value, so catalog cells are derived again. Catalog cells
+  // also wore their theme's class as a second, ignored class attribute, so `.dark` tokens never reached them: every
+  // catalog component renders once more.
+  (sql: SqlStorage) => {
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1')`);
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'catalogThemeClass'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('catalogThemeClass', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'component' AND specimen IS NOT NULL`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */
@@ -412,7 +422,7 @@ export class FileRoom extends DurableObject<Env> {
       const members = (kids.get(id) ?? []).sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id.localeCompare(b.id));
       for (const { start, end, table } of familyRuns(members.map((m) => m.name))) {
         const family = members.slice(start, end);
-        familySpecimens(family.map((m) => ({ id: m.id, name: m.name, width: m.width, source: sources.get(m.id) ?? "" })), themes, !!table)
+        familySpecimens(family.map((m) => ({ id: m.id, name: m.name, width: m.width, source: sources.get(m.id) ?? "", fixed: typeof m.height === "number" })), themes, !!table)
           .forEach((spec, i) => next.set(family[i]!.id, spec));
       }
     }
@@ -1052,7 +1062,8 @@ export class FileRoom extends DurableObject<Env> {
               const size = await loadFrame(tab, { ...n, width: specimenWidth(n), html: renderedHtml(n, this.node(n.id)!.source, design) }, origin, design);
               const scale = Math.min(1, 1600 / Math.max(size.width, size.height));
               const bytes = await capture(tab, size.width, size.height, { type: "jpeg", scale });
-              content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}` }, { type: "image", data: bytesToBase64(bytes), mimeType: "image/jpeg" });
+              const legend = n.specimen ? ` ${specimenLegend(n.specimen, n.examples)}` : "";
+              content.push({ type: "text", text: `${n.name} (${n.id}) ${size.width}x${size.height}${legend}` }, { type: "image", data: bytesToBase64(bytes), mimeType: "image/jpeg" });
             }
             return { content };
           };

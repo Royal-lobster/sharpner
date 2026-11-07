@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogSpecimen, CELL_PAD_X, familySpecimens, parseExamples, propAxes, specimenThemes, specimenWidth } from "./catalog-specimens";
+import { catalogSpecimen, CELL_PAD_X, familySpecimens, parseExamples, propAxes, specimenLegend, specimenThemes, specimenWidth } from "./catalog-specimens";
 import { frameDocument, renderedHtml } from "./types";
 
 const button = (size = "{{size|md|sm,md,lg}}") => `<button data-size="${size}">{{label|Send}}</button>`;
@@ -79,6 +79,32 @@ describe("family specimens", () => {
     expect(familySpecimens([member("Card", `<b>{{label|Hi}}</b>`, 1000)], dark, false)[0]).not.toBeNull();
   });
 
+  it("runs a second listed prop down, one row per value of each member's own list", () => {
+    const states = (list: string) => `<button data-size="{{size|md|sm,md}}" data-state="{{state|rest|${list}}}">{{label|Send}}</button>`;
+    const [primary, ghost] = familySpecimens([member("Primary", states("rest,hover,disabled")), member("Ghost", states("rest,hover"))], dark, false);
+    expect(primary!.axis).toBe("size");
+    expect(primary!.rows).toEqual({ axis: "state", values: ["rest", "hover", "disabled"] });
+    expect(ghost!.rows).toEqual({ axis: "state", values: ["rest", "hover"] });
+    expect(ghost!.columns).toEqual(primary!.columns);
+  });
+
+  it("takes axes only from props every member lists, and keeps a fixed-height member to one row", () => {
+    const tone = `<b data-tone="{{tone|neutral|neutral,danger}}" data-state="{{state|rest|rest,hover}}">{{label|Hi}}</b>`;
+    const [a, b] = familySpecimens([member("A", tone), { ...member("B", `<b data-state="{{state|rest|rest,hover}}">x</b>`), fixed: true }], plain, false);
+    // tone is A's alone, so state runs across; B is fixed-height, which never mattered for columns.
+    expect(a).toMatchObject({ axis: "state", columns: [{ theme: "", value: "rest" }, { theme: "", value: "hover" }] });
+    expect(a!.rows).toBeUndefined();
+    const [rowsA, rowsB] = familySpecimens([member("A", button() + tone), { ...member("B", button() + tone), fixed: true }], plain, false);
+    expect(rowsA!.rows!.axis).toBe("tone");
+    expect(rowsB!.rows).toBeUndefined();
+    expect(b).not.toBeNull();
+  });
+
+  it("gives a family with one theme and a single-value axis rows when it lists a second prop", () => {
+    const [only] = familySpecimens([member("A", `<b data-a="{{a|x|x}}" data-s="{{s|rest|rest,hover}}">x</b>`)], plain, false);
+    expect(only).toMatchObject({ axis: "s", columns: [{ theme: "", value: "rest" }, { theme: "", value: "hover" }] });
+  });
+
   it("keeps a single default instance when there is nothing to compare", () => {
     expect(familySpecimens([member("Primary", `<b>{{label|Hi}}</b>`)], plain, false)).toEqual([null]);
   });
@@ -104,9 +130,12 @@ describe("catalog specimen document", () => {
 
   it("lays out one themed cell per column, each holding an instance with its value", () => {
     const html = catalogSpecimen({ name: "Button/Primary", width: 136 }, "x-button-primary", spec!, specimenThemes(".dark{}"));
-    const cells = html.match(/<div class="sp-cell"[^>]*>/g)!;
+    const cells = html.match(/<div [^>]*class="sp-cell[ "][^>]*>/g)!;
     expect(cells).toHaveLength(6);
     expect(cells[0]).toContain('data-theme="dark"');
+    // One class attribute: a browser ignores a repeated one, and `.dark` tokens would never apply.
+    expect(cells[0]!.match(/class=/g)).toHaveLength(1);
+    expect(cells[0]).toContain('class="sp-cell dark"');
     expect(cells[0]).toContain(`width:${spec!.cellWidth}px`);
     expect(cells[3]).toContain("color-scheme:light");
     expect(html.match(/<x-button-primary size="(\w+)">/g)).toEqual(["sm", "md", "lg", "sm", "md", "lg"].map((v) => `<x-button-primary size="${v}">`));
@@ -115,9 +144,30 @@ describe("catalog specimen document", () => {
   it("renders examples under each theme's cells and leaves them out at a fixed height", () => {
     const n = { name: "Button/Primary", width: 136, examples: [{ name: "Long", props: { label: "A <b>" } }] };
     const html = catalogSpecimen(n, "x-button-primary", spec!, specimenThemes(".dark{}"));
-    expect(html.match(/class="sp-band"/g)).toHaveLength(2);
+    expect(html.match(/class="sp-band[ "]/g)).toHaveLength(2);
     expect(html).toContain('<x-button-primary label="A &lt;b&gt;">');
-    expect(catalogSpecimen({ ...n, height: 80 }, "x-button-primary", spec!, specimenThemes(".dark{}"))).not.toContain(`class="sp-band"`);
+    expect(catalogSpecimen({ ...n, height: 80 }, "x-button-primary", spec!, specimenThemes(".dark{}"))).not.toContain(`class="sp-band`);
+  });
+
+  it("repeats the cells for each row value, labelling the row at the start of each theme", () => {
+    const source = `<button data-size="{{size|md|sm,md}}" data-state="{{state|rest|rest,hover}}">x</button>`;
+    const [rowSpec] = familySpecimens([{ id: "p", name: "Button/Primary", width: 136, source }], specimenThemes(".dark{}"), false);
+    const html = catalogSpecimen({ name: "Button/Primary", width: 136 }, "x-b", rowSpec!, specimenThemes(".dark{}"));
+    expect(html.match(/<div class="sp-cells">/g)).toHaveLength(2);
+    expect(html.match(/<x-b [^>]*>/g)).toEqual(["rest", "hover"].flatMap((state) => ["sm", "md", "sm", "md"].map((size) => `<x-b size="${size}" state="${state}">`)));
+    expect(html.match(/<span class="sp-row-label">(\w+)<\/span>/g)).toEqual(["rest", "rest", "hover", "hover"].map((v) => `<span class="sp-row-label">${v}</span>`));
+    // A fixed-height component keeps to its height with one row.
+    expect(catalogSpecimen({ name: "Button/Primary", width: 136, height: 40 }, "x-b", rowSpec!, specimenThemes(".dark{}")).match(/<div class="sp-cells">/g)).toHaveLength(1);
+  });
+
+  it("says which cell is which for agents reading a screenshot", () => {
+    const source = `<button data-size="{{size|md|sm,md}}" data-state="{{state|rest|rest,hover}}">x</button>`;
+    const [a, b] = familySpecimens([
+      { id: "p", name: "Button/Primary", width: 136, source },
+      { id: "g", name: "Button/Ghost", width: 136, source: source.replace("sm,md", "md,lg") },
+    ], specimenThemes(".dark{}"), false);
+    expect(specimenLegend(a!, [{ name: "Long", props: {} }])).toBe("Cells left to right: dark sm, dark md, dark lg (blank), light sm, light md, light lg (blank). Rows top to bottom, by state: rest, hover. Examples under each theme: Long.");
+    expect(specimenLegend(b!)).toContain("dark sm (blank)");
   });
 
   it("is what a catalog component renders, and nothing changes outside catalogs", () => {

@@ -119,7 +119,7 @@ The place in a component where an instance's own content goes.
 _Avoid_: Children area, outlet, placeholder
 
 **Variant**:
-A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can restyle every variant. In a catalog, each variant is a row of cells: every compared theme times every listed prop value. Variants named `Family/Row/Column`, such as `Button/Secondary/Large`, show as a table of variants instead.
+A component representing one appearance of a family, such as a primary or ghost button. Hover, focus, pressed and disabled are interaction states of a variant. A theme can restyle every variant. In a catalog, each variant is a row of cells: every compared theme times every listed prop value, repeated per value of a second listed prop, usually its interaction states. Variants named `Family/Row/Column`, such as `Button/Secondary/Large`, show as a table of variants instead.
 _Avoid_: State component, flavor
 
 **Library**:

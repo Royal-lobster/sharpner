@@ -27,7 +27,8 @@ function fixture() {
     }
     return { toArray: () => rows, [Symbol.iterator]: () => rows[Symbol.iterator]() };
   } };
-  const room = new FileRoom({ storage: { sql }, waitUntil: vi.fn() } as unknown as DurableObjectState, {} as Env);
+  const open = () => new FileRoom({ storage: { sql }, waitUntil: vi.fn() } as unknown as DurableObjectState, {} as Env);
+  const room = open();
   const pageId = room.pages()[0]!.id;
   const internals = room as unknown as {
     putNode(id: string, input: NodeInput, touched: Set<string>, design: { tags: Set<string>; tokens: boolean }): boolean;
@@ -38,7 +39,7 @@ function fixture() {
   const put = (id: string, input: NodeInput) => internals.putNode(id, { pageId, ...input }, new Set(), { tags: new Set(), tokens: false });
   // apply() runs refreshSpecimens after every batch of operations; the tests call it the same way.
   const refresh = () => [...internals.refreshSpecimens()].sort();
-  return { room, put, refresh, internals };
+  return { room, put, refresh, internals, db, open };
 }
 
 const button = `<button data-size="{{size|md|sm,md,lg}}">{{label|Send}}</button>`;
@@ -86,6 +87,32 @@ describe("catalog specimens in the FileRoom", () => {
     put("ghost", { width: 200 });
     expect(refresh()).toEqual(["ghost", "primary"]);
     expect(room.node("primary")!.specimen!.cellWidth).toBe(200 + 2 * CELL_PAD_X);
+  });
+
+  it("adds a row of cells per value of a family's second listed prop", () => {
+    const { room, put, refresh } = fixture();
+    put("catalog", { kind: "section" });
+    put("primary", { kind: "component", parentId: "catalog", name: "Button/Primary", width: 136, source: button.replace(">", ` data-state="{{state|rest|rest,hover,disabled}}">`) });
+    expect(refresh()).toEqual(["primary"]);
+    expect(room.node("primary")!.specimen).toMatchObject({ axis: "size", rows: { axis: "state", values: ["rest", "hover", "disabled"] } });
+  });
+
+  it("renders every catalog component once more after the theme-class fix, and leaves the rest alone", () => {
+    const { room, put, refresh, db, open } = fixture();
+    put("tokens", { kind: "tokens", source: `.dark { --color-background: #000 }` });
+    put("catalog", { kind: "section" });
+    put("primary", { kind: "component", parentId: "catalog", name: "Button/Primary", width: 136, source: button });
+    put("loose", { kind: "component", name: "Promo/Banner", source: button });
+    refresh();
+    const before = { primary: room.node("primary")!.rev, loose: room.node("loose")!.rev };
+    db.exec(`DELETE FROM meta WHERE k = 'catalogThemeClass'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    const reopened = open();
+    expect(reopened.node("primary")!.rev).toBe(before.primary + 1);
+    expect(reopened.node("loose")!.rev).toBe(before.loose);
+    expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
+    // Guarded: running it again changes nothing.
+    db.exec(`UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    expect(open().node("primary")!.rev).toBe(before.primary + 1);
   });
 
   it("stores examples and usage notes on components and validates examples against their props", () => {

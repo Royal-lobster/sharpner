@@ -1,8 +1,9 @@
 /**
  * Catalog specimens: what a component in a catalog section shows. Each declared theme sits side by side, and a prop
  * that lists its values (`{{size|md|sm,md,lg}}`) gets one cell per value, so a family reads as a table without
- * hand-built boards. Named examples render under the cells. Every member of a family shares one cell width and one
- * column list, so the canvas can rule the family as a table and the cells line up.
+ * hand-built boards. A second listed prop (often `{{state|rest|rest,hover,pressed,disabled}}`) adds a row per
+ * value. Named examples render under the cells. Every member of a family shares one cell width and one column list,
+ * so the canvas can rule the family as a table and the cells line up; rows belong to each member.
  */
 import { componentName, escapeHtml } from "./specimens";
 
@@ -12,9 +13,11 @@ export type ComponentExample = { name: string; props: Record<string, string>; wi
 export type SpecimenColumn = { theme: string; value: string | null };
 /**
  * Derived on the server for each component in a catalog. `columns` is shared by the whole family; `blank` lists the
- * columns this member has nothing for, because it lacks the family's axis prop or that value.
+ * columns this member has nothing for, because it lacks that value. `rows` is the member's own values of the
+ * family's second listed prop, one row of cells each.
  */
-export type Specimen = { cellWidth: number; axis: string | null; columns: SpecimenColumn[]; blank?: number[] };
+export type Specimen = { cellWidth: number; axis: string | null; columns: SpecimenColumn[]; blank?: number[]; rows?: SpecimenRows };
+export type SpecimenRows = { axis: string; values: string[] };
 
 /** Room around an instance inside its cell, across and down. */
 export const CELL_PAD_X = 16;
@@ -82,35 +85,38 @@ export function parseExamples(input: unknown, html: string): ComponentExample[] 
   });
 }
 
-/** What the catalog needs to know about a component. */
-export type SpecimenSource = { id: string; name: string; width: number; source: string };
+/** What the catalog needs to know about a component. A fixed-height component keeps to one row. */
+export type SpecimenSource = { id: string; name: string; width: number; source: string; fixed?: boolean };
 
 /**
  * Specimens for one catalog family, in order. A family whose names are all `Family/Row/Column` is already a table of
- * nodes, so its members only gain theme cells. Otherwise, when every member lists the values of the first such
- * prop, that prop is the family's axis: the members contribute their values in order, and a member leaves blank
- * the values it doesn't list. A family where any member lacks the prop compares themes only.
+ * nodes, so its members only gain theme cells. Otherwise the props every member lists, in the first member's
+ * source order, become axes: the first runs across, one column per value, and the second runs down, one row per
+ * value. Members contribute column values in order and leave blank the ones they don't list; rows are each
+ * member's own values. A prop some member doesn't list is not an axis, so no member is left with empty cells.
  */
 export function familySpecimens(members: SpecimenSource[], themes: SpecimenTheme[], rowColumnTable: boolean): (Specimen | null)[] {
   if (!members.length) return [];
   const axesOf = members.map((m) => propAxes(m.source));
-  // Value columns only when every member lists the prop: one member's sizes would leave the others' cells empty.
-  const first = rowColumnTable ? undefined : axesOf.flat()[0];
-  const lead = first && axesOf.every((axes) => axes.some((a) => a.name === first.name)) ? first : undefined;
+  const shared = rowColumnTable ? [] : axesOf[0]!.filter((a) => axesOf.every((axes) => axes.some((b) => b.name === a.name)));
+  const [lead, down] = shared;
   const values: (string | null)[] = lead ? [] : [null];
-  if (lead) for (const axes of axesOf) for (const v of axes.find((a) => a.name === lead.name)?.values ?? []) if (!values.includes(v)) values.push(v);
-  if (themes.length < 2 && values.length < 2) return members.map(() => null);
+  if (lead) for (const axes of axesOf) for (const v of axes.find((a) => a.name === lead.name)!.values) if (!values.includes(v)) values.push(v);
+  const rowsOf = (i: number) => down && !members[i]!.fixed ? { axis: down.name, values: axesOf[i]!.find((a) => a.name === down.name)!.values } : undefined;
+  if (themes.length < 2 && values.length < 2 && !members.some((_, i) => rowsOf(i))) return members.map(() => null);
   const columns = themes.flatMap((t) => values.map((value) => ({ theme: t.name, value })));
   const cellWidth = (rowColumnTable ? 0 : Math.max(...members.map((m) => m.width))) + CELL_PAD_X * 2;
   if (Math.max(...members.map((m) => m.width)) + CELL_PAD_X * 2 > MAX_SPECIMEN_WIDTH / columns.length) return members.map(() => null);
   return members.map((m, i) => {
-    const own = lead && axesOf[i]!.find((a) => a.name === lead.name);
-    const blank = columns.flatMap((c, k) => c.value === null || (own ? own.values.includes(c.value) : c.value === lead!.def) ? [] : [k]);
+    const own = lead && axesOf[i]!.find((a) => a.name === lead.name)!;
+    const blank = columns.flatMap((c, k) => c.value === null || own!.values.includes(c.value) ? [] : [k]);
+    const rows = rowsOf(i);
     return {
       cellWidth: rowColumnTable ? m.width + CELL_PAD_X * 2 : cellWidth,
-      axis: lead && own ? lead.name : null,
+      axis: lead ? lead.name : null,
       columns,
       ...(blank.length ? { blank } : {}),
+      ...(rows ? { rows } : {}),
     };
   });
 }
@@ -132,36 +138,65 @@ const catalogStyles = `<style>
 .sp-example-name{font:500 11px/1.3 ui-sans-serif,system-ui,sans-serif;opacity:.55}
 .sp-band-rule{flex-basis:100%;height:1px;margin:0 0 8px;background:currentColor;opacity:.12}
 .sp-catalog--fixed{height:100vh}.sp-catalog--fixed .sp-cells{flex:1;min-height:0}
+.sp-catalog--rows .sp-cell{position:relative;padding-top:${CELL_PAD_Y + 12}px}
+.sp-row-label{position:absolute;top:6px;left:8px;font:500 10px/1.2 ui-sans-serif,system-ui,sans-serif;opacity:.55;white-space:nowrap}
 </style>`;
 
-/** A theme's attributes with `style` added to (or merged into) its own style attribute. */
-const themed = (attrs: string, style: string) => /style="/.test(attrs)
-  ? ` ${attrs.replace(/style="([^"]*)"/, (_, own: string) => `style="${own};${style}"`)}`
-  : ` ${attrs ? `${attrs} ` : ""}style="${style}"`;
+/**
+ * An element's attributes: its class and style merged into the theme's own, since a browser ignores a repeated
+ * attribute and `.dark` tokens would never apply.
+ */
+const themed = (attrs: string, cls: string, style: string) => {
+  let out = attrs;
+  for (const [name, value, join] of [["class", cls, " "], ["style", style, ";"]] as const) {
+    const pattern = new RegExp(`${name}="([^"]*)"`);
+    out = pattern.test(out) ? out.replace(pattern, (_, own: string) => `${name}="${value}${join}${own}"`) : `${out} ${name}="${value}"`;
+  }
+  return ` ${out.trim()}`;
+};
 
 const instance = (tag: string, props: Record<string, string>) =>
   `<${tag}${Object.entries(props).map(([k, v]) => ` ${k}="${escapeHtml(v)}"`).join("")}></${tag}>`;
 
 /**
  * The document for a catalog specimen: a row of cells, one per column, each on its theme's background with the
- * instance at the component's own width, then the examples under each theme's cells. Fixed-height components keep
- * to their height and leave examples out.
+ * instance at the component's own width, repeated for each row value with the value labelled at the start of each
+ * theme; then the examples under each theme's cells. Fixed-height components keep to their height, one row, and
+ * leave examples out.
  */
 export function catalogSpecimen(n: { name: string; width: number; height?: number | null; examples?: ComponentExample[] | null }, tag: string, specimen: Specimen, themes: SpecimenTheme[]) {
   const { family, variant } = componentName(n.name);
   const fixed = typeof n.height === "number";
   const attrs = new Map(themes.map((t) => [t.name, t.attrs]));
   const blank = new Set(specimen.blank ?? []);
-  const cells = specimen.columns.map((c, k) => {
-    const inner = blank.has(k) ? "" : `<div class="sp-instance" style="width:${n.width}px">${instance(tag, specimen.axis && c.value !== null ? { [specimen.axis]: c.value } : {})}</div>`;
-    return `<div class="sp-cell"${themed(attrs.get(c.theme) ?? "", `width:${specimen.cellWidth}px`)}>${inner}</div>`;
-  }).join("");
+  const rows = !fixed && specimen.rows ? specimen.rows : undefined;
+  const strip = (row: string | null) => `<div class="sp-cells">${specimen.columns.map((c, k) => {
+    const props = {
+      ...(specimen.axis && c.value !== null ? { [specimen.axis]: c.value } : {}),
+      ...(rows && row !== null ? { [rows.axis]: row } : {}),
+    };
+    const label = row !== null && specimen.columns[k - 1]?.theme !== c.theme ? `<span class="sp-row-label">${escapeHtml(row)}</span>` : "";
+    const inner = blank.has(k) ? "" : `<div class="sp-instance" style="width:${n.width}px">${instance(tag, props)}</div>`;
+    return `<div${themed(attrs.get(c.theme) ?? "", "sp-cell", `width:${specimen.cellWidth}px`)}>${label}${inner}</div>`;
+  }).join("")}</div>`;
+  const cells = (rows ? rows.values : [null]).map(strip).join("");
   const examples = fixed ? [] : n.examples ?? [];
   const groups = [...new Set(specimen.columns.map((c) => c.theme))];
   const bands = examples.length ? `<div class="sp-bands">${groups.map((theme) => {
     const width = specimen.cellWidth * specimen.columns.filter((c) => c.theme === theme).length;
     const items = examples.map((e) => `<div class="sp-example"><div class="sp-instance" style="width:${e.width ?? n.width}px">${instance(tag, e.props)}</div><span class="sp-example-name">${escapeHtml(e.name)}</span></div>`).join("");
-    return `<div class="sp-band"${themed(attrs.get(theme) ?? "", `width:${width}px`)}><span class="sp-band-rule"></span>${items}</div>`;
+    return `<div${themed(attrs.get(theme) ?? "", "sp-band", `width:${width}px`)}><span class="sp-band-rule"></span>${items}</div>`;
   }).join("")}</div>` : "";
-  return `${catalogStyles}<article class="sp-catalog${fixed ? " sp-catalog--fixed" : ""}" aria-label="${escapeHtml(`${family} / ${variant} component`)}"><div class="sp-cells">${cells}</div>${bands}</article>`;
+  const modifiers = `${fixed ? " sp-catalog--fixed" : ""}${rows ? " sp-catalog--rows" : ""}`;
+  return `${catalogStyles}<article class="sp-catalog${modifiers}" aria-label="${escapeHtml(`${family} / ${variant} component`)}">${cells}${bands}</article>`;
+}
+
+/** Says which cell is which, for an agent reading a screenshot of a catalog specimen. */
+export function specimenLegend(specimen: Specimen, examples?: ComponentExample[] | null): string {
+  const blank = new Set(specimen.blank ?? []);
+  const cells = specimen.columns.map((c, k) => `${[c.theme, c.value].filter(Boolean).join(" ") || "default"}${blank.has(k) ? " (blank)" : ""}`);
+  const parts = [`Cells left to right: ${cells.join(", ")}.`];
+  if (specimen.rows) parts.push(`Rows top to bottom, by ${specimen.rows.axis}: ${specimen.rows.values.join(", ")}.`);
+  if (examples?.length) parts.push(`Examples under each theme: ${examples.map((e) => e.name).join(", ")}.`);
+  return parts.join(" ");
 }
