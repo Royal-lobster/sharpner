@@ -397,10 +397,13 @@ export class FileRoom extends DurableObject<Env> {
    */
   private refreshSpecimens(): Set<string> {
     const nodes = this.nodes();
-    const catalogs = catalogSectionIds(nodes);
-    const sources = new Map(this.sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'component'`).toArray().map((r) => [r.id, r.source]));
-    const tokens = mergeDesignSystems(this.library?.design, this.ownDesignSystem()).tokens;
-    const themes = specimenThemes(tokens);
+    // Only the marked Design System page's catalogs: component sections on feature pages often hold whole screens
+    // as components, which would render at several times their width.
+    const systemPage = this.pages().find((p) => p.kind === "design-system")?.id;
+    const catalogs = systemPage ? [...catalogSectionIds(nodes.filter((n) => n.pageId === systemPage))] : [];
+    const sources = new Map(systemPage ? this.sql.exec<{ id: string; source: string }>(`SELECT id, source FROM nodes WHERE kind = 'component' AND page_id = ?`, systemPage).toArray().map((r) => [r.id, r.source]) : []);
+    const ownTokens = this.sql.exec<{ source: string }>(`SELECT source FROM nodes WHERE kind = 'tokens' ORDER BY rowid`).toArray().map((r) => r.source).join("\n");
+    const themes = specimenThemes([this.library?.design.tokens, ownTokens].filter(Boolean).join("\n"));
     const next = new Map<string, Specimen | null>();
     const kids = childrenOf(nodes);
     for (const id of catalogs) {

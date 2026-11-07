@@ -32,11 +32,13 @@ function fixture() {
   const internals = room as unknown as {
     putNode(id: string, input: NodeInput, touched: Set<string>, design: { tags: Set<string>; tokens: boolean }): boolean;
     refreshSpecimens(): Set<string>;
+    putPage(page: { id: string; name: string; sort: number; kind?: "canvas" | "design-system" }): void;
   };
+  internals.putPage({ id: pageId, name: "Design System", sort: 0, kind: "design-system" });
   const put = (id: string, input: NodeInput) => internals.putNode(id, { pageId, ...input }, new Set(), { tags: new Set(), tokens: false });
   // apply() runs refreshSpecimens after every batch of operations; the tests call it the same way.
   const refresh = () => [...internals.refreshSpecimens()].sort();
-  return { room, put, refresh };
+  return { room, put, refresh, internals };
 }
 
 const button = `<button data-size="{{size|md|sm,md,lg}}">{{label|Send}}</button>`;
@@ -60,6 +62,16 @@ describe("catalog specimens in the FileRoom", () => {
     expect(room.node("loose")!.specimen).toBeUndefined();
     // Nothing changed, so nothing renders again.
     expect(refresh()).toEqual([]);
+  });
+
+  it("leaves component sections on other pages as they were, so screens kept as components stay their own width", () => {
+    const { room, put, refresh, internals } = fixture();
+    put("tokens", { kind: "tokens", source: `.dark { --color-background: #000 }` });
+    internals.putPage({ id: "feature", name: "Trade", sort: 1 });
+    put("parts", { kind: "section", pageId: "feature" });
+    put("state", { kind: "component", pageId: "feature", parentId: "parts", name: "Trade/Live", width: 1440, source: "<main>Live</main>" });
+    expect(refresh()).toEqual([]);
+    expect(room.node("state")!.specimen).toBeUndefined();
   });
 
   it("re-renders a family's members when one of them widens their shared cells, and keeps cells across edits", () => {

@@ -68,6 +68,12 @@ describe("family specimens", () => {
     expect(cell).toEqual({ cellWidth: 136 + 2 * CELL_PAD_X, axis: null, columns: [{ theme: "dark", value: null }, { theme: "light", value: null }] });
   });
 
+  it("keeps one default instance when the cells would be too wide to render", () => {
+    expect(familySpecimens([member("Screen", button(), 1440)], dark, false)).toEqual([null]);
+    expect(familySpecimens([member("Card", `<b>{{label|Hi}}</b>`, 1200)], dark, false)).toEqual([null]);
+    expect(familySpecimens([member("Card", `<b>{{label|Hi}}</b>`, 1000)], dark, false)[0]).not.toBeNull();
+  });
+
   it("keeps a single default instance when there is nothing to compare", () => {
     expect(familySpecimens([member("Primary", `<b>{{label|Hi}}</b>`)], plain, false)).toEqual([null]);
   });

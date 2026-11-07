@@ -21,6 +21,8 @@ export const CELL_PAD_X = 16;
 export const CELL_PAD_Y = 12;
 export const MAX_AXIS_VALUES = 8;
 export const MAX_EXAMPLES = 8;
+/** Widest a catalog specimen may render; a family whose cells would be wider keeps one default instance. */
+export const MAX_SPECIMEN_WIDTH = 2400;
 const VALUE_MAX = 40;
 
 const stripComments = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
@@ -98,6 +100,7 @@ export function familySpecimens(members: SpecimenSource[], themes: SpecimenTheme
   if (themes.length < 2 && values.length < 2) return members.map(() => null);
   const columns = themes.flatMap((t) => values.map((value) => ({ theme: t.name, value })));
   const cellWidth = (rowColumnTable ? 0 : Math.max(...members.map((m) => m.width))) + CELL_PAD_X * 2;
+  if (Math.max(...members.map((m) => m.width)) + CELL_PAD_X * 2 > MAX_SPECIMEN_WIDTH / columns.length) return members.map(() => null);
   return members.map((m, i) => {
     const own = lead && axesOf[i]!.find((a) => a.name === lead.name);
     const blank = columns.flatMap((c, k) => c.value === null || (own ? own.values.includes(c.value) : c.value === lead!.def) ? [] : [k]);
