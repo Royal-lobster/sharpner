@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { BUILD } from "../shared/build";
 import puppeteer from "@cloudflare/puppeteer";
 import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
@@ -1463,7 +1464,7 @@ export class FileRoom extends DurableObject<Env> {
     const library = await this.libraryInfo();
     // Link viewers never learn who else is in the file.
     const peers = att.shareToken ? [] : this.peers().filter((p) => p.cid !== att.cid);
-    this.send(ws, { type: "init", pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
+    this.send(ws, { type: "init", build: BUILD, pages: this.pages(), nodes: this.nodes(), cid: att.cid, peers, library,
       coverNodeId: this.meta("coverNodeId") || null,
       brand: this.brand(),
       comments: att.shareToken ? [] : this.comments(),

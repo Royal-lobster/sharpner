@@ -1,4 +1,5 @@
 import { selectThumbnail } from "../shared/thumbnails";
+import { reloadIfStale } from "./stale-build";
 import { layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
@@ -265,6 +266,7 @@ export class Room {
   private receive(msg: ServerMsg) {
     switch (msg.type) {
       case "init": {
+        if (reloadIfStale(msg.build)) return;
         if (this.boundPrincipal && (!samePrincipal(this.boundPrincipal, msg.principal)
           || typeof msg.sessionExpiresAt !== "number" || !Number.isFinite(msg.sessionExpiresAt) || msg.sessionExpiresAt <= Date.now())) {
           this.status = "denied"; this.close(); this.pages = []; this.nodes.clear(); this.emit(); return;

@@ -49,6 +49,7 @@ edits and fan out changes.
 | `worker/thumbnail-css.ts`, `worker/render-fonts.ts` | Compiled Tailwind CSS and prepared fonts for rendered previews |
 | `shared/types.ts` | Wire messages, documents, and design-system composition |
 | `shared/session-principal.ts` | Immutable Clerk identity binding across HTTP, socket init, and SDK |
+| `shared/build.ts`, `src/stale-build.ts` | The deploy a bundle came from; a tab whose room `init` reports another build reloads once (or offers to, while someone types) |
 | `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
 | `shared/specimens.ts` | Component and token-sheet presentations |
@@ -83,6 +84,8 @@ Components use light-DOM custom elements so Tailwind works inside them. Editing 
 Agents call `read_skill()` before edits. It returns [SKILL.md](../worker/skills/sharpner/SKILL.md), which links to task references. The same tool reads those files by path. Startup instructions stay short. For product design, agents read `get_design_system`, reuse existing definitions, and inspect screenshots. See the [design-system reference](../worker/skills/sharpner/references/design-system.md), [screen reference](../worker/skills/sharpner/references/screens.md), and [architecture decision](adr/0001-html-native-design-system.md).
 
 ## Rendering and loading
+
+Live previews, catalog specimens and token sheets render in the browser with the tab's own bundle. `vite build` stamps one build id into the browser and Worker bundles (`shared/build.ts`), the FileRoom sends it in every socket `init`, and a tab on an older bundle reloads once per server build so it never draws with code the server no longer uses. `vite dev` and tests use `dev` and never reload.
 
 Workspace cards use a file's **cover**. An agent can pin an ordinary
 frame or image with the `cover.set` operation (`set_cover` over MCP).
