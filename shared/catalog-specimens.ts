@@ -87,14 +87,16 @@ export type SpecimenSource = { id: string; name: string; width: number; source: 
 
 /**
  * Specimens for one catalog family, in order. A family whose names are all `Family/Row/Column` is already a table of
- * nodes, so its members only gain theme cells. Otherwise the first member that lists a prop's values sets the
- * family's axis, the other members contribute their values in order, and a member without that prop shows its
- * default in the family's default column only.
+ * nodes, so its members only gain theme cells. Otherwise, when every member lists the values of the first such
+ * prop, that prop is the family's axis: the members contribute their values in order, and a member leaves blank
+ * the values it doesn't list. A family where any member lacks the prop compares themes only.
  */
 export function familySpecimens(members: SpecimenSource[], themes: SpecimenTheme[], rowColumnTable: boolean): (Specimen | null)[] {
   if (!members.length) return [];
   const axesOf = members.map((m) => propAxes(m.source));
-  const lead = rowColumnTable ? undefined : axesOf.flat()[0];
+  // Value columns only when every member lists the prop: one member's sizes would leave the others' cells empty.
+  const first = rowColumnTable ? undefined : axesOf.flat()[0];
+  const lead = first && axesOf.every((axes) => axes.some((a) => a.name === first.name)) ? first : undefined;
   const values: (string | null)[] = lead ? [] : [null];
   if (lead) for (const axes of axesOf) for (const v of axes.find((a) => a.name === lead.name)?.values ?? []) if (!values.includes(v)) values.push(v);
   if (themes.length < 2 && values.length < 2) return members.map(() => null);

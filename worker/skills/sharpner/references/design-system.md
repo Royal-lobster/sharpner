@@ -130,7 +130,7 @@ Create a `kind: "component"` node with HTML in `source`. Its name sets the tag: 
 
 - Name variants as `Family/Variant`, such as `Button/Ghost` or `Badge/Secondary`. Components have one definition; theme differences go in token values or scoped CSS (see Use themes).
 - Use props for content. `{{label|Continue}}` takes the instance's label attribute or the default value.
-- List the values of a prop that changes appearance, such as size or tone, after a second `|`: `{{size|md|sm,md,lg}}` (up to eight). Instances still pass one value; catalogs show a column per value. Prefer one `Button/Ghost` with a size list to `Button/Ghost/Small`, `Button/Ghost/Large` copies.
+- List the values of a prop that changes appearance, such as size or tone, after a second `|`: `{{size|md|sm,md,lg}}` (up to eight). Instances still pass one value; catalogs show a column per value when every variant of the family lists that prop. Give a differently shaped member, such as a full-width or link button, its own family. Prefer one `Button/Ghost` with a size list to `Button/Ghost/Small`, `Button/Ghost/Large` copies.
 - Give a component `examples` for edge cases worth seeing: up to eight named prop sets, such as `[{ name: "Long label", props: { label: "Send money to Maya Rodriguez" }, width: 160 }]`. Catalogs show them under the variant. Give the family's first variant a one-line usage `description`, such as "One primary per view"; catalogs show it by the family name.
 - Props also work in attributes: `<img src="{{src|/placeholder.png}}">`.
 - Use `<slot></slot>` for child content in cards, dialogs, sidebars, and lists.

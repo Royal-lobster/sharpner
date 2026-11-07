@@ -46,14 +46,19 @@ describe("family specimens", () => {
   const member = (id: string, source: string, width = 120) => ({ id, name: `Button/${id}`, width, source });
 
   it("shares one column list and the widest cell across a family", () => {
-    const [primary, link] = familySpecimens([member("Primary", button(), 136), member("Link", `<a>{{label|More}}</a>`, 100)], dark, false);
+    const [primary, ghost] = familySpecimens([member("Primary", button(), 136), member("Ghost", button(), 100)], dark, false);
     expect(primary).toEqual({
       cellWidth: 136 + 2 * CELL_PAD_X, axis: "size",
       columns: ["dark", "light"].flatMap((theme) => ["sm", "md", "lg"].map((value) => ({ theme, value }))),
     });
-    // A member without the prop shows its default in the default column only.
-    expect(link).toMatchObject({ cellWidth: primary!.cellWidth, axis: null, blank: [0, 2, 3, 5] });
+    expect(ghost).toEqual(primary);
     expect(specimenWidth({ width: 136, specimen: primary })).toBe(6 * (136 + 2 * CELL_PAD_X));
+  });
+
+  it("compares themes only when any member lacks the prop, so no cell is left empty", () => {
+    const [primary, link] = familySpecimens([member("Primary", button(), 136), member("Link", `<a>{{label|More}}</a>`, 100)], dark, false);
+    expect(primary).toEqual({ cellWidth: 136 + 2 * CELL_PAD_X, axis: null, columns: [{ theme: "dark", value: null }, { theme: "light", value: null }] });
+    expect(link).toEqual(primary);
   });
 
   it("joins members' values in order and blanks the ones a member lacks", () => {

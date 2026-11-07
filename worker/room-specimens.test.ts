@@ -49,7 +49,7 @@ describe("catalog specimens in the FileRoom", () => {
     put("tokens", { kind: "tokens", source: `[data-theme="dark"] { --color-background: #000 }` });
     put("catalog", { kind: "section" });
     put("primary", { kind: "component", parentId: "catalog", name: "Button/Primary", width: 136, source: button });
-    put("ghost", { kind: "component", parentId: "catalog", name: "Button/Ghost", width: 120, source: `<button>{{label|Ghost}}</button>` });
+    put("ghost", { kind: "component", parentId: "catalog", name: "Button/Ghost", width: 120, source: button.replace("Send", "Ghost") });
     put("loose", { kind: "component", name: "Promo/Banner", source: button });
     const before = room.node("primary")!.rev;
     expect(refresh()).toEqual(["ghost", "primary"]);
@@ -57,7 +57,7 @@ describe("catalog specimens in the FileRoom", () => {
     expect(primary.rev).toBe(before + 1);
     expect(primary.specimen).toMatchObject({ cellWidth: 136 + 2 * CELL_PAD_X, axis: "size" });
     expect(primary.specimen!.columns).toHaveLength(6);
-    expect(room.node("ghost")!.specimen).toMatchObject({ cellWidth: primary.specimen!.cellWidth, blank: [0, 2, 3, 5] });
+    expect(room.node("ghost")!.specimen).toMatchObject({ cellWidth: primary.specimen!.cellWidth });
     // Components outside catalogs keep their single default instance.
     expect(room.node("loose")!.specimen).toBeUndefined();
     // Nothing changed, so nothing renders again.

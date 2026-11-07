@@ -302,6 +302,8 @@ const MIGRATIONS = [
     if (!columns.has("examples")) sql.exec(`ALTER TABLE nodes ADD COLUMN examples TEXT`);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1')`);
   },
+  // A family gets value columns only when every member lists the prop, so catalog cells are derived again.
+  `INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1');`,
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

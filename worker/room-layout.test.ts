@@ -78,7 +78,7 @@ describe("persisted automatic layout", () => {
     // Seven specimen refreshes: the old card presentation, dark specimens, standards-mode measurement, compact specimens twice,
     // the owner's clear, then full-width previews.
     expect(room.node("component")!.rev).toBe(8);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "24" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "25" });
   });
 
   it("refreshes cached token previews once for named themes without rerendering screens or components", () => {
