@@ -22,6 +22,22 @@ describe("generated foundations", () => {
     expect(result.vars.light!["--color-background"]).toBe("white");
   });
 
+  it("reads a block's own tokens when it also holds nested blocks, such as keyframes in @theme", () => {
+    const result = foundations(`@theme {
+      --font-display: "Sora"; /* Headlines and big numbers */
+      @keyframes pop { from { opacity: 0 } to { opacity: 1 } }
+      --text-6xl: 60px;
+      --radius-card: 16px;
+      @media (max-width: 600px) { --radius-card: 12px; }
+    } :root { --color-primary: lime; .card { --color-primary: red; } }`);
+    expect(result.type.map((t) => t.name)).toEqual(["--font-display", "--text-6xl"]);
+    expect(result.type[0]!.description).toBe("Headlines and big numbers");
+    // Nested conditional and scoped declarations stay out of the file-wide values.
+    expect(result.radii[0]!.values).toEqual({ light: "16px" });
+    expect(result.vars.light!["--color-primary"]).toBe("lime");
+    expect(result.vars.light!["opacity"]).toBeUndefined();
+  });
+
   it("orders defined recommended slots first and resolves theme inheritance, aliases and comment descriptions", () => {
     const css = `@theme {
       --color-brand-z: #456;

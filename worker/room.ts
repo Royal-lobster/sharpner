@@ -314,6 +314,14 @@ const MIGRATIONS = [
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'component' AND specimen IS NOT NULL`);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Token sheets skipped a whole block that also held nested blocks, such as a Tailwind @theme with @keyframes, so
+  // their fonts, type scale and radii went missing. Every token sheet renders once more.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'nestedThemeTokens'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('nestedThemeTokens', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'tokens'`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

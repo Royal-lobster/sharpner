@@ -31,19 +31,24 @@ export function tokenUtility(name: string) {
 /** Only unconditional root/theme rules describe file-wide foundations. Scoped/conditional CSS stays in live previews. */
 function tokenRules(css: string) {
   const rules: { selector: string; body: string }[] = [];
-  const stack: { selector: string; start: number; nested: boolean; excluded: boolean }[] = [];
+  // Each open block keeps its own text, without nested blocks: a `@theme` that also holds `@keyframes` still
+  // declares its tokens.
+  const stack: { selector: string; parts: string[]; from: number; excluded: boolean }[] = [];
   let header = 0;
   // Skip strings and comments when finding blocks, including braces in token strings and URLs.
   for (const m of css.matchAll(/\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{};]/g)) {
     if (m[0] === "{") {
       const selector = css.slice(header, m.index).replace(/\/\*[\s\S]*?\*\//g, "").trim();
       const parent = stack.at(-1);
-      if (parent) parent.nested = true;
-      stack.push({ selector, start: m.index + 1, nested: false, excluded: !!parent && (parent.excluded || !/^@layer\b/.test(parent.selector)) });
+      // The nested block's selector stays in the parent's text, so a comment just before it still describes a token.
+      if (parent) parent.parts.push(css.slice(parent.from, m.index));
+      stack.push({ selector, parts: [], from: m.index + 1, excluded: !!parent && (parent.excluded || !/^@layer\b/.test(parent.selector)) });
       header = m.index + 1;
     } else if (m[0] === "}") {
       const block = stack.pop();
-      if (block && !block.nested && !block.excluded) rules.push({ selector: block.selector, body: css.slice(block.start, m.index) });
+      if (block && !block.excluded) rules.push({ selector: block.selector, body: block.parts.join("") + css.slice(block.from, m.index) });
+      const parent = stack.at(-1);
+      if (parent) parent.from = m.index + 1;
       header = m.index + 1;
     } else if (m[0] === ";") header = m.index + 1;
   }
