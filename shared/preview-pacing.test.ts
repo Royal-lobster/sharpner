@@ -90,14 +90,24 @@ describe("preview pacing", () => {
     const doc = pacedDocument();
     doc.post({ paused: false, share: 1 });
     const ran = doc.loop(0.1);
-    doc.frame();
+    for (let i = 0; i < 3; i++) doc.frame();
     doc.post({ paused: true, share: 1 });
     for (let i = 0; i < 30; i++) doc.frame();
-    expect(ran.length).toBe(1);
+    expect(ran.length).toBe(3);
     doc.post({ paused: false, share: 1 });
     doc.frame();
     doc.frame();
-    expect(ran.length).toBe(3);
+    expect(ran.length).toBe(5);
+  });
+
+  it("draws its first frames before holding a document paused from load", () => {
+    // A preview goes live as the camera settles; if it moves again before the design's first frame, the design
+    // must still draw, or its empty view covers the thumbnail until the camera stops.
+    const doc = pacedDocument(20);
+    doc.post({ paused: true, share: previewAnimationShare(6) });
+    const ran = doc.loop(80);
+    for (let i = 0; i < 30; i++) doc.frame();
+    expect(ran.length).toBe(2);
   });
 
   it("ignores pace messages from anything but the parent, and shares it cannot use", () => {

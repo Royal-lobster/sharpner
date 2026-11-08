@@ -5,7 +5,9 @@
  * drag to about five camera updates per second; where it isolates them, they still kept a core busy while
  * nobody touched the canvas. Pacing bounds what previews' animation frames may take. The canvas pauses
  * them while the camera moves, and at rest splits one main-thread budget among its live previews: a frame
- * that took longer waits in proportion before the next one. Interaction playback documents are not paced.
+ * that took longer waits in proportion before the next one. A document's first frames are never held, so a
+ * preview that goes live as the camera starts moving again still draws before it covers its thumbnail.
+ * Interaction playback documents are not paced.
  */
 export const PREVIEW_PACE_MESSAGE = "sharpner:preview-pace";
 export type PreviewPaceMessage = { type: typeof PREVIEW_PACE_MESSAGE; paused: boolean; share: number };
@@ -27,10 +29,13 @@ function previewPacing(type: string, initialShare: number) {
   const nativeFrame = requestAnimationFrame.bind(globalThis);
   const rendered = new MessageChannel();
   let queue = new Map<number, FrameRequestCallback>();
-  let lastId = 0, scheduled = false, measuring = false, paused = false;
+  // Frame batches that run whatever the pace: a script often builds its view over its first frame or two.
+  const startup = 2;
+  let lastId = 0, scheduled = false, measuring = false, paused = false, ran = 0;
   let share = initialShare, frameStart = 0, readyAt = 0;
+  const held = () => ran >= startup && paused;
   const schedule = () => {
-    if (scheduled || measuring || paused || !queue.size) return;
+    if (scheduled || measuring || held() || !queue.size) return;
     scheduled = true;
     nativeFrame(run);
   };
@@ -43,9 +48,10 @@ function previewPacing(type: string, initialShare: number) {
   };
   function run(time: number) {
     scheduled = false;
-    if (paused) return;
+    if (held()) return;
     // A throttled document keeps its requests and checks again on the next display frame.
-    if (clock.now() < readyAt) return schedule();
+    if (ran >= startup && clock.now() < readyAt) return schedule();
+    ran++;
     const batch = queue;
     queue = new Map();
     frameStart = clock.now();

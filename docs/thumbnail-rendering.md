@@ -29,7 +29,11 @@ both screenshots and previews. Tailwind 4.3.3 is pinned for live documents and
 server compilation. A bounded compiler cache is keyed by the actual token and
 authored Tailwind CSS, so it is naturally invalidated by design-system changes.
 Styles are seeded before load; a second pass collects actual expanded DOM classes
-and styles, including props, slots, authored theme contexts and scripts.
+and styles, including props, slots, authored theme contexts and scripts. A document
+that runs authored scripts, in its own HTML or a component it embeds, first gets
+`SCRIPT_SETTLE_MS` (250 ms) after load, in a single render and in a sprite alike:
+scripts often build their view from a timer or an animation frame, and a preview
+captured at load showed a chart's empty frame at the wrong height.
 Shared Google Fonts styles and font bytes are fetched before browser launch,
 with bounded caching and an original-link fallback. Other font providers retain
 normal browser loading. One WebP capture produces the sharp tier; a detached

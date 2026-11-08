@@ -332,6 +332,17 @@ const MIGRATIONS = [
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind = 'tokens'`);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Previews captured a document with authored scripts as soon as it loaded, often before the script drew, so a
+  // chart showed its empty frame at the wrong height. Such documents now get time to draw (SCRIPT_SETTLE_MS).
+  // Every frame and component that runs a script renders once more: its own, or, when any component holds one,
+  // every frame and component in the file, since each may embed it.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'scriptSettle'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('scriptSettle', '1')`);
+    const scriptedComponent = sql.exec(`SELECT 1 FROM nodes WHERE kind = 'component' AND source LIKE '%<script%' LIMIT 1`).toArray().length > 0;
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('frame', 'component') AND (? OR source LIKE '%<script%')`, scriptedComponent ? 1 : 0);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

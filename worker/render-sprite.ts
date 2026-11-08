@@ -1,6 +1,6 @@
 import type { Page as BrowserPage } from "@cloudflare/puppeteer";
 import { frameDocument } from "../shared/types";
-import { AUTO_VIEWPORT, bytesToBase64, capture, documentDesign, FIT_PASSES, hiScale, MAX_HEIGHT, seedInput, tailwindCss } from "./render";
+import { AUTO_VIEWPORT, bytesToBase64, capture, documentDesign, FIT_PASSES, hiScale, MAX_HEIGHT, runsScripts, SCRIPT_SETTLE_MS, seedInput, tailwindCss } from "./render";
 import { pruneFontFaces, type RenderDesign } from "./render-fonts";
 
 /**
@@ -116,10 +116,12 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   await page.setContent(SHELL, { waitUntil: "load", timeout: 5000 });
   // Only the font subsets these documents' characters need travel to the page. Text a script writes need not be in
   // its source, so documents with authored scripts keep every subset.
-  const scripted = [...jobs.map((job) => job.html), ...design.components.map((c) => c.html)].some((html) => /<script\b/i.test(html));
+  const scripted = jobs.some((job) => runsScripts(job.html, design));
   const fonts = design.fonts && !scripted ? pruneFontFaces(design.fonts, docs.join("")) : design.fonts ?? "";
   phases.sentKB += Math.round((docs.reduce((n, doc) => n + doc.length, 0) + fonts.length) / 1024);
-  const { frames: loaded, ms: pageMs } = await page.evaluate(async ({ docs, sizes, fonts, mark, timeoutMs }) => {
+  // As a single render does, a document with authored scripts gets its allowance after load; the frames load together.
+  const settle = jobs.map((job, i) => runsScripts(job.html, designs[i]!) ? SCRIPT_SETTLE_MS : 0);
+  const { frames: loaded, ms: pageMs } = await page.evaluate(async ({ docs, sizes, settle, fonts, mark, timeoutMs }) => {
     const started = performance.now();
     // Fonts arrive once as data URLs and become blob URLs every frame shares, instead of megabytes per document.
     const fontCss = fonts ? fonts.replace(/url\(data:([^;,)]+);base64,([^)]+)\)/g, (_: string, type: string, data: string) => {
@@ -134,8 +136,9 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
       frame.style.width = `${sizes[i]!.w}px`;
       frame.style.height = `${sizes[i]!.h}px`;
       const timer = setTimeout(() => { frame.remove(); resolve(null); }, timeoutMs);
-      frame.onload = () => {
+      frame.onload = async () => {
         clearTimeout(timer);
+        if (settle[i]) await new Promise((wait) => setTimeout(wait, settle[i]));
         const d = frame.contentDocument;
         if (!d?.body) { frame.remove(); resolve(null); return; }
         // Component expansion has finished parsing. Read actual classes, as a single render does.
@@ -149,7 +152,7 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
       document.body.appendChild(frame);
     })));
     return { frames, ms: Math.round(performance.now() - started) };
-  }, { docs, sizes, fonts, mark: FONT_MARK, timeoutMs: limits.loadMs }) as { frames: Loaded[]; ms: number };
+  }, { docs, sizes, settle, fonts, mark: FONT_MARK, timeoutMs: limits.loadMs }) as { frames: Loaded[]; ms: number };
   phases.pageLoad += pageMs;
 
   lap("load");

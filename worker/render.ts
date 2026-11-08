@@ -12,6 +12,18 @@ export const FIT_PASSES = 3;
 /** Width the sharp preview tier is captured at, at most; narrower frames are never enlarged. */
 export const hiScale = (width: number) => Math.min(1, 1280 / width);
 
+/**
+ * Authored scripts often build their view after the load event, from a timer or an animation frame. A document
+ * that runs any gets this long after load before its classes are read, its height measured and its preview
+ * captured; without it, a preview could show a design's markup before its script drew it, at the wrong height.
+ */
+export const SCRIPT_SETTLE_MS = 250;
+
+/** Whether a document runs authored scripts: in its own HTML or in a component it embeds. */
+export function runsScripts(html: string, design: Pick<RenderDesign, "components">) {
+  return [html, ...design.components.map((c) => c.html)].some((source) => /<script\b/i.test(source));
+}
+
 /** Chunked encoding avoids argument/stack limits for large captures. */
 export function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
@@ -47,12 +59,15 @@ export async function loadFrame(page: BrowserPage, f: { html: string; width: num
     await page.setViewport({ width, height: viewportHeight });
   }
   await page.setContent(frameDocument(f.html, { base, design, compiledTailwind: true, tailwindCss: seedCss, fontCss: design.fonts }), { waitUntil: "load", timeout: 20_000 });
-  // Component expansion has finished parsing. Read actual classes rather
-  // than guessing from source (props, slots and SVG may create new classes).
-  const { css, classes } = await page.evaluate(() => ({
-    css: [...document.querySelectorAll('style[type="text/tailwindcss"]')].map((style) => style.textContent).join("\n"),
-    classes: [...new Set([...document.querySelectorAll("[class]")].flatMap((el) => [...el.classList]))],
-  }));
+  // Component expansion has finished parsing, and authored scripts have had their allowance. Read actual
+  // classes rather than guessing from source (props, slots, SVG and scripts may create new classes).
+  const { css, classes } = await page.evaluate(async (settleMs) => {
+    if (settleMs) await new Promise((resolve) => setTimeout(resolve, settleMs));
+    return {
+      css: [...document.querySelectorAll('style[type="text/tailwindcss"]')].map((style) => style.textContent).join("\n"),
+      classes: [...new Set([...document.querySelectorAll("[class]")].flatMap((el) => [...el.classList]))],
+    };
+  }, runsScripts(f.html, design) ? SCRIPT_SETTLE_MS : 0);
   const compiled = await tailwindCss(css, classes);
   let measured = await page.evaluate(async ({ css, changed }) => {
     if (!changed) {

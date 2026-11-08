@@ -148,6 +148,9 @@ script, in live previews only; thumbnails and screenshots render without it. The
   runs, so the browser's style, layout and paint count with the script. A frame that took
   `spent` ms waits `spent × (1 / share − 1)` ms before the next one. Cheap animations still run
   at the display rate.
+- A document's first two frame batches run whatever the pace. A preview goes live once the
+  camera settles; if the camera moves again before the design's first frame, the design still
+  draws instead of covering its thumbnail with an empty view until the camera stops.
 
 Timers, CSS animations and Web Animations are not paced. Interaction playback documents are
 not paced either. Measured on the chart prototypes (Chrome 155, Arc A750, 1728×1000 at 2×, six

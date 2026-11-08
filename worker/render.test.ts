@@ -122,6 +122,22 @@ describe("auto-height frame viewport", () => {
     expect(doc).not.toContain("x-screen-huge");
   });
 
+  it("gives a document with authored scripts time to draw before reading, measuring and capturing it", async () => {
+    const { loadFrame, SCRIPT_SETTLE_MS } = await import("./render");
+    const settleOf = async (html: string, system: { tokens: string; components: { tag: string; html: string }[] }) => {
+      const { tab, calls } = layoutTab({ content: 100 });
+      await loadFrame(tab, { html, width: 390, height: null }, "https://sharpner.test", system);
+      // The first evaluation, which reads the document's classes before any measurement, waits this long.
+      return (calls.evaluate.mock.calls[0] as unknown as [unknown, number])[1];
+    };
+    expect(await settleOf("<main></main>", design)).toBe(0);
+    expect(await settleOf("<main></main><script>requestAnimationFrame(draw)</script>", design)).toBe(SCRIPT_SETTLE_MS);
+    // A script in a component the document embeds counts; one in a component it never uses does not.
+    const system = { tokens: "", components: [{ tag: "x-chart", html: "<div></div><SCRIPT>draw()</SCRIPT>" }] };
+    expect(await settleOf("<x-chart></x-chart>", system)).toBe(SCRIPT_SETTLE_MS);
+    expect(await settleOf("<main></main>", system)).toBe(0);
+  });
+
   it("lays an auto-height frame out in a viewport as tall as its content, as the live canvas iframe is", async () => {
     const { loadFrame } = await import("./render");
     const { tab, calls, viewport } = layoutTab({ content: 2337 });
