@@ -376,22 +376,35 @@ describe("thumbnail scheduling", () => {
       return { browser, pages };
     }
 
-    it("leaves its browser running for the next turn, which reconnects instead of launching", async () => {
+    it("leaves its browser running for the next turn while an agent is at work, which reconnects instead of launching", async () => {
       const {room,create,apply,db} = fixture(true);
       const {browser, pages} = session("warm-1");
       renderer.launch.mockResolvedValue(browser); renderer.connect.mockResolvedValue(browser);
       await create("screen");
       db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
-      expect(await room.renderThumbnails()).toMatchObject({rendered:1,warm:"warm-1"});
+      expect(await room.renderThumbnails(undefined, undefined, undefined, true)).toMatchObject({rendered:1,warm:"warm-1"});
       // Its own pages close; the browser stays.
       expect(pages.map((p) => p.close.mock.calls.length)).toEqual([1]);
       expect(browser.disconnect).toHaveBeenCalledTimes(1);
       expect(browser.close).not.toHaveBeenCalled();
       await apply([{t:"node.put",id:"screen",node:{source:"<p>Edited</p>"}}]);
       db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
-      expect(await room.renderThumbnails(undefined, undefined, "warm-1")).toMatchObject({rendered:1,warm:"warm-1"});
+      expect(await room.renderThumbnails(undefined, undefined, "warm-1", true)).toMatchObject({rendered:1,warm:"warm-1"});
       expect(renderer.connect).toHaveBeenCalledWith(expect.anything(), "warm-1");
       expect(renderer.launch).toHaveBeenCalledTimes(1);
+    });
+
+    it("closes its browser, even one it reconnected to, when no agent is at work", async () => {
+      const {room,create,db} = fixture(true);
+      const {browser, pages} = session("warm-1");
+      renderer.connect.mockResolvedValue(browser);
+      await create("screen");
+      db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+      expect(await room.renderThumbnails(undefined, undefined, "warm-1")).toMatchObject({rendered:1,warm:null});
+      expect(renderer.connect).toHaveBeenCalledWith(expect.anything(), "warm-1");
+      expect(browser.close).toHaveBeenCalledTimes(1);
+      expect(browser.disconnect).not.toHaveBeenCalled();
+      expect(pages).toHaveLength(1);
     });
 
     it("launches when the warm browser is gone, and closes a browser that had a failed sprite", async () => {
@@ -402,7 +415,7 @@ describe("thumbnail scheduling", () => {
       renderer.renderSprite.mockRejectedValueOnce(new Error("sprite timed out"));
       await create("screen");
       db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
-      expect(await room.renderThumbnails(undefined, undefined, "gone")).toMatchObject({rendered:0,warm:null});
+      expect(await room.renderThumbnails(undefined, undefined, "gone", true)).toMatchObject({rendered:0,warm:null});
       expect(renderer.launch).toHaveBeenCalledTimes(1);
       expect(browser.close).toHaveBeenCalledTimes(1);
       expect(browser.disconnect).not.toHaveBeenCalled();
@@ -421,7 +434,7 @@ describe("thumbnail scheduling", () => {
       renderer.launch.mockResolvedValue(browser);
       await create("a"); await create("b"); await create("c");
       db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
-      expect(await room.renderThumbnails()).toMatchObject({rendered:3,warm:"ctx"});
+      expect(await room.renderThumbnails(undefined, undefined, undefined, true)).toMatchObject({rendered:3,warm:"ctx"});
       expect(contexts).toHaveLength(3);
       expect(contexts.map((c) => c.close.mock.calls.length)).toEqual([1, 1, 1]);
       expect(browser.newPage).not.toHaveBeenCalled();

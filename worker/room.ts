@@ -1031,11 +1031,12 @@ export class FileRoom extends DurableObject<Env> {
   /**
    * One bounded fair turn, one browser for the file's entire queue. Called only by ThumbnailQueue. `warm` is the
    * browser session the previous turn left running; `warm` in the result is the session this turn leaves, null when
-   * it left none, and absent when it never opened a browser.
+   * it left none, and absent when it never opened a browser. Only a turn with `keepWarm`, while an agent is at work,
+   * leaves its browser running; any other turn closes it, because idle browser time is billed.
    */
-  async renderThumbnails(notAfter = Date.now() + 20_000, quantumMs: number = THUMBNAIL_POLICY.quantumMs, warm?: string): Promise<TurnResult> {
+  async renderThumbnails(notAfter = Date.now() + 20_000, quantumMs: number = THUMBNAIL_POLICY.quantumMs, warm?: string, keepWarm = false): Promise<TurnResult> {
     if (this.browserTask) return { more: true, browserMs: 0, rendered: 0 };
-    return this.withFileBrowser(() => this.renderThumbnailsNow(notAfter, Math.min(quantumMs, THUMBNAIL_POLICY.soloQuantumMs), warm));
+    return this.withFileBrowser(() => this.renderThumbnailsNow(notAfter, Math.min(quantumMs, THUMBNAIL_POLICY.soloQuantumMs), warm, keepWarm));
   }
 
   private async withFileBrowser<T>(run: () => Promise<T>): Promise<T> {
@@ -1096,7 +1097,7 @@ export class FileRoom extends DurableObject<Env> {
     } finally { this.screenshotRequests--; }
   }
 
-  private async renderThumbnailsNow(notAfter: number, quantumMs: number, warm?: string): Promise<TurnResult> {
+  private async renderThumbnailsNow(notAfter: number, quantumMs: number, warm: string | undefined, keepWarm: boolean): Promise<TurnResult> {
     const fileId = this.meta("fileId"), base = this.meta("origin") ?? "";
     if (!this.env.BROWSER || !fileId || !this.hasRenderAudience()) return { more: false, browserMs: 0, rendered: 0 };
     const readyAt = Number(this.meta("thumbAfter") ?? 0);
@@ -1182,7 +1183,7 @@ export class FileRoom extends DurableObject<Env> {
       console.warn("thumbnail session failed", String(err));
     } finally {
       stopped = true;
-      if (browser) left = await releaseBrowser(browser, opened, healthy);
+      if (browser) left = await releaseBrowser(browser, opened, healthy && keepWarm);
     }
     const browserMs = Date.now() - started;
     // `pending` previews still trail their node's revision after this turn; 0 means the file is in sync.

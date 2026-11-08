@@ -35,12 +35,12 @@ export async function openTab(browser: Browser): Promise<Page> {
 }
 
 /**
- * Closes this turn's pages and disconnects, leaving the browser running for the next turn; returns its session.
- * A browser that may be unhealthy (a timed-out session, a wedged page) closes instead, as does one whose pages
- * will not close.
+ * With `keep`, closes this turn's pages and disconnects, leaving the browser running for the next turn; returns its
+ * session. Otherwise the browser closes, which ends its billed time. Callers pass `keep` only for a healthy browser
+ * (no timed-out session or wedged page); one whose pages will not close closes too.
  */
-export async function releaseBrowser(browser: Browser, pages: Page[], healthy: boolean): Promise<string | undefined> {
-  if (healthy) {
+export async function releaseBrowser(browser: Browser, pages: Page[], keep: boolean): Promise<string | undefined> {
+  if (keep) {
     try {
       // A tab's own context closes with its pages; a tab in the shared context closes alone.
       await withTimeout(Promise.all(pages.map((page) => {
@@ -56,4 +56,14 @@ export async function releaseBrowser(browser: Browser, pages: Page[], healthy: b
   }
   await withTimeout(browser.close(), 5000, "browser close").catch(() => {});
   return undefined;
+}
+
+/** Closes a session a turn left running, when it still answers. */
+export async function closeBrowser(endpoint: Parameters<typeof puppeteer.launch>[0], session: string): Promise<void> {
+  try {
+    const browser = await withTimeout(puppeteer.connect(endpoint, session), 5000, "browser connect");
+    await withTimeout(browser.close(), 5000, "browser close");
+  } catch (err) {
+    console.warn("thumbnail browser close failed", String(err));
+  }
 }

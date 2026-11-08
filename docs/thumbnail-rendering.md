@@ -45,7 +45,7 @@ canvas derives the overview tier. Frames no wider than 256px share one object.
 | Browser tabs in a turn | 4, each in a browser context of its own, rendering one sprite at a time |
 | Nodes per batch / per sprite | 96 / 24 |
 | Edit debounce | None for the first edit after 1.2 quiet seconds; 1.2 seconds within a burst |
-| Warm browser between turns | 60 seconds of keep-alive; reused while 10 seconds remain |
+| Warm browser between turns | Only while an agent is at work; closed 60 seconds after its last MCP call on a file. Browser Run's own idle limit is 3 minutes, in case that close fails |
 | Fair turn / sprite deadline / hard session deadline | 8 / 20 / 40 seconds; the turn is 15 seconds when no other file can run |
 | Reserved time before admission | 60 seconds, refunded to measured elapsed time |
 | Daily automatic browser time per file, per workspace, globally and for `BACKFILL` files | Lifted on 4 Nov 2026: about 11.5 days each, so never reached. Spend is still recorded. Earlier values were 30 minutes, 1 hour, 4 hours and 1 hour. |
@@ -55,11 +55,16 @@ canvas derives the overview tier. Frames no wider than 256px share one object.
 The shared Durable Object rotates workspaces, then files. Files in the temporary
 `BACKFILL` set wait behind every file someone is viewing. A busy file keeps one
 browser session across its batches until its fair turn expires; it does not
-launch another browser per batch. A healthy turn closes its pages and leaves the
+launch another browser per batch. Idle browser time is billed like any other, so
+the browser stays warm only while an agent is at work: every MCP call on a file,
+read or write, marks the agent active, because agents read before they write. A
+healthy turn within 60 seconds of such a call closes its pages and leaves the
 browser running; the queue hands that session to the next automatic turn, of any
-file, for up to 60 seconds, so a burst of edits pays one launch (1–2 seconds in
-production) instead of one per turn. A turn with a failed sprite, a failed single
-render or a timed-out session closes its browser instead. Only a session Sharpner
+file, so an agent's edits pay one launch (1–2 seconds in production) instead of
+one per turn, and the queue closes the browser 60 seconds after the agent's last
+call. A read never launches a browser. A turn at any other time, such as for a
+viewer's page or a migration, closes its browser, as does a turn with a failed
+sprite, a failed single render or a timed-out session. Only a session Sharpner
 left is reused, never another idle session on the account.
 Persistent leases and conservative reservations protect admission across
 restarts and failures. Explicit `screenshot_nodes` requests use the same browser
