@@ -76,7 +76,9 @@ This is not complete network or CPU isolation. Display-resource URLs remain
 network-capable, initial script self-navigation can issue a request before
 disposal, and APIs outside CSP's connection model need separate controls.
 Arbitrary JavaScript can also monopolize its renderer thread; a sandbox is not
-a CPU quota. A dedicated preview origin and an explicit asset/dependency policy
+a CPU quota. Live previews bound only their animation frames (see "Live preview
+pacing" in [architecture](architecture.md#rendering-and-loading)); playback runs at full rate, and
+a long synchronous script or a CSS animation is not paced. A dedicated preview origin and an explicit asset/dependency policy
 remain hardening work before treating hostile third-party code as supported.
 Normal previews and server screenshots retain their existing policies; playback
 restrictions are deliberately not applied to every existing file's renderer.

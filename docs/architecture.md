@@ -132,6 +132,29 @@ Only visible nodes, plus a margin, are considered. Rendering switches with on-sc
 
 Components can become live from 220 CSS px wide; screen previews use the thresholds above. Without thumbnails, up to twelve nodes can become live from 140 CSS px wide. The low-resolution cache admits a stable viewport working set, capped at 600 images, 16 million decoded pixels, and sixteen concurrent loads. Dense views beyond that budget use boxes until navigation makes room; they do not continuously evict and reload each other. Original image uploads are promoted only for up to eight large, actually visible images.
 
+**Live preview pacing.** Live previews run authored scripts, and a design that redraws on every animation frame
+costs that much main thread for as long as it is live. Safari, Firefox and Chrome without
+sandboxed-frame isolation run these iframes on the canvas's own thread. There, six live chart
+prototypes (about 30 ms per frame each) held a drag to 4–5 camera updates per second. With
+isolation, the same prototypes kept a core busy while nobody touched the canvas.
+`frameDocument(…, { pace: true })` installs `shared/preview-pacing.ts` before any authored
+script, in live previews only; thumbnails and screenshots render without it. The script wraps
+`requestAnimationFrame`:
+
+- While the camera moves, the canvas tells every live preview to hold its frame callbacks.
+  They run again 220 ms after the camera settles.
+- At rest, live previews split one budget of 30% of a core (`PREVIEW_ANIMATION_BUDGET`). A
+  frame's cost is measured from its first callback until a task posted from the callbacks
+  runs, so the browser's style, layout and paint count with the script. A frame that took
+  `spent` ms waits `spent × (1 / share − 1)` ms before the next one. Cheap animations still run
+  at the display rate.
+
+Timers, CSS animations and Web Animations are not paced. Interaction playback documents are
+not paced either. Measured on the chart prototypes (Chrome 155, Arc A750, 1728×1000 at 2×, six
+live): a drag went from 4–5 to 42–52 camera updates per second on a shared thread. At rest, the
+isolated preview process went from 1.06 to about 0.4 cores. The prototypes' CSS animations
+still cost the GPU process about 0.4 cores.
+
 Source edits, token edits, edits to a component the document uses, and cold assets
 use the fresh-document swap (the warm theme-only update path was removed with theme
 switching on 2026-11-02). A live document embeds only the components whose tags

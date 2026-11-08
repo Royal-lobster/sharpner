@@ -25,6 +25,7 @@ import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { CanvasLayout } from "./canvas-layout";
 import { LiveFrame } from "./live-frame";
+import { previewAnimationShare } from "../shared/preview-pacing";
 import { InteractionFrame } from "./InteractionFrame";
 import { INTERACTION_READY_TIMEOUT_MS } from "../shared/interaction-document";
 import { fitLabel, LABEL_FONT, LABEL_ROOM, labelBaseline } from "./canvas-labels";
@@ -278,6 +279,8 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   highImages.current = renderPlan.imageIds;
   const { sections: visibleSections, domFrames, rasterFrames } = renderPlan;
   const liveIds = [...renderPlan.liveIds];
+  // Live previews split one animation budget, so more of them on screen cost the main thread no more.
+  const animationShare = previewAnimationShare(liveIds.length);
   useEffect(() => {
     room.needSources(liveIds);
     return () => room.needSources([]);
@@ -579,6 +582,8 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
               height={r.h}
               tier={screenWidth * dpr > HI_RES_MIN_PIXELS ? "hi" : "lo"}
               live={live.current.has(f.id)}
+              navigating={!settled}
+              animationShare={animationShare}
               // A session is keyed by revision, so it waits for the matching source instead of starting stale.
               html={src && (f.id !== playingId || src.rev === f.rev) ? renderedHtml(f, src.source, design) : undefined}
               design={design}
@@ -665,6 +670,10 @@ type FrameNodeProps = {
   height: number;
   tier: Tier;
   live: boolean;
+  /** The camera is moving: live previews hold their animation frames. */
+  navigating: boolean;
+  /** The share of the main thread this node's live preview may animate with at rest. */
+  animationShare: number;
   html: string | undefined;
   design: DesignSystem;
   /** Present only on the design being played. */
@@ -680,7 +689,7 @@ type FrameNodeProps = {
   fresh: boolean;
 };
 
-const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, html, design, playback, onPlay, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
+const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, height, tier, live, navigating, animationShare, html, design, playback, onPlay, selected, peerColor, agent, doneAt, fresh }: FrameNodeProps) {
   const settling = doneAt !== undefined;
   const lo = thumbnailSource(f);
   const hi = thumbnailSource(f, true);
@@ -713,7 +722,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
         {!lo && !showLive && !playback && <div className="frame-placeholder">{f.kind === "image" ? "" : "Rendering…"}</div>}
-        {showLive && <LiveFrame id={f.id} html={html} design={usedDesign} width={specimenWidth(f)} height={height} />}
+        {showLive && <LiveFrame id={f.id} html={html} design={usedDesign} width={specimenWidth(f)} height={height} paused={navigating} share={animationShare} />}
         {playback && (html === undefined
           ? <InteractionLoading onTimeout={() => playback.stop("timeout")} />
           // A new key is a new session: Reset, or any change to what the design renders.
