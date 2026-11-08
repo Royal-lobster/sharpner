@@ -46,35 +46,32 @@ describe("warm browser", () => {
     expect(calls.warm.at(-1)).toBeUndefined();
   });
 
-  it("keeps a turn's browser only while an agent is at work, and closes it once the agent goes quiet", async () => {
+  it("asks a turn to keep its browser only when another file is waiting, and closes one nobody reuses in time", async () => {
     const {queue, fire, alarm} = fixture();
-    // Previews a viewer's page or a migration needs, with no agent at work, close their browser.
     await queue.enqueue("a-one", Date.now()); await fire();
     expect(calls.keepWarm).toEqual([false]);
-    queue.agentActive();
-    calls.render.mockResolvedValueOnce({ more: false, browserMs: 1000, rendered: 4, warm: "session-1" });
-    await queue.enqueue("a-one", Date.now()); await fire();
+    // Two files are ready, so the first turn's browser serves the second.
+    await queue.enqueue("a-two", Date.now()); await queue.enqueue("b-one", Date.now());
+    calls.render.mockResolvedValueOnce({ more: true, browserMs: 1000, rendered: 4, warm: "session-1", retryAt: Date.now() + 500 });
+    await fire();
     expect(calls.keepWarm.at(-1)).toBe(true);
-    // The queue checks again when the agent's quiet spell would end.
     await fire();
-    expect(alarm()).toBe(Date.now() + policy.agentIdleMs);
-    // A read before the next edit keeps the browser for that edit.
-    vi.advanceTimersByTime(policy.agentIdleMs - 5000);
-    queue.agentActive();
-    vi.advanceTimersByTime(5000);
-    await fire();
-    expect(calls.close).not.toHaveBeenCalled();
-    await queue.enqueue("b-one", Date.now()); await fire();
     expect(calls.warm.at(-1)).toBe("session-1");
-    expect(calls.keepWarm.at(-1)).toBe(true);
-    // That turn opened no browser, so the warm one stays; a minute after the agent's last call it closes.
-    vi.advanceTimersByTime(policy.agentIdleMs);
+    expect(calls.keepWarm.at(-1)).toBe(false);
+    // That turn opened no browser, so the warm one stays for the first file's remaining work, due in 500 ms.
     await fire();
+    expect(alarm()).toBe(Date.now() + 500);
+    vi.advanceTimersByTime(500); await fire();
+    expect(calls.warm.at(-1)).toBe("session-1");
+    expect(calls.close).not.toHaveBeenCalled();
+    // Nothing else is due, so the queue closes the browser once its warm window passes.
+    await fire();
+    expect(alarm()).toBe(Date.now() - 500 + policy.warmMs);
+    vi.advanceTimersByTime(policy.warmMs); await fire();
     expect(calls.close).toHaveBeenCalledWith({}, "session-1");
     expect(alarm()).toBeNull();
     await queue.enqueue("a-one", Date.now()); await fire();
     expect(calls.warm.at(-1)).toBeUndefined();
-    expect(calls.keepWarm.at(-1)).toBe(false);
   });
 });
 

@@ -54,10 +54,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   const server = new McpServer({ name: "sharpner", version: "0.2.0" }, { instructions: INSTRUCTIONS });
   const actor: Actor = { id: user.id, name: `${user.name}'s agent`, avatar: user.avatar_url, agent: true };
 
-  // Any file call shows an agent at work, and agents read before they write, so previews keep a warm browser.
-  const queue = env.THUMBNAIL_QUEUE?.get(env.THUMBNAIL_QUEUE.idFromName("global"));
   const access = async (fileId: string) => {
-    const [file] = await Promise.all([fileFor(env, user.id, fileId), queue?.agentActive().catch(() => {})]);
+    const file = await fileFor(env, user.id, fileId);
     if (!file) throw new Error(`File ${fileId} not found or you are not a member of its workspace`);
     const stub = room(env, file.id);
     return { file, stub, apply: (ops: Op[]) => {

@@ -6,7 +6,7 @@ type Page = Awaited<ReturnType<Browser["newPage"]>>;
 
 /**
  * Reconnects to the session the previous automatic turn left warm, when it still answers; otherwise launches a
- * browser that can stay warm for `keepAliveMs` after this turn. A launch costs one to two seconds in production.
+ * browser that Browser Run closes after `keepAliveMs` idle, in case Sharpner does not. A launch costs one to two seconds in production.
  * Only a session Sharpner itself left is reused, never another idle session on the account.
  */
 export async function openBrowser(endpoint: Parameters<typeof puppeteer.launch>[0], warm: string | undefined, keepAliveMs: number): Promise<{ browser: Browser; reused: boolean }> {

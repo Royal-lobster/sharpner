@@ -376,7 +376,7 @@ describe("thumbnail scheduling", () => {
       return { browser, pages };
     }
 
-    it("leaves its browser running for the next turn while an agent is at work, which reconnects instead of launching", async () => {
+    it("leaves its browser running when another file is waiting, and the next turn reconnects instead of launching", async () => {
       const {room,create,apply,db} = fixture(true);
       const {browser, pages} = session("warm-1");
       renderer.launch.mockResolvedValue(browser); renderer.connect.mockResolvedValue(browser);
@@ -394,7 +394,7 @@ describe("thumbnail scheduling", () => {
       expect(renderer.launch).toHaveBeenCalledTimes(1);
     });
 
-    it("closes its browser, even one it reconnected to, when no agent is at work", async () => {
+    it("closes its browser, even one it reconnected to, when nothing else is due", async () => {
       const {room,create,db} = fixture(true);
       const {browser, pages} = session("warm-1");
       renderer.connect.mockResolvedValue(browser);
@@ -405,6 +405,18 @@ describe("thumbnail scheduling", () => {
       expect(browser.close).toHaveBeenCalledTimes(1);
       expect(browser.disconnect).not.toHaveBeenCalled();
       expect(pages).toHaveLength(1);
+    });
+
+    it("keeps its browser for the file's own remaining previews", async () => {
+      const {room,create,db} = fixture(true);
+      const {browser} = session("warm-1");
+      renderer.launch.mockResolvedValue(browser);
+      await create("a"); await create("b");
+      db.exec("DELETE FROM meta WHERE k = 'thumbAfter'");
+      // The fair turn ends before any render, so both previews are left for the next turn.
+      expect(await room.renderThumbnails(undefined, 0)).toMatchObject({rendered:0,more:true,warm:"warm-1"});
+      expect(browser.close).not.toHaveBeenCalled();
+      expect(browser.disconnect).toHaveBeenCalledTimes(1);
     });
 
     it("launches when the warm browser is gone, and closes a browser that had a failed sprite", async () => {

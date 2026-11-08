@@ -24,12 +24,13 @@ export const THUMBNAIL_POLICY = {
   // A sprite still running when the quantum ends finishes; a sprite past spriteMs ends the session.
   spriteMs: 20_000,
   sessionMs: 40_000,
-  // While an agent is at work, a turn leaves its browser running for the next turn, which then skips a 1–2 s launch.
-  // An agent is at work until agentIdleMs after its last MCP call on a file, read or write; the queue then closes the
-  // browser, because idle time is billed like any browser time. Turns for anything else, such as a viewer's page or
-  // a migration, close their browser. keepAliveMs is Browser Run's own idle limit, in case that close fails.
-  agentIdleMs: 60_000,
-  keepAliveMs: 180_000,
+  // Idle browser time is billed like rendering, and a reconnect saves only about 1 s of a 1.5 s launch, so a turn
+  // keeps its browser only when more work is due at once: its file has previews left, or another file is waiting.
+  // The next turn then reconnects within warmMs; otherwise the queue closes the browser. In production on 7 Nov 2026,
+  // a 60 s keep-alive after every turn billed 3.7 idle hours in 15 hours to save 0.2 hours of launches.
+  warmMs: 3_000,
+  // Browser Run's own idle limit, in case the queue's close fails.
+  keepAliveMs: 60_000,
   // Browser lifetime is reserved before starting, then refunded to actual elapsed time.
   reservationMs: 60_000,
   screenshotSessionMs: 110_000,

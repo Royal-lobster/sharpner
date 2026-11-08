@@ -45,7 +45,7 @@ canvas derives the overview tier. Frames no wider than 256px share one object.
 | Browser tabs in a turn | 4, each in a browser context of its own, rendering one sprite at a time |
 | Nodes per batch / per sprite | 96 / 24 |
 | Edit debounce | None for the first edit after 1.2 quiet seconds; 1.2 seconds within a burst |
-| Warm browser between turns | Only while an agent is at work; closed 60 seconds after its last MCP call on a file. Browser Run's own idle limit is 3 minutes, in case that close fails |
+| Warm browser between turns | Only when another turn is due at once; reused within 3 seconds, then closed. Browser Run's own idle limit is 60 seconds, in case that close fails |
 | Fair turn / sprite deadline / hard session deadline | 8 / 20 / 40 seconds; the turn is 15 seconds when no other file can run |
 | Reserved time before admission | 60 seconds, refunded to measured elapsed time |
 | Daily automatic browser time per file, per workspace, globally and for `BACKFILL` files | Lifted on 4 Nov 2026: about 11.5 days each, so never reached. Spend is still recorded. Earlier values were 30 minutes, 1 hour, 4 hours and 1 hour. |
@@ -56,16 +56,32 @@ The shared Durable Object rotates workspaces, then files. Files in the temporary
 `BACKFILL` set wait behind every file someone is viewing. A busy file keeps one
 browser session across its batches until its fair turn expires; it does not
 launch another browser per batch. Idle browser time is billed like any other, so
-the browser stays warm only while an agent is at work: every MCP call on a file,
-read or write, marks the agent active, because agents read before they write. A
-healthy turn within 60 seconds of such a call closes its pages and leaves the
-browser running; the queue hands that session to the next automatic turn, of any
-file, so an agent's edits pay one launch (1–2 seconds in production) instead of
-one per turn, and the queue closes the browser 60 seconds after the agent's last
-call. A read never launches a browser. A turn at any other time, such as for a
-viewer's page or a migration, closes its browser, as does a turn with a failed
-sprite, a failed single render or a timed-out session. Only a session Sharpner
-left is reused, never another idle session on the account.
+a healthy turn leaves its browser running only when another turn is due at once:
+its file still has previews to render (a bulk edit that outlasts its fair turn, or
+the next edit of a burst after its debounce), or another file is waiting. The
+queue hands that session to the next automatic turn, of any file, within 3
+seconds, and otherwise closes it. Every other turn closes its browser, as does a
+turn with a failed sprite, a failed single render or a timed-out session. Only a
+session Sharpner left is reused, never another idle session on the account.
+`thumbnail-turn` logs `timing`: `prep` before the browser, `open` for the tabs,
+`store` for R2 and the FileRoom, and `release`.
+
+### Warm browser, production, 7–8 Nov 2026
+
+From #53 until this rule, every healthy turn left its browser running for 60
+seconds. Workers Logs for the 680 turns from 7 Nov 10:27 to 8 Nov 01:24 UTC
+(`thumbnail-turn`, 99.5% of lines retrieved) give about 3.7 hours of idle browser
+between and after turns, estimated as the gap from one turn's end to the next
+turn's start, capped at 60 seconds, against 1.65 hours of turn time. Reconnecting
+took a median 0.58 seconds and launching 1.56 seconds, so reuse saved about 0.2
+hours of launches. Daily browser time from the same logs matched the bill: about
+4.9 hours on 7 Nov (billed about 5), when rendering alone was 1.5 hours. Replaying
+those gaps, closing after every turn costs 0.19 hours of launches, keeping the
+browser 3 seconds only when its file had previews left costs 0.21 hours, and 10
+seconds after every turn costs 1.29 hours. A single-preview turn took a median
+3.3 seconds: 0.58 to launch or reconnect, 0.46 sending 412 KB of documents and
+fonts, 0.92 loading, capturing and encoding, and 1.05 outside the logged phases,
+which `timing` now splits.
 Persistent leases and conservative reservations protect admission across
 restarts and failures. Explicit `screenshot_nodes` requests use the same browser
 slot and the file's serialized browser work, with bounded waiting and session

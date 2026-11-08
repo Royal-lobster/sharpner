@@ -1031,8 +1031,9 @@ export class FileRoom extends DurableObject<Env> {
   /**
    * One bounded fair turn, one browser for the file's entire queue. Called only by ThumbnailQueue. `warm` is the
    * browser session the previous turn left running; `warm` in the result is the session this turn leaves, null when
-   * it left none, and absent when it never opened a browser. Only a turn with `keepWarm`, while an agent is at work,
-   * leaves its browser running; any other turn closes it, because idle browser time is billed.
+   * it left none, and absent when it never opened a browser. `keepWarm` says another file's turn is due at once. A turn
+   * leaves its browser running only then, or when this file has previews left; otherwise it closes the browser,
+   * because idle browser time is billed.
    */
   async renderThumbnails(notAfter = Date.now() + 20_000, quantumMs: number = THUMBNAIL_POLICY.quantumMs, warm?: string, keepWarm = false): Promise<TurnResult> {
     if (this.browserTask) return { more: true, browserMs: 0, rendered: 0 };
@@ -1102,6 +1103,7 @@ export class FileRoom extends DurableObject<Env> {
     if (!this.env.BROWSER || !fileId || !this.hasRenderAudience()) return { more: false, browserMs: 0, rendered: 0 };
     const readyAt = Number(this.meta("thumbAfter") ?? 0);
     if (Date.now() < readyAt) return { more: true, browserMs: 0, rendered: 0 };
+    const entered = Date.now();
     let designRev = this.meta("designRev");
     let design = await prepareRenderDesign(await this.designSystem());
     if (Date.now() > notAfter) return { more: true, browserMs: 0, rendered: 0 };
@@ -1115,6 +1117,9 @@ export class FileRoom extends DurableObject<Env> {
     const started = Date.now();
     let rendered = 0, launchMs = 0, sprites = 0, alone = 0, reused = false;
     const phases: SpritePhases = { seed: 0, load: 0, settle: 0, capture: 0, encode: 0, pageLoad: 0, sentKB: 0 };
+    // Turn work outside the sprites: preparing the design before the browser, opening tabs, storing previews in R2
+    // and closing or releasing the browser. In Workers Date.now() advances only across I/O.
+    const timing = { prep: started - entered, open: 0, store: 0, release: 0 };
     let retryAt: number | undefined;
     let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
     let left: string | undefined;
@@ -1133,11 +1138,13 @@ export class FileRoom extends DurableObject<Env> {
         // The session deadline passed while connecting; the cleanup below has already run.
         if (stopped) { await session.browser.close().catch(() => {}); return; }
         browser = session.browser;
+        const opening = Date.now();
         const tabs = new Set(await Promise.all(Array.from({ length: Math.max(1, tabCount) }, async () => {
           const tab = await openTab(browser!);
           opened.push(tab);
           return tab;
         })));
+        timing.open = Date.now() - opening;
         // Re-query between batches so edits supersede queued work.
         while (due() && tabs.size) {
           // A design change bumps the revision of every node it affects, so a render of any other node stays
@@ -1160,7 +1167,7 @@ export class FileRoom extends DurableObject<Env> {
             for (let w = work.shift(); w && due(); w = work.shift()) {
               if (w.sprite) {
                 sprites++;
-                const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases);
+                const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases, timing);
                 // A failed sprite may leave its page wedged, so that tab retires; the other tabs keep going, and
                 // the failed sprite's nodes render alone.
                 if (result === false) { tabs.delete(tab); healthy = false; break; }
@@ -1183,12 +1190,15 @@ export class FileRoom extends DurableObject<Env> {
       console.warn("thumbnail session failed", String(err));
     } finally {
       stopped = true;
-      if (browser) left = await releaseBrowser(browser, opened, healthy && keepWarm);
+      // A browser stays warm only for a turn that is due at once: this file's remaining previews, or another file.
+      const releasing = Date.now();
+      if (browser) left = await releaseBrowser(browser, opened, healthy && (keepWarm || this.pendingCount() > 0));
+      timing.release = Date.now() - releasing;
     }
     const browserMs = Date.now() - started;
     // `pending` previews still trail their node's revision after this turn; 0 means the file is in sync.
     const pending = this.pendingCount();
-    console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, pending, sprites, alone, browserMs, launchMs, reused, warm: !!left, quantumMs, phases }));
+    console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, pending, sprites, alone, browserMs, launchMs, reused, warm: !!left, quantumMs, phases, timing }));
     this.updateCover(fileId);
     const more = pending > 0;
     if (!more && this.backfill()) { this.setMeta("backfill", ""); console.log("thumbnail-backfill-done", JSON.stringify({ fileId })); }
@@ -1207,6 +1217,7 @@ export class FileRoom extends DurableObject<Env> {
     design: Awaited<ReturnType<typeof prepareRenderDesign>>,
     valid: () => boolean,
     phases: SpritePhases,
+    timing: { store: number },
   ): Promise<number | false> {
     let result: Awaited<ReturnType<typeof renderSprite>>;
     try {
@@ -1219,12 +1230,14 @@ export class FileRoom extends DurableObject<Env> {
     }
     for (const [phase, ms] of Object.entries(result.phases) as [keyof SpritePhases, number][]) phases[phase] += ms;
     const stored: string[] = [];
+    const storing = Date.now();
     for (const [id, shot] of result.captured) {
       const n = jobs.find((job) => job.id === id)!;
       try {
         if (await this.storeThumb(n, { measured: shot.measured, lo: shot.lo, hi: shot.hi }, fileId, valid)) stored.push(id);
       } catch (err) { console.warn("thumbnail store failed", id, String(err)); }
     }
+    timing.store += Date.now() - storing;
     if (result.fallback.length) this.markSolo(jobs.filter((job) => result.fallback.includes(job.id)));
     // Publish the sprite's previews together, as soon as they are recorded.
     if (stored.length) this.broadcast({ type: "sync", nodes: this.nodes(stored), by: null });

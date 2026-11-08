@@ -17,8 +17,7 @@ export class ThumbnailQueue extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS queue (file_id TEXT PRIMARY KEY, team_id TEXT NOT NULL, ready_at INTEGER NOT NULL, turn INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, day INTEGER NOT NULL, spent INTEGER NOT NULL, turn INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS lease (id INTEGER PRIMARY KEY CHECK (id = 1), until_ms INTEGER NOT NULL, token TEXT NOT NULL DEFAULT '');
-      CREATE TABLE IF NOT EXISTS warm (id INTEGER PRIMARY KEY CHECK (id = 1), session TEXT NOT NULL, until_ms INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS agent (id INTEGER PRIMARY KEY CHECK (id = 1), active_at INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS warm (id INTEGER PRIMARY KEY CHECK (id = 1), session TEXT NOT NULL, until_ms INTEGER NOT NULL);`);
     if (!this.sql.exec<{ name: string }>(`PRAGMA table_info(lease)`).toArray().some((c) => c.name === "token")) this.sql.exec(`ALTER TABLE lease ADD COLUMN token TEXT NOT NULL DEFAULT ''`);
   }
 
@@ -39,25 +38,15 @@ export class ThumbnailQueue extends DurableObject<Env> {
     if (this.sql.exec(`SELECT 1 FROM queue LIMIT 1`).toArray().length) await this.wake(Date.now() + 50);
   }
 
-  /** An agent called an MCP tool on a file. Agents read before they write, so its next edit should find a warm browser. */
-  agentActive(): void {
-    this.sql.exec(`INSERT OR REPLACE INTO agent VALUES (1, ?)`, Date.now());
-  }
-
-  private activeAt() {
-    return this.sql.exec<{ active_at: number }>(`SELECT active_at FROM agent WHERE id = 1`).toArray()[0]?.active_at ?? 0;
-  }
-
-  /** Closes the warm browser once the agent has gone quiet; while it stays warm, returns when to check again. */
+  /** Closes the browser a turn left warm once no turn reused it in time; until then, returns when to check. */
   private async cool(now: number): Promise<number | undefined> {
     const warm = this.sql.exec<{ session: string; until_ms: number }>(`SELECT session, until_ms FROM warm WHERE id = 1`).toArray()[0];
     if (!warm) return undefined;
-    const coolAt = this.activeAt() + policy.agentIdleMs;
-    if (now < coolAt && now < warm.until_ms) return Math.min(coolAt, warm.until_ms);
+    if (now < warm.until_ms) return warm.until_ms;
     // Forget it before yielding, so no turn reconnects to a browser that is closing.
     this.sql.exec(`DELETE FROM warm`);
-    if (now < warm.until_ms && this.env.BROWSER) await closeBrowser(this.env.BROWSER, warm.session);
-    console.log("thumbnail-browser-closed", JSON.stringify({ agentIdleMs: now - this.activeAt(), expired: now >= warm.until_ms }));
+    if (this.env.BROWSER) await closeBrowser(this.env.BROWSER, warm.session);
+    console.log("thumbnail-browser-closed", JSON.stringify({ idleMs: now - warm.until_ms + policy.warmMs }));
     return undefined;
   }
 
@@ -120,18 +109,17 @@ export class ThumbnailQueue extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(now + policy.reservationMs);
       let spent: number = policy.reservationMs;
       let more = true, completed = false, retryAt = now + 30_000;
-      // The browser the previous turn left running, while its keep-alive has time to spare. Turns run one at a
-      // time, so no other turn holds it.
+      // The browser the previous turn left running for this one. Turns run one at a time, so no other turn holds it.
       const warmRow = this.sql.exec<{ session: string; until_ms: number }>(`SELECT session, until_ms FROM warm WHERE id = 1 AND until_ms > ?`, now).toArray()[0];
       const warm = warmRow?.session;
       this.sql.exec(`DELETE FROM warm`);
-      // Idle browser time is billed, so only a turn while an agent is at work leaves its browser running.
-      const keepWarm = now - this.activeAt() < policy.agentIdleMs;
+      // A turn leaves its browser running only for work that is due at once; another file waiting is one case.
+      const keepWarm = admitted.length > 1;
       try {
         const result = await room(this.env, job.fileId).renderThumbnails(now + policy.reservationMs - policy.sessionMs - 5000, alone ? policy.soloQuantumMs : policy.quantumMs, warm, keepWarm);
-        // A turn that never opened a browser leaves the warm one as it was, idle since it was left.
+        // A turn that never opened a browser leaves the warm one as it was.
         if (result.warm === undefined && warmRow) this.sql.exec(`INSERT OR REPLACE INTO warm VALUES (1, ?, ?)`, warmRow.session, warmRow.until_ms);
-        else if (result.warm) this.sql.exec(`INSERT OR REPLACE INTO warm VALUES (1, ?, ?)`, result.warm, Date.now() + policy.keepAliveMs - 10_000);
+        else if (result.warm) this.sql.exec(`INSERT OR REPLACE INTO warm VALUES (1, ?, ?)`, result.warm, Date.now() + policy.warmMs);
         spent = Math.min(policy.reservationMs, Math.max(0, result.browserMs));
         more = result.more;
         retryAt = result.retryAt ?? Date.now() + 500;
