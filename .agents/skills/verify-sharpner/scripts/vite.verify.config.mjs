@@ -11,21 +11,25 @@ const scratch = process.env.VERIFY_SHARPNER_SCRATCH;
 if (!scratch) throw new Error("VERIFY_SHARPNER_SCRATCH is not set. Start the app with `verify.mjs launch`.");
 
 const isCloudflare = (plugin) => Boolean(plugin && typeof plugin === "object" && typeof plugin.name === "string" && plugin.name.startsWith("vite-plugin-cloudflare"));
-const flat = (base.plugins ?? []).flat(Infinity);
-const at = flat.findIndex(isCloudflare);
-if (at < 0) throw new Error("vite.config.ts no longer uses @cloudflare/vite-plugin. Update the verify-sharpner skill.");
-const plugins = flat.filter((plugin) => !isCloudflare(plugin));
-plugins.splice(at, 0, cloudflare({
-  configPath: `${scratch}/wrangler.verify.json`,
-  persistState: { path: `${scratch}/state` },
-  remoteBindings: false,
-  inspectorPort: false,
-}));
 
-export default {
-  ...base,
-  plugins,
-  cacheDir: `${scratch}/vite-cache`,
-  clearScreen: false,
-  server: { ...base.server, host: "127.0.0.1", strictPort: true },
+// vite.config.ts may export a config or a function of the command, as defineConfig allows.
+export default async (env) => {
+  const config = typeof base === "function" ? await base(env) : base;
+  const flat = (config.plugins ?? []).flat(Infinity);
+  const at = flat.findIndex(isCloudflare);
+  if (at < 0) throw new Error("vite.config.ts no longer uses @cloudflare/vite-plugin. Update the verify-sharpner skill.");
+  const plugins = flat.filter((plugin) => !isCloudflare(plugin));
+  plugins.splice(at, 0, cloudflare({
+    configPath: `${scratch}/wrangler.verify.json`,
+    persistState: { path: `${scratch}/state` },
+    remoteBindings: false,
+    inspectorPort: false,
+  }));
+  return {
+    ...config,
+    plugins,
+    cacheDir: `${scratch}/vite-cache`,
+    clearScreen: false,
+    server: { ...config.server, host: "127.0.0.1", strictPort: true },
+  };
 };
