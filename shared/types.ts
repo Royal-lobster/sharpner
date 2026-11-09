@@ -1,6 +1,7 @@
 // Shapes shared by the browser, the worker, and the FileRoom Durable Object. Vocabulary: see CONTEXT.md.
 import { componentSpecimen, tokenSpecimen } from "./specimens";
 import { catalogSpecimen, specimenThemes, type ComponentExample, type Specimen } from "./catalog-specimens";
+import { forceStateScript, stateVariantCss } from "./component-states";
 import { themeNames } from "./themes";
 import { previewPacingScript } from "./preview-pacing";
 import type { ThemeThumbnails } from "./thumbnails";
@@ -155,10 +156,11 @@ export function mergeDesignSystems(library: DesignSystem | null | undefined, own
  * attributes and `<slot></slot>` takes its children. Expansion waits until the document is parsed, so an
  * instance's children are always there to slot (elements can upgrade mid-parse if a tag is already defined).
  */
-const componentScript = (defs: ComponentDef[]) => {
+const componentScript = (defs: ComponentDef[], forceStates: boolean) => {
   const byTag: Record<string, string> = {};
   for (const d of defs) byTag[d.tag] = d.html;
   return String.raw`<script>(()=>{
+${forceStates ? forceStateScript : ""}
 const C=${JSON.stringify(byTag).replace(/</g, "\\u003c")};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"})[c]);
 for(const[t,d]of Object.entries(C))if(!customElements.get(t))customElements.define(t,class extends HTMLElement{
@@ -167,6 +169,7 @@ x(){if(this._x)return;this._x=1;if(this.parentElement&&this.parentElement.closes
 const h=d;
 const kids=this.innerHTML;this.style.display="contents";
 this.innerHTML=h.replace(/\{\{\s*([\w-]+)\s*(?:\|([^|}]*)(?:\|[^}]*)?)?\}\}/g,(_,k,v)=>esc(this.hasAttribute(k)?this.getAttribute(k):(v||"").trim())).replace(/<slot\s*\/?>(\s*<\/slot>)?/gi,()=>kids);
+${forceStates ? `if(this.dataset.spState)SP_STATE(this,this.dataset.spState.split(" "));` : ""}
 }});})()</script>`;
 };
 
@@ -178,9 +181,11 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
     imports.push(`<link rel="stylesheet" href="${href.replace(/"/g, "&quot;")}">`);
     return "";
   });
+  // A catalog row that forces a state makes hover:, focus:, active: and the like match without a pointer.
+  const forceStates = /\sdata-sp-state="/.test(html);
   // `@theme static` emits every token as a CSS variable, not only those some utility happens to use,
   // so `var(--color-…)` works in custom CSS and the token sheet specimen.
-  const theme = css.replace(/@theme\s*\{/g, "@theme static {");
+  const theme = css.replace(/@theme\s*\{/g, "@theme static {") + (forceStates ? `\n${stateVariantCss}` : "");
   const tokens = imports.join("") + (theme.trim() ? `<style type="text/tailwindcss">${theme.replace(/<\//g, "<\\/")}</style>` : "");
   const head =
     (opts.base ? `<base href="${opts.base}">` : "") +
@@ -196,7 +201,7 @@ export function frameDocument(html: string, opts: { base?: string; measure?: boo
   const probe = opts.measure
     ? `<script>(()=>{let h=0;const post=()=>{const n=Math.ceil(document.body.getBoundingClientRect().height);if(n!==h){h=n;parent.postMessage({sharpnerHeight:n},"*")}};new ResizeObserver(post).observe(document.body);addEventListener("load",post)})()</script>`
     : "";
-  const tail = (opts.design?.components.length ? componentScript(opts.design.components) : "") + probe;
+  const tail = (opts.design?.components.length ? componentScript(opts.design.components, forceStates) : "") + probe;
   if (/^\s*(<!doctype|<html)/i.test(html)) {
     // Live previews are srcdoc documents, which never use quirks mode. Without a doctype the thumbnail
     // renderer would: <body> stretches to the viewport and auto-height nodes measure as tall as the page.

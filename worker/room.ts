@@ -343,6 +343,9 @@ const MIGRATIONS = [
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE kind IN ('frame', 'component') AND (? OR source LIKE '%<script%')`, scriptedComponent ? 1 : 0);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // A catalog component that lists no state prop gets a row per state its Tailwind variants style (hover, focus,
+  // checked, disabled and the like), so catalog cells are derived again; a component whose cells change renders again.
+  `INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1');`,
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

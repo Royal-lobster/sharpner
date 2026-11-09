@@ -2,10 +2,12 @@
  * Catalog specimens: what a component in a catalog section shows. Each declared theme sits side by side, and a prop
  * that lists its values (`{{size|md|sm,md,lg}}`) gets one cell per value, so a family reads as a table without
  * hand-built boards. A second listed prop (often `{{state|rest|rest,hover,pressed,disabled}}`) adds a row per
- * value. Named examples render under the cells. Every member of a family shares one cell width and one column list,
+ * value; a component that lists no second prop gets a row per interaction state its Tailwind variants style, such as
+ * hover, focus, checked and disabled (see component-states). Named examples render under the cells. Every member of a family shares one cell width and one column list,
  * so the canvas can rule the family as a table and the cells line up; rows belong to each member.
  */
 import { componentName, escapeHtml } from "./specimens";
+import { inferredStates } from "./component-states";
 
 /** One authored example: a named set of prop values, optionally at its own width. */
 export type ComponentExample = { name: string; props: Record<string, string>; width?: number };
@@ -17,7 +19,8 @@ export type SpecimenColumn = { theme: string; value: string | null };
  * family's second listed prop, one row of cells each.
  */
 export type Specimen = { cellWidth: number; axis: string | null; columns: SpecimenColumn[]; blank?: number[]; rows?: SpecimenRows };
-export type SpecimenRows = { axis: string; values: string[] };
+/** `inferred` rows are the states a component styles with Tailwind variants and lists no prop for; each forces its state. */
+export type SpecimenRows = { axis: string; values: string[]; inferred?: true };
 
 /** Room around an instance inside its cell, across and down. */
 export const CELL_PAD_X = 16;
@@ -96,7 +99,8 @@ export type SpecimenSource = { id: string; name: string; width: number; source: 
  * nodes, so its members only gain theme cells. Otherwise the props every member lists, in the first member's
  * source order, become axes: the first runs across, one column per value, and the second runs down, one row per
  * value. Members contribute column values in order and leave blank the ones they don't list; rows are each
- * member's own values. A prop some member doesn't list is not an axis, so no member is left with empty cells.
+ * member's own values. A prop some member doesn't list is not an axis, so no member is left with empty cells. A member
+ * without that second prop gets a row per state it styles instead, unless the family is a table of nodes.
  */
 export function familySpecimens(members: SpecimenSource[], themes: SpecimenTheme[], rowColumnTable: boolean): (Specimen | null)[] {
   if (!members.length) return [];
@@ -105,7 +109,12 @@ export function familySpecimens(members: SpecimenSource[], themes: SpecimenTheme
   const [lead, down] = shared;
   const values: (string | null)[] = lead ? [] : [null];
   if (lead) for (const axes of axesOf) for (const v of axes.find((a) => a.name === lead.name)!.values) if (!values.includes(v)) values.push(v);
-  const rowsOf = (i: number) => down && !members[i]!.fixed ? { axis: down.name, values: axesOf[i]!.find((a) => a.name === down.name)!.values } : undefined;
+  const rowsOf = (i: number): SpecimenRows | undefined => {
+    if (members[i]!.fixed) return undefined;
+    if (down) return { axis: down.name, values: axesOf[i]!.find((a) => a.name === down.name)!.values };
+    const states = rowColumnTable ? null : inferredStates(members[i]!.source, axesOf[i]);
+    return states ? { axis: "state", values: states, inferred: true } : undefined;
+  };
   if (themes.length < 2 && values.length < 2 && !members.some((_, i) => rowsOf(i))) return members.map(() => null);
   const columns = themes.flatMap((t) => values.map((value) => ({ theme: t.name, value })));
   const cellWidth = (rowColumnTable ? 0 : Math.max(...members.map((m) => m.width))) + CELL_PAD_X * 2;
@@ -176,7 +185,8 @@ export function catalogSpecimen(n: { name: string; width: number; height?: numbe
   const strip = (row: string | null) => `<div class="sp-cells">${specimen.columns.map((c, k) => {
     const props = {
       ...(specimen.axis && c.value !== null ? { [specimen.axis]: c.value } : {}),
-      ...(rows && row !== null ? { [rows.axis]: row } : {}),
+      ...(rows && row !== null && !rows.inferred ? { [rows.axis]: row } : {}),
+      ...(rows?.inferred && row ? { "data-sp-state": row } : {}),
     };
     const label = row !== null && specimen.columns[k - 1]?.theme !== c.theme ? `<span class="sp-row-label">${escapeHtml(valueLabel(row))}</span>` : "";
     const inner = blank.has(k) ? "" : `<div class="sp-instance" style="width:${n.width}px">${instance(tag, props)}</div>`;

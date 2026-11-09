@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogSpecimen, CELL_PAD_X, familySpecimens, parseExamples, propAxes, specimenLegend, specimenThemes, specimenWidth } from "./catalog-specimens";
+import { catalogSpecimen, CELL_PAD_X, familySpecimens, parseExamples, propAxes, specimenLegend, specimenThemes, specimenWidth, type Specimen } from "./catalog-specimens";
 import { frameDocument, renderedHtml } from "./types";
 
 const button = (size = "{{size|md|sm,md,lg}}") => `<button data-size="${size}">{{label|Send}}</button>`;
@@ -105,6 +105,18 @@ describe("family specimens", () => {
     expect(only).toMatchObject({ axis: "s", columns: [{ theme: "", value: "rest" }, { theme: "", value: "hover" }] });
   });
 
+  it("gives a member without a second listed prop a row per state its Tailwind variants style", () => {
+    const check = `<button role="checkbox" aria-checked="false" class="size-4 hover:border-primary aria-checked:bg-primary disabled:opacity-50"></button>`;
+    const [box, plainBox] = familySpecimens([{ id: "c", name: "Checkbox/Default", width: 180, source: check }, { id: "p", name: "Checkbox/Plain", width: 180, source: "<input type=checkbox>" }], dark, false);
+    expect(box).toMatchObject({ axis: null, rows: { axis: "state", values: ["", "hover", "checked", "checked hover", "disabled", "checked disabled"], inferred: true } });
+    expect(plainBox!.rows).toBeUndefined();
+    // A family that lists a second prop keeps it; a table of nodes and a fixed-height member keep one row.
+    expect(familySpecimens([{ id: "c", name: "Checkbox/Default", width: 180, source: check, fixed: true }], dark, false)[0]!.rows).toBeUndefined();
+    expect(familySpecimens([{ id: "c", name: "Checkbox/Default/Small", width: 180, source: check }], dark, true)[0]!.rows).toBeUndefined();
+    // With one theme and nothing listed, the states alone are worth a specimen.
+    expect(familySpecimens([{ id: "c", name: "Checkbox/Default", width: 180, source: check }], plain, false)[0]).toMatchObject({ columns: [{ theme: "", value: null }] });
+  });
+
   it("keeps a single default instance when there is nothing to compare", () => {
     expect(familySpecimens([member("Primary", `<b>{{label|Hi}}</b>`)], plain, false)).toEqual([null]);
   });
@@ -166,6 +178,26 @@ describe("catalog specimen document", () => {
     expect(spec!.columns.map((c) => c.value)).toEqual(["", "sm", "lg"]);
     expect(catalogSpecimen({ name: "Button/Primary", width: 136 }, "x-b", spec!, specimenThemes("")).match(/<span class="sp-row-label">(\w+)<\/span>/g)![0]).toBe('<span class="sp-row-label">default</span>');
     expect(specimenLegend(spec!)).toBe("Cells left to right: default, sm, lg. Rows top to bottom, by state: default, hover, active.");
+  });
+
+  it("forces each inferred state on its row's instance instead of setting a prop", () => {
+    const states: Specimen = { cellWidth: 212, axis: null, columns: [{ theme: "", value: null }], rows: { axis: "state", values: ["", "checked hover"], inferred: true } };
+    const html = catalogSpecimen({ name: "Checkbox/Default", width: 180 }, "x-checkbox", states, specimenThemes(""));
+    expect(html).toContain('<x-checkbox></x-checkbox>');
+    expect(html).toContain('<x-checkbox data-sp-state="checked hover"></x-checkbox>');
+    expect(html).not.toContain(' state="');
+    expect(html).toContain(">default</span>");
+    const component = { tag: "x-checkbox", html: `<button class="hover:bg-muted"></button>` };
+    const doc = frameDocument(html, { design: { tokens: "", components: [component] } });
+    expect(doc).toContain("@custom-variant hover (&:is(:hover, :where([data-sp-state~=hover]) *));");
+    expect(doc).toContain("SP_STATE(this,this.dataset.spState.split(\" \"))");
+    // The runtime is valid script.
+    const script = /<script>(\(\(\)=>\{\nconst SP_STATE[\s\S]*?)<\/script>/.exec(doc)![1]!;
+    expect(() => new Function(script)).not.toThrow();
+    // Documents without a forced state carry neither.
+    const screen = frameDocument("<x-checkbox></x-checkbox>", { design: { tokens: "", components: [component] } });
+    expect(screen).not.toContain("@custom-variant");
+    expect(screen).not.toContain("SP_STATE");
   });
 
   it("says which cell is which for agents reading a screenshot", () => {
