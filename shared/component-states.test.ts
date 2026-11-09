@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classVariants, inferredStates, stateVariantCss, variantState } from "./component-states";
+import { classVariants, forceStateScript, inferredStates, stateVariantCss, variantState } from "./component-states";
 import { propAxes } from "./catalog-specimens";
 import { thumbnailCss } from "../worker/thumbnail-css";
 
@@ -55,5 +55,30 @@ describe("component states", () => {
     expect(css).toContain(".group-hover\\:underline:is(:where(.group):is(:hover, :where([data-sp-state~=hover]) *) *)");
     expect(css).toContain(".checked\\:bg-black:is(:checked, :where([data-sp-state~=checked], [data-sp-state~=selected], [data-sp-state~=on]) *)");
     expect(css).toContain(".enabled\\:cursor-pointer:enabled:not(:where([data-sp-state~=disabled]) *)");
+  });
+  it("checks a forced radio outside its group, so repeated rows don't uncheck each other", () => {
+    // A minimal element: enough of the DOM for SP_STATE to walk, match and set attributes.
+    const el = (tag: string, attrs: Record<string, string>, kids: any[] = []): any => {
+      const node: any = {
+        tag, type: attrs.type, attrs: { ...attrs }, kids, parentElement: null, previousElementSibling: null,
+        classList: Object.assign((attrs.class ?? "").split(/\s+/).filter(Boolean), { contains(this: string[], c: string) { return this.includes(c); } }),
+        matches: (sel: string) => sel.split(",").some((s) => s === `${tag}[type=${node.attrs.type}]`),
+        setAttribute: (k: string, v: string) => { node.attrs[k] = v; },
+        removeAttribute: (k: string) => { delete node.attrs[k]; },
+        hasAttribute: (k: string) => k in node.attrs,
+        querySelectorAll: () => kids.flatMap((k: any) => [k, ...k.querySelectorAll()]),
+      };
+      for (const k of kids) k.parentElement = node;
+      return node;
+    };
+    const SP_STATE = new Function(`${forceStateScript}\nreturn SP_STATE;`)();
+    const radio = el("input", { type: "radio", name: "odds" });
+    const box = el("input", { type: "checkbox", name: "terms" });
+    SP_STATE(el("label", {}, [radio, box]), ["checked"]);
+    expect(radio.attrs).toEqual({ type: "radio", checked: "" });
+    expect(box.attrs).toEqual({ type: "checkbox", name: "terms", checked: "" });
+    const rest = el("input", { type: "radio", name: "odds" });
+    SP_STATE(el("label", {}, [rest]), ["hover"]);
+    expect(rest.attrs).toEqual({ type: "radio", name: "odds" });
   });
 });

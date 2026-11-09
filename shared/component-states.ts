@@ -95,7 +95,8 @@ export const stateVariantCss = [
 /**
  * Runs in the document after a component expands with `data-sp-state`: sets the attribute each of its classes'
  * state variants tests, on the element, its `group` ancestor or its `peer` sibling, and checks or disables native
- * controls. Kept in sync with PATTERNS: an on-state word (checked, selected, on) forces the checked state.
+ * controls. A forced radio leaves its group first: rows and themes repeat one name, and checking one would uncheck
+ * the others. Kept in sync with PATTERNS: an on-state word (checked, selected, on) forces the checked state.
  */
 export const forceStateScript = String.raw`const SP_STATE=(()=>{
 const P={hover:/^hover$/,focus:/^focus(-visible|-within)?$/,pressed:/^active$/,checked:${PATTERNS[3]![1]},invalid:${PATTERNS[4]![1]},disabled:${PATTERNS[5]![1]}};
@@ -106,7 +107,7 @@ const near=(el,kind,name)=>{const c=name?kind+"/"+name:kind;if(kind==="group"){f
 for(let e=el.previousElementSibling;e;e=e.previousElementSibling)if(e.classList.contains(c))return e;return null};
 return(root,words)=>{const on=words.some(w=>w==="checked"||w==="selected"||w==="on");const want=s=>s==="checked"?on:words.includes(s);
 for(const el of [root,...root.querySelectorAll("*")]){
-if(on&&el.matches('input[type=checkbox],input[type=radio]'))el.setAttribute("checked","");
+if(on&&el.matches('input[type=checkbox],input[type=radio]')){if(el.type==="radio")el.removeAttribute("name");el.setAttribute("checked","")}
 if(words.includes("disabled")&&el.matches("button,input,select,textarea,fieldset"))el.setAttribute("disabled","");
 if(words.includes("invalid")&&el.hasAttribute("aria-invalid"))el.setAttribute("aria-invalid","true");
 for(const t of el.classList)for(const v of split(t)){const m=/^(?:(group|peer|in|has)-)?(.+?)(?:\/([\w-]+))?$/.exec(v);if(!m||m[1]==="in"||m[1]==="has")continue;
