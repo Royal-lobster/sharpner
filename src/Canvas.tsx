@@ -23,7 +23,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { IconLayout, IconMaximize, IconMinus, IconPlayerPlay, IconPlayerStop, IconPlus, IconRotateClockwise } from "@tabler/icons-react";
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
-import { CanvasLayout } from "./canvas-layout";
+import { anchoredToHidden, CanvasLayout } from "./canvas-layout";
 import { LiveFrame } from "./live-frame";
 import { previewAnimationShare } from "../shared/preview-pacing";
 import { InteractionFrame } from "./InteractionFrame";
@@ -59,6 +59,8 @@ type Props = {
   onMarqueeSelection?: (ids: string[] | null) => void;
   /** Link viewers can look around but never select, move, delete, or add anything. */
   readOnly?: boolean;
+  /** Leave component nodes, and sections they empty, off this viewer's canvas. Nothing is sent to the room. */
+  hideComponents?: boolean;
   /** The design this viewer is playing, owned by the editor so page and selection changes can end it. */
   interactionId?: string | null;
   onInteract?: (id: string | null) => void;
@@ -70,7 +72,7 @@ type Props = {
   draftComment?: CommentAnchor | null;
 };
 
-export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, onMarqueeSelection, readOnly = false, interactionId, onInteract, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
+export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, onMarqueeSelection, readOnly = false, hideComponents = false, interactionId, onInteract, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
   useSyncExternalStore(room.subscribe, room.getVersion);
   const rootRef = useRef<HTMLDivElement>(null);
   const [playbackReset, setPlaybackReset] = useState(0);
@@ -128,9 +130,9 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   useEffect(() => () => reportMarquee.current?.(null), []);
 
   const layout = useMemo(() => new CanvasLayout(room), [room]);
-  const { frames, rects, catalogs, sections, nodes, labels: catalogLabels, tables: catalogTables, tableCells, sectionContents } = layout.page(pageId);
+  const { frames, rects, catalogs, sections, nodes, labels: catalogLabels, tables: catalogTables, tableCells, sectionContents } = layout.page(pageId, hideComponents);
   const rectOf = (f: CanvasNode) => rects.get(f.id)!;
-  const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId);
+  const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId, hideComponents);
   const navigationRef = useRef(navigation);
   navigationRef.current = navigation;
 
@@ -604,7 +606,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
             <span>{p.name}</span>
           </div>
         ))}
-        {!readOnly && [...room.comments.values()].filter((t) => t.anchor.pageId === pageId && (t.resolvedAt === null || t.id === activeCommentId)).map((thread) => {
+        {!readOnly && [...room.comments.values()].filter((t) => t.anchor.pageId === pageId && (t.resolvedAt === null || t.id === activeCommentId) && !anchoredToHidden(t.anchor, rects, room)).map((thread) => {
           const point = commentPoint(thread.anchor, rects);
           return <button key={thread.id} className={`comment-pin${thread.id === activeCommentId ? " active" : ""}${thread.resolvedAt ? " resolved" : ""}`}
             style={{ left: point.x, top: point.y }} aria-label={`Comment ${thread.number} by ${thread.firstMessage.author.name}: ${thread.firstMessage.body}`}

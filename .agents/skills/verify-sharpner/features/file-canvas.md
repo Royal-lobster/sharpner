@@ -57,6 +57,15 @@ Preconditions:
   name changes to a larger `Zoom <n>%, reset to 100%`. Run `node $V ab find role
   button click --name "Zoom to fit"` to fit the page again.
 - **Proof.** Run `node $V capture canvas page-1-fit`.
+- **Hide components.** Add `{"kind":"component","name":"Card/Base","source":"<div
+  class=\"p-4 border\">Card</div>"}` in its own section with `create_nodes`. Run
+  `node $V ab find role button click --name "File menu for Verify canvas"`, then
+  `node $V ab find role menuitemcheckbox click --name "Show components"`. The
+  component and its section leave the canvas. `node $V ab eval
+  'localStorage.getItem("sharpner:hide-components")'` prints `"1"`, and the setting
+  survives a reload. A second browser, such as the share link viewer, still shows
+  the component. On a `design-system` page, components always show. Opening a
+  comment pinned to a hidden component turns components back on.
 
 ## Gotchas
 

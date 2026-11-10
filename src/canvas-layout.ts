@@ -2,7 +2,7 @@ import { catalogLabels, catalogSectionIds, layoutRects, union } from "../shared/
 import { commentPoint } from "../shared/comments";
 import { canvasNavigation } from "./canvas-navigation";
 import type { Room } from "./room";
-import type { CanvasNode } from "../shared/types";
+import type { CanvasNode, CommentAnchor } from "../shared/types";
 import { specimenWidth } from "../shared/catalog-specimens";
 
 /** A section's own designs: how many, the widest, and what to call them in a count. */
@@ -22,8 +22,35 @@ function sectionContents(frames: CanvasNode[]) {
   return contents as Map<string, SectionContents>;
 }
 
-function pageGeometry(room: Room, pageId: string) {
-  const frames = room.pageNodes(pageId);
+/**
+ * A page as this viewer sees it with components hidden: no component nodes, and no section left empty by
+ * their removal. Sections that were already empty stay, so an agent's placeholder still shows.
+ */
+export function withoutComponents(nodes: CanvasNode[]) {
+  if (!nodes.some((n) => n.kind === "component")) return nodes;
+  const kids = new Map<string, CanvasNode[]>();
+  for (const n of nodes) if (n.parentId) (kids.get(n.parentId) ?? kids.set(n.parentId, []).get(n.parentId)!).push(n);
+  const kept = new Map<string, boolean>();
+  const keep = (n: CanvasNode): boolean => {
+    if (n.kind === "component") return false;
+    if (n.kind !== "section") return true;
+    if (!kept.has(n.id)) {
+      kept.set(n.id, true);
+      const children = kids.get(n.id) ?? [];
+      kept.set(n.id, !children.length || children.some(keep));
+    }
+    return kept.get(n.id)!;
+  };
+  return nodes.filter(keep);
+}
+
+/** True when a comment's node still exists but this viewer hides it, so its pin has nowhere to sit. */
+export function anchoredToHidden(anchor: CommentAnchor, rects: ReadonlyMap<string, unknown>, room: Pick<Room, "nodes">) {
+  return !!anchor.nodeId && !rects.has(anchor.nodeId) && room.nodes.has(anchor.nodeId);
+}
+
+function pageGeometry(room: Room, pageId: string, hideComponents: boolean) {
+  const frames = hideComponents ? withoutComponents(room.pageNodes(pageId)) : room.pageNodes(pageId);
   const rects = layoutRects(frames, (node) => room.heightOf(node));
   const catalogs = catalogSectionIds(frames);
   const { labels, tables, cells } = catalogLabels(frames, rects, catalogs);
@@ -40,28 +67,30 @@ type Navigation = { navigationRects: NonNullable<Geometry["bounds"]>[]; navigati
 
 /** One active page per canvas. Camera, presence and preview loads reuse world geometry. */
 export class CanvasLayout {
-  private geometry: { pageId: string; revision: number; value: Geometry } | null = null;
+  private geometry: { pageId: string; revision: number; hideComponents: boolean; value: Geometry } | null = null;
   private view: { geometry: Geometry; comments: number; activeCommentId: string | null; width: number; height: number; value: Navigation } | null = null;
 
   constructor(private room: Room) {}
 
-  page(pageId: string): Geometry {
+  /** `hideComponents` drops component nodes, and sections they leave empty, from this viewer's page. */
+  page(pageId: string, hideComponents = false): Geometry {
     const cached = this.geometry;
-    if (cached?.pageId === pageId && cached.revision === this.room.dataRevision) return cached.value;
-    const value = pageGeometry(this.room, pageId);
-    this.geometry = { pageId, revision: this.room.dataRevision, value };
+    if (cached?.pageId === pageId && cached.revision === this.room.dataRevision && cached.hideComponents === hideComponents) return cached.value;
+    const value = pageGeometry(this.room, pageId, hideComponents);
+    this.geometry = { pageId, revision: this.room.dataRevision, hideComponents, value };
     this.view = null;
     return value;
   }
 
-  navigation(pageId: string, size: { w: number; h: number }, activeCommentId: string | null = null): Navigation {
-    const geometry = this.page(pageId), cached = this.view;
+  navigation(pageId: string, size: { w: number; h: number }, activeCommentId: string | null = null, hideComponents = false): Navigation {
+    const geometry = this.page(pageId, hideComponents), cached = this.view;
     if (cached?.geometry === geometry && cached.comments === this.room.commentsRevision && cached.activeCommentId === activeCommentId &&
       cached.width === size.w && cached.height === size.h) return cached.value;
     // A cached union preserves the same bounds without rescanning every node after a resize or comment.
     const navigationRects = geometry.bounds ? [geometry.bounds] : [];
     for (const thread of this.room.comments.values()) {
       if (thread.anchor.pageId !== pageId || thread.resolvedAt !== null && thread.id !== activeCommentId) continue;
+      if (anchoredToHidden(thread.anchor, geometry.rects, this.room)) continue;
       navigationRects.push({ ...commentPoint(thread.anchor, geometry.rects), w: 1, h: 1 });
     }
     const value = { navigationRects, navigation: canvasNavigation(navigationRects, size) };

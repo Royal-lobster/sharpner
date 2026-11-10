@@ -38,7 +38,9 @@ Agents write the designs and inspect their rendered screenshots.
 - **Feedback that agents can act on.** Pin comments to designs, discuss them in
   threads, then ask an agent to address the feedback and resolve it when fixed.
 - **Design systems that carry through.** Define tokens and reusable components
-  once. Link another file as a library to share them across designs.
+  once. Link another file as a library to share them across designs. Turn off
+  **Show components** in the file menu to see only screens outside the Design
+  System page. The setting applies only to your browser.
 - **A link for the review.** Share a live, view-only canvas without requiring an
   account. File and review links include the current page and selection, so your
   team opens directly on the designs you selected. Revoke the review link when

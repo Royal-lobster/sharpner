@@ -43,8 +43,8 @@ Preconditions:
 - **Check read-only controls.** In the viewer ARIA snapshot, the `Collaboration`
   navigation is absent, each frame has `Interact with <frame name>`, and the
   home link is `Sharpner`, not `All files`. Run `node $V viewer find role button
-  click --name "File menu for <file name>"`. The menu shows `View only · Live` and
-  only `Canvas controls`. Run `node $V viewer press Escape`.
+  click --name "File menu for <file name>"`. The menu shows `View only · Live`,
+  `Show components` and `Canvas controls`. Run `node $V viewer press Escape`.
 - **Try to delete.** Run `node $V viewer click '[data-frame="<nodeId>"]
   .frame-body'`, then `node $V viewer press Delete`. The frame stays, and no
   `Selection` toolbar appears. `node $V mcp get_file '{"fileId":"<fileId>"}'`

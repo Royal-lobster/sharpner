@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
@@ -18,7 +18,7 @@ import { Loading, Notice } from "./states";
 import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -144,12 +144,18 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
   const [dialog, setDialog] = useState<"help" | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
+  const [hideComponents, setHideComponents] = useHiddenComponents();
   const fileTrigger = useRef<HTMLButtonElement>(null);
   const commentsTrigger = useRef<HTMLButtonElement>(null);
   const pendingFileAction = useRef<(() => void) | null>(null);
   const toggle = (panel: NonNullable<typeof open>) => (next: boolean) => setOpen(next ? panel : open === panel ? null : open);
 
   const page = room.pages.find((p) => p.id === pageId) ?? room.pages[0];
+  // Hiding is this viewer's preference. The Design System page is where components live, so it always shows them.
+  const hidingComponents = hideComponents && page?.kind !== "design-system";
+  const hidden = (id: string) => hidingComponents && room.nodes.get(id)?.kind === "component";
+  // A link or comment that points at a component brings components back rather than landing on nothing.
+  useEffect(() => { if (selectionFocus?.ids.some(hidden)) setHideComponents(false); }, [selectionFocus]);
   // Playback ends when its design leaves the page or is deleted, on comment mode or disconnection,
   // when a member selects something else, and when the tab is hidden.
   const playingNode = interactionId ? room.nodes.get(interactionId) : undefined;
@@ -169,6 +175,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   };
   const selectComment = (thread: CommentThread | null) => {
     setActiveCommentId(thread?.id ?? null); setCommentMode(false); setCommentsOpen(true);
+    if (thread?.anchor.nodeId && room.nodes.get(thread.anchor.nodeId)?.kind === "component") setHideComponents(false);
     if (thread) { selectPage(thread.anchor.pageId); setCommentFocus((f) => ({ id: thread.id, request: (f?.request ?? 0) + 1 })); }
   };
 
@@ -212,14 +219,14 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const openComments = [...room.comments.values()].filter((t) => t.resolvedAt === null).length;
   const counts = new Map<string, number>();
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
-  const selected = (marqueeSelection ?? liveSelection).flatMap((id) => room.nodes.get(id) ?? []);
+  const selected = (marqueeSelection ?? liveSelection).flatMap((id) => hidden(id) ? [] : room.nodes.get(id) ?? []);
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
   return (
     <div className="editor" ref={trackKeyboardInset}>
       <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
         {page ? (
-          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} onMarqueeSelection={setMarqueeSelection} readOnly={readOnly}
+          <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} onMarqueeSelection={setMarqueeSelection} readOnly={readOnly} hideComponents={hidingComponents}
             interactionId={playbackValid ? interactionId : null} onInteract={setInteractionId}
             commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
@@ -272,6 +279,14 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => void renameFile(); }}><Pencil aria-hidden />Rename file…</DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>}
+              <DropdownMenuCheckboxItem checked={!hideComponents} onSelect={(event) => event.preventDefault()} onCheckedChange={(show) => {
+                setHideComponents(!show);
+                // Hidden components leave the selection, so the toolbar and agents don't point at something off screen.
+                if (!show && page?.kind !== "design-system") {
+                  const kept = liveSelection.filter((id) => room.nodes.get(id)?.kind !== "component");
+                  if (kept.length !== liveSelection.length) selectNodes(kept);
+                }
+              }}><IconComponents aria-hidden />Show components</DropdownMenuCheckboxItem>
               <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("help"); }}><IconKeyboard aria-hidden />Canvas controls</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -427,6 +442,18 @@ function trackKeyboardInset(el: HTMLElement | null) {
   vv.addEventListener("resize", update);
   vv.addEventListener("scroll", update);
   return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
+}
+
+const HIDE_COMPONENTS_KEY = "sharpner:hide-components";
+
+/** Whether this browser hides component nodes outside the Design System page. One setting for every file. */
+function useHiddenComponents() {
+  const [hide, setHide] = useState(() => { try { return localStorage.getItem(HIDE_COMPONENTS_KEY) === "1"; } catch { return false; } });
+  const update = (next: boolean) => {
+    setHide(next);
+    try { next ? localStorage.setItem(HIDE_COMPONENTS_KEY, "1") : localStorage.removeItem(HIDE_COMPONENTS_KEY); } catch { /* private mode keeps it for this tab */ }
+  };
+  return [hide, update] as const;
 }
 
 /** Publishes where the navigation dock ends as `--nav-end`, so the selection bar centers in the space beside it. */
