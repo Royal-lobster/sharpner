@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createCache, rewrite } from "./cache.mjs";
 
 const origin = process.env.SHARPNER_ORIGIN;
 // The token arrives on an open descriptor (the container) or in a file, so it is in no environment a browser's
@@ -32,6 +33,9 @@ if (origin.startsWith("http://") && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$
   console.error("SHARPNER_ORIGIN must be https unless it is this machine.");
   process.exit(2);
 }
+// Strings the deployment sends by reference (fonts, component definitions, CSS) are kept here, so each travels
+// once. Without a directory they are kept in memory, until this process stops.
+const cache = createCache(process.env.RENDER_HOST_CACHE_DIR || null, { diskBytes: Number(process.env.RENDER_HOST_CACHE_GB ?? 5) * 1024 ** 3 });
 const socketUrl = `${origin.replace(/^http/, "ws").replace(/\/$/, "")}/api/render-host/socket`;
 const log = (slot, message) => console.log(`${new Date().toISOString()} slot ${slot} ${message}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,6 +113,38 @@ const opened = (socket) => new Promise((resolve, reject) => {
   socket.addEventListener("error", (event) => reject(new Error(event.message || "WebSocket failed to open")), { once: true });
 });
 
+/**
+ * Where a session's time went, for the log: per DevTools method, how many commands, how long the browser took to
+ * answer them, and how much travelled each way. The rest of a session's time is the deployment and the network.
+ */
+function sessionTiming() {
+  const waiting = new Map(), methods = new Map();
+  const entry = (method) => methods.get(method) ?? methods.set(method, { count: 0, ms: 0, sent: 0, returned: 0 }).get(method);
+  return {
+    /** A command on its way to the browser. Puppeteer writes the method first and the id last. */
+    command(raw) {
+      const method = /^\{"method":"([^"]+)"/.exec(raw.slice(0, 120))?.[1], id = /"id":(\d+)(?:,"sessionId":"[^"]*")?\}$/.exec(raw.slice(-160))?.[1];
+      if (!method || !id) return;
+      waiting.set(id, { method, at: performance.now() });
+      const stats = entry(method); stats.count++; stats.sent += raw.length;
+    },
+    /** A message from the browser; a reply starts with its id. */
+    reply(raw) {
+      const id = /^\{"id":(\d+)/.exec(raw.slice(0, 30))?.[1], sent = id && waiting.get(id);
+      if (!sent) return;
+      waiting.delete(id);
+      const stats = entry(sent.method); stats.ms += performance.now() - sent.at; stats.returned += raw.length;
+    },
+    summary() {
+      const mb = (chars) => (chars / 1024 ** 2).toFixed(1);
+      const all = [...methods].sort((a, b) => b[1].ms - a[1].ms);
+      const total = all.reduce((sum, [, stats]) => ({ ms: sum.ms + stats.ms, sent: sum.sent + stats.sent, returned: sum.returned + stats.returned }), { ms: 0, sent: 0, returned: 0 });
+      return `browser answered in ${(total.ms / 1000).toFixed(1)} s summed, ${mb(total.sent)} MB in, ${mb(total.returned)} MB out; ` +
+        all.slice(0, 4).map(([method, stats]) => `${method} ×${stats.count} ${(stats.ms / 1000).toFixed(1)} s ${mb(stats.sent)}/${mb(stats.returned)} MB`).join(", ");
+    },
+  };
+}
+
 /** One browser: started, parked with the deployment, driven for one session, then removed with its profile. */
 async function serve(slot) {
   // Chrome makes its own profile directory, as the user it runs as.
@@ -122,7 +158,8 @@ async function serve(slot) {
     await browser.ready();
     remote = await opened(new WebSocket(socketUrl, { headers: { authorization: `Bearer ${token}` } }));
     log(slot, "parked");
-    let sessionAt = 0, messages = 0;
+    let sessionAt = 0, messages = 0, hits = 0, stored = 0;
+    const timing = sessionTiming();
     const reason = await new Promise((resolve) => {
       const ping = setInterval(() => { if (!sessionAt && remote.readyState === WebSocket.OPEN) remote.send("ping"); }, PING_MS);
       const parked = setTimeout(() => { if (!sessionAt) resolve("idle browser replaced"); }, PARKED_MS);
@@ -132,14 +169,17 @@ async function serve(slot) {
         if (event.data === "pong" || typeof event.data !== "string") return;
         if (!sessionAt) { sessionAt = Date.now(); log(slot, "session started"); deadline = setTimeout(() => done("session outlived its limit"), SESSION_MS); }
         messages++;
-        browser.send(event.data);
+        const action = rewrite(event.data, cache);
+        hits += action.hits ?? 0; stored += action.stored ?? 0;
+        if (action.reply) remote.send(action.reply);
+        else { timing.command(action.forward); browser.send(action.forward); }
       });
-      browser.onmessage = (message) => { if (remote.readyState === WebSocket.OPEN) remote.send(message); };
+      browser.onmessage = (message) => { timing.reply(message); if (remote.readyState === WebSocket.OPEN) remote.send(message); };
       remote.addEventListener("close", () => done("deployment closed the socket"));
       remote.addEventListener("error", () => done("deployment socket failed"));
       child.once("exit", () => done("browser exited"));
     });
-    log(slot, sessionAt ? `session ended after ${Math.round((Date.now() - sessionAt) / 1000)} s, ${messages} messages: ${reason}` : `unparked: ${reason}`);
+    log(slot, sessionAt ? `session ended after ${Math.round((Date.now() - sessionAt) / 1000)} s, ${messages} messages, ${hits} strings from the cache, ${stored} stored: ${reason}; ${timing.summary()}` : `unparked: ${reason}`);
     return sessionAt > 0;
   } finally {
     try { remote?.close(); } catch { /* already closed */ }
@@ -166,6 +206,6 @@ async function slot(n) {
   }
 }
 
-console.log(`Render host for ${origin}: ${pool} browser${pool === 1 ? "" : "s"}, ${chrome}`);
+console.log(`Render host for ${origin}: ${pool} browser${pool === 1 ? "" : "s"}, ${chrome}; cache ${process.env.RENDER_HOST_CACHE_DIR || "in memory"}: ${cache.stats().strings} strings, ${cache.stats().megabytes} MB`);
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => process.exit(0));
 await Promise.all(Array.from({ length: pool }, (_, n) => slot(n + 1)));

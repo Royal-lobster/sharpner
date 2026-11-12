@@ -166,6 +166,15 @@ it ends when either side closes, including when a FileRoom is reset, so a failed
 hosted turn frees the browser slot at once. The host's README lists what keeps the
 machine safe from the pages it renders.
 
+A host keeps a cache of the strings sprites share (fonts, component definitions,
+compiled CSS, token sheets). A sprite on a host names each by the SHA-256 of its
+text and sends the text only when the host says it lacks it (`hostCache` in
+`worker/render-host.ts`, `tools/render-host/cache.mjs`). With the real nodes of the
+file above, a local render sent 12.9 MB on a cold cache and 1.0 MB on a warm one.
+Single renders (`loadFrame`) still send whole documents. The host's log gives, per
+session, how long its browser took per DevTools method and how much travelled each
+way, which separates the browser's own time from the deployment's and the network's.
+
 Checked on 13 Nov 2026 in a local instance: previews and `screenshot_nodes` rendered
 on the host's Chromium 156 (`hosted: true`), and on Browser Run again as soon as the
 host stopped. A Chromium on a host and Browser Run's are different builds with
