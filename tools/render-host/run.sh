@@ -14,18 +14,21 @@ podman image exists "$image" || podman build -t "$image" -f "$here/Containerfile
 # This machine's default profile plus the one call Chromium's own sandbox needs. See seccomp.py.
 python3 "$here/seccomp.py" "${RENDER_HOST_SECCOMP_BASE:-/usr/share/containers/seccomp.json}" "$state/seccomp.json"
 
-# - No volume and a read-only root: the container holds nothing of this machine and keeps nothing.
+# - A read-only root and one volume of the container's own, for the string cache: the container holds nothing of
+#   this machine, and keeps only what the deployment asked it to cache.
 # - pasta without --map-gw, so the gateway address is not a door to this machine's own services; the entrypoint
 #   then drops every private, link-local, carrier-grade NAT (tailnet) and IPv6 destination.
 # - Public DNS resolvers, so no name is resolved by the home router or the tailnet.
-# - Capabilities: only what the entrypoint needs to load the network rules and to run Chromium as another user.
+# - Capabilities: only what the entrypoint needs to load the network rules, to give the cache volume to the host
+#   program's user, and to run Chromium as another user.
 #   It gives up NET_ADMIN before anything else starts, and Chromium gets none.
 exec podman run --rm --replace --name "${RENDER_HOST_NAME:-sharpner-render-host}" \
   --read-only --tmpfs /tmp:rw,size=4g,mode=1777 --shm-size 1g \
-  --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --cap-add=KILL \
+  --volume "${RENDER_HOST_CACHE_VOLUME:-sharpner-render-cache}:/var/cache/sharpner-render" \
+  --cap-drop=ALL --cap-add=NET_ADMIN --cap-add=CHOWN --cap-add=SETUID --cap-add=SETGID --cap-add=SETPCAP --cap-add=KILL \
   --security-opt no-new-privileges --security-opt "seccomp=$state/seccomp.json" \
   --network pasta:--no-map-gw --dns 1.1.1.1 --dns 1.0.0.1 \
   --memory "${RENDER_HOST_MEMORY:-8g}" --memory-swap "${RENDER_HOST_MEMORY:-8g}" --pids-limit 4096 --cpus "${RENDER_HOST_CPUS:-6}" \
   --secret render_host_token,mode=0400 \
-  -e SHARPNER_ORIGIN -e RENDER_HOST_POOL \
+  -e SHARPNER_ORIGIN -e RENDER_HOST_POOL -e RENDER_HOST_CACHE_GB \
   "$image"

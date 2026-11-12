@@ -3,6 +3,7 @@ import type { Page } from "@cloudflare/puppeteer";
 import { frameDocument } from "../shared/types";
 import { hiScale, documentDesign, seedInput, tailwindCss } from "./render";
 import { alignment, planSprites, renderSprite, SPRITE_LIMITS } from "./render-sprite";
+import { createCache, rewrite, type StringCache } from "../tools/render-host/cache.mjs";
 
 describe("sprite documents", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -47,6 +48,65 @@ describe("sprite documents", () => {
     expect(Math.max(...messages)).toBeLessThanOrEqual(SPRITE_LIMITS.batchChars * 1.1);
     expect(srcdocs.length).toBe(expected.length);
     srcdocs.forEach((doc, i) => expect(doc === expected[i]).toBe(true));
+  });
+
+  /** The same recording page, behind a render host: each call passes through the host's own message rewriting. */
+  function hostedPage(cache: StringCache) {
+    const { page, srcdocs } = recordingPage();
+    const plain = page.evaluate.bind(page) as unknown as (fn: (args: unknown) => unknown, args: unknown) => Promise<unknown>;
+    // What travels from the deployment to the host, before the host puts cached strings in.
+    const messages: number[] = [];
+    const hosted = { ...page, evaluate: async (fn: (args: unknown) => unknown, args: unknown) => {
+      const raw = JSON.stringify({ id: 1, method: "Runtime.callFunctionOn", params: { arguments: [{ value: args }] } });
+      messages.push(raw.length);
+      const action = rewrite(raw, cache);
+      if (action.reply) throw new Error(`Protocol error (Runtime.callFunctionOn): ${(JSON.parse(action.reply) as { error: { message: string } }).error.message}`);
+      return plain(fn, (JSON.parse(action.forward!) as { params: { arguments: { value: unknown }[] } }).params.arguments[0]!.value);
+    } } as unknown as Page;
+    return { page: hosted, messages, srcdocs };
+  }
+
+  it("sends a caching render host each shared part once, ever, and references after that", async () => {
+    const data = (n: number) => `<script type="text/plain" data-chunk="${n}">${"QUJD".repeat(250_000)}</script>`;
+    const design = {
+      tokens: `@theme { --color-brand: #0f0; }\n${"/* token */".repeat(500)}`, fonts: `@font-face{font-family:Test;src:local("Test")}/*${"font ".repeat(40_000)}*/`,
+      components: [{ tag: "x-data-1", html: data(1) }, { tag: "x-data-2", html: data(2) }],
+    };
+    const jobs = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, html: `<main class="p-${i}"><x-data-1></x-data-1><x-data-2></x-data-2></main>`, width: 390, height: null }));
+    const expected = (await Promise.all(jobs.map(async (job) => {
+      const scoped = documentDesign(job.html, design);
+      const { cssSource, candidates } = seedInput(job.html, "https://sharpner.example", scoped);
+      return frameDocument(job.html, { base: "https://sharpner.example", design: scoped, compiledTailwind: true, tailwindCss: await tailwindCss(cssSource, candidates), fontCss: "FONTS" });
+    })));
+    const cache = createCache(null);
+    const total = (messages: number[]) => messages.reduce((a, b) => a + b, 0);
+    // The first sprite on this host stores what the host lacks: about 2 MB of definitions and 0.2 MB of fonts.
+    const first = hostedPage(cache);
+    const one = await renderSprite(first.page, jobs, "https://sharpner.example", design, SPRITE_LIMITS, true);
+    expect(total(first.messages)).toBeGreaterThan(2_200_000);
+    expect(one.phases.sentKB).toBeGreaterThan(2100);
+    // Any later sprite, on a new page, in another session: references only, and the same documents.
+    vi.unstubAllGlobals();
+    const second = hostedPage(cache);
+    const two = await renderSprite(second.page, jobs, "https://sharpner.example", design, SPRITE_LIMITS, true);
+    expect(total(second.messages)).toBeLessThan(40_000);
+    expect(two.phases.sentKB).toBeLessThan(40);
+    for (const { srcdocs } of [first, second]) {
+      expect(srcdocs.length).toBe(jobs.length);
+      // The page puts the fonts where the documents mark them; with them marked again the documents are as built whole.
+      srcdocs.forEach((doc, i) => expect(doc.split(design.fonts).join("FONTS") === expected[i]!.split("/*sharpner-sprite-fonts*/").join("FONTS")).toBe(true));
+    }
+  });
+
+  it("sends the strings themselves when a hosted browser keeps no cache", async () => {
+    const design = { tokens: "", components: [{ tag: "x-card", html: `<div>${"card ".repeat(2000)}</div>` }] };
+    const jobs = [0, 1].map((i) => ({ id: `n${i}`, html: `<main><x-card></x-card>${i}</main>`, width: 390, height: null }));
+    const { page, messages, srcdocs } = recordingPage();
+    await renderSprite(page, jobs, "https://sharpner.example", design, SPRITE_LIMITS, true);
+    const expected = await whole(jobs, design);
+    expect(srcdocs.length).toBe(2);
+    srcdocs.forEach((doc, i) => expect(doc === expected[i]).toBe(true));
+    expect(messages.reduce((a, b) => a + b, 0)).toBeGreaterThan(10_000);
   });
 
   it("splits documents that share nothing into bounded messages", async () => {

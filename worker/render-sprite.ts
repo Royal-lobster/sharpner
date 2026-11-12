@@ -2,6 +2,7 @@ import type { Page as BrowserPage } from "@cloudflare/puppeteer";
 import { frameDocument } from "../shared/types";
 import { AUTO_VIEWPORT, bytesToBase64, capture, documentDesign, FIT_PASSES, hiScale, MAX_HEIGHT, runsScripts, SCRIPT_SETTLE_MS, seedInput, tailwindCss } from "./render";
 import { pruneFontFaces, type RenderDesign } from "./render-fonts";
+import { hostCache, type CachedString } from "./render-host";
 
 /**
  * A sprite renders many previews from one browser page. Each node keeps its own document in a same-origin srcdoc
@@ -138,8 +139,11 @@ type Loaded = { css: string; classes: string[] } | null;
 type Placed = { i: number; x: number; y: number; height: number; measured: number };
 type Layout = { placed: Placed[]; fallback: number[]; width: number; height: number };
 
-/** Renders every job it can into one page and returns their captures; the rest are listed for a single render. */
-export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: string, design: RenderDesign, limits = SPRITE_LIMITS): Promise<SpriteResult> {
+/**
+ * Renders every job it can into one page and returns their captures; the rest are listed for a single render.
+ * `hosted` says the page belongs to a render host, which may keep the shared parts and fonts in a cache.
+ */
+export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: string, design: RenderDesign, limits = SPRITE_LIMITS, hosted = false): Promise<SpriteResult> {
   const captured = new Map<string, SpriteCapture>();
   const phases: SpritePhases = { seed: 0, load: 0, settle: 0, capture: 0, encode: 0, pageLoad: 0, sentKB: 0 };
   if (!jobs.length) return { captured, fallback: [], phases };
@@ -164,17 +168,23 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   const open = `@@sharpner-part-${crypto.randomUUID()}-`, close = "@@";
   const partIndex = new Map<object | string, number>();
   const scan = (text: string) => { if (points) for (const char of text) points.add(char.codePointAt(0)!); };
-  let batch = { parts: [] as string[], docs: [] as string[] }, batchChars = 0, sent = 0;
+  // A render host with a cache already holds most parts from earlier sprites: those travel as references.
+  const cache = hosted ? await hostCache(page, limits.batchChars) : null;
+  let batch = { parts: [] as (string | CachedString)[], docs: [] as string[] }, batchChars = 0, sent = 0;
   const flush = async () => {
     if (!batchChars) return;
-    await page.evaluate((received: { parts: string[]; docs: string[] }) => {
+    const received = batch;
+    // On the page every part is a string: a caching host has put each referenced one in.
+    const send = () => page.evaluate((received: { parts: string[]; docs: string[] }) => {
       const w = window as unknown as { spriteParts?: string[]; spriteDocs?: string[] };
       (w.spriteParts ??= []).push(...received.parts);
       (w.spriteDocs ??= []).push(...received.docs);
-    }, batch);
+    }, received as { parts: string[]; docs: string[] });
+    await (cache ? cache.call(send) : send());
     batch = { parts: [], docs: [] }; batchChars = 0;
   };
   const queue = async (list: "parts" | "docs", text: string) => {
+    if (list === "parts" && cache) { batch.parts.push(await cache.ref(text)); batchChars += 80; return; }
     if (batchChars && batchChars + text.length > limits.batchChars) await flush();
     batch[list].push(text); batchChars += text.length; sent += text.length;
   };
@@ -207,10 +217,10 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   }
   await flush();
   const fonts = points ? pruneFontFaces(design.fonts!, String.fromCodePoint(...points)) : design.fonts ?? "";
-  phases.sentKB += Math.round((sent + fonts.length) / 1024);
+  const fontsSent = cache && fonts ? await cache.ref(fonts) : fonts;
   // As a single render does, a document with authored scripts gets its allowance after load; the frames load together.
   const settle = jobs.map((job, i) => runsScripts(job.html, designs[i]!) ? SCRIPT_SETTLE_MS : 0);
-  const { frames: loaded, ms: pageMs } = await page.evaluate(async ({ sizes, settle, fonts, mark, open, close, timeoutMs }) => {
+  const load = () => page.evaluate(async ({ sizes, settle, fonts, mark, open, close, timeoutMs }) => {
     const started = performance.now();
     const w = window as unknown as { spriteParts?: string[]; spriteDocs?: string[] };
     const parts = w.spriteParts ?? [];
@@ -247,7 +257,9 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
       document.body.appendChild(frame);
     })));
     return { frames, ms: Math.round(performance.now() - started) };
-  }, { sizes, settle, fonts, mark: FONT_MARK, open, close, timeoutMs: limits.loadMs }) as { frames: Loaded[]; ms: number };
+  }, { sizes, settle, fonts: fontsSent as string, mark: FONT_MARK, open, close, timeoutMs: limits.loadMs }) as Promise<{ frames: Loaded[]; ms: number }>;
+  const { frames: loaded, ms: pageMs } = await (cache ? cache.call(load) : load());
+  phases.sentKB += Math.round((sent + (cache ? cache.sent : fonts.length)) / 1024);
   phases.pageLoad += pageMs;
 
   lap("load");

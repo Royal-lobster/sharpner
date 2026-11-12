@@ -20,7 +20,7 @@ this cannot reach the machine or its networks:
 | --- | --- |
 | No way in | The host only makes outbound connections. Chromium is driven over a pipe, so there is no debugging port. |
 | Its networks are closed | The entrypoint loads firewall rules that drop every private, link-local and carrier-grade NAT (tailnet) destination and all IPv6, then gives up the right to change them. The rules match addresses, so a public name that resolves to a private address is blocked too. The container uses public DNS resolvers, and the gateway is not mapped to the machine. It refuses to start if the rules did not load. |
-| Nothing of the machine inside | No volume is mounted and the root filesystem is read-only. Profiles live in a memory filesystem and are deleted after each session. |
+| Nothing of the machine inside | The root filesystem is read-only and no directory of the machine is mounted. Profiles live in a memory filesystem and are deleted after each session. The one volume is the container's own, for the cache below; Chromium's user cannot read it. |
 | No privileges | Rootless podman: the container's users are unprivileged ids on the machine. Chromium runs as a user of its own with no capabilities and `no-new-privileges`, inside Chromium's own sandbox (`seccomp.py` allows the one call it needs). |
 | The token stays out of reach | It is a podman secret readable only by the entrypoint, handed to the host program on an open descriptor. The program runs as a different user from Chromium, so a browser process cannot read its memory or environment. |
 | Bounded use | Memory, process and CPU limits on the container, a second memory limit on the systemd unit, and a five-minute limit on any session. |
@@ -29,6 +29,19 @@ this cannot reach the machine or its networks:
 What it does not do: pages still reach the public internet, as any page does, from this machine's address. A
 Chromium flaw that escapes its sandbox would run as an unprivileged user in the container, behind the same rules.
 Serve only workspaces you trust until you have decided that is enough for strangers' files.
+
+## Cache
+
+A sprite's documents share megabytes of fonts, component definitions and CSS, and every sprite needs them again.
+The deployment sends each such string to a host once: it names a string by the SHA-256 of its text, and the host
+keeps what it is given in the `sharpner-render-cache` volume (5 GB by default, `RENDER_HOST_CACHE_GB`; least
+recently used strings go first). Later sprites, in any session, carry the name instead of the string, and the host
+puts the string back before the browser sees the message. `cache.mjs` describes the three message shapes.
+
+A string is kept only under the hash of its own text and is checked again when read, so nothing can be stored
+under another string's name. The cache holds design content (component definitions, token sheets, fonts) of the
+workspaces the host serves, unencrypted, on the machine. `podman volume rm sharpner-render-cache` empties it;
+everything is sent again as it is needed.
 
 ## Set up
 

@@ -1,4 +1,4 @@
-import type { BrowserWorker } from "@cloudflare/puppeteer";
+import type { BrowserWorker, Page } from "@cloudflare/puppeteer";
 
 /**
  * A render host is a machine that lends its Chrome to this deployment, so previews and screenshots cost no Browser
@@ -53,3 +53,67 @@ export type HostSocket =
 
 /** A session acquired but never connected to (its room was reset, say) is given up after this long. */
 export const HOST_ACQUIRE_MS = 15_000;
+
+// ---- the host's cache: see tools/render-host/cache.mjs for the protocol ----------------
+
+/** In a function call's arguments, stands for the string with this SHA-256; a caching host puts the string in. */
+export type CachedString = { "sharpner:cached": string };
+const MISSING = /sharpner:missing (\[.*\])/;
+
+const sha256 = async (text: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+/** The hashes a caching host says it lacks, from the error it answers a call with; null for any other error. */
+function missingFrom(error: unknown): string[] | null {
+  const found = MISSING.exec(String((error as { message?: unknown })?.message ?? error));
+  if (!found) return null;
+  try { const hashes = JSON.parse(found[1]!) as unknown; return Array.isArray(hashes) ? hashes.filter((hash): hash is string => typeof hash === "string") : null; }
+  catch { return null; }
+}
+
+const caching = new WeakMap<Page, Promise<boolean>>();
+/**
+ * Whether the browser behind `page` is a render host that keeps a cache. A caching host answers a reference to
+ * a string it cannot have with the missing-strings error; Browser Run, or a host without a cache, runs the call.
+ */
+function cachingHost(page: Page) {
+  let known = caching.get(page);
+  if (!known) caching.set(page, known = page.evaluate(() => true, { "sharpner:cached": "0".repeat(64) }).then(() => false, (error) => missingFrom(error) !== null));
+  return known;
+}
+
+/**
+ * Sends long strings to a page on a caching render host by reference, so each travels once however many sprites,
+ * turns and days need it. `ref` names a string; `call` runs a page call whose arguments hold references, and
+ * when the host lacks some of them it stores those, in messages of at most `batchChars`, and runs the call again.
+ * Returns null when the browser has no cache; strings then travel as they are.
+ */
+export async function hostCache(page: Page, batchChars: number) {
+  if (!await cachingHost(page)) return null;
+  const texts = new Map<string, string>();
+  let sent = 0;
+  return {
+    /** Characters this cache actually sent: references, and the strings the host lacked. */
+    get sent() { return sent; },
+    async ref(text: string): Promise<CachedString> {
+      const hash = await sha256(text);
+      texts.set(hash, text);
+      sent += hash.length;
+      return { "sharpner:cached": hash };
+    },
+    async call<T>(run: () => Promise<T>): Promise<T> {
+      try { return await run(); }
+      catch (error) {
+        const missing = missingFrom(error)?.filter((hash) => texts.has(hash));
+        if (!missing?.length) throw error;
+        let batch: Record<string, string> = {}, chars = 0;
+        const store = async () => { if (chars) await page.evaluate(() => {}, { "sharpner:store": batch }); batch = {}; chars = 0; };
+        for (const hash of missing) {
+          const text = texts.get(hash)!;
+          if (chars && chars + text.length > batchChars) await store();
+          batch[hash] = text; chars += text.length; sent += text.length;
+        }
+        await store();
+        return run();
+      }
+    },
+  };
+}

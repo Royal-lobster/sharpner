@@ -7,7 +7,7 @@ export default defineConfig({
     environment: "node",
     // Worker CSS compilation imports Tailwind's source styles with ?raw.
     css: { include: /tailwindcss/ },
-    include: ["worker/**/*.test.ts", "src/**/*.test.ts", "shared/**/*.test.ts"],
+    include: ["worker/**/*.test.ts", "src/**/*.test.ts", "shared/**/*.test.ts", "tools/**/*.test.mjs"],
     maxWorkers: 4,
     fileParallelism: false,
   },

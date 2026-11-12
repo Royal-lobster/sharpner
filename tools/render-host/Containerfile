@@ -7,7 +7,8 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  # The host program runs as `node` (1000); Chromium runs as a user of its own, which owns nothing.
  && groupadd --gid 1001 chrome && useradd --uid 1001 --gid 1001 --no-create-home --shell /usr/sbin/nologin chrome
-COPY render-host.mjs entrypoint.sh /opt/render-host/
-RUN chmod 0555 /opt/render-host/entrypoint.sh /opt/render-host/render-host.mjs
-ENV CHROME_BIN=/usr/bin/chromium-headless-shell RENDER_HOST_CHROME_USER=1001
+COPY render-host.mjs cache.mjs entrypoint.sh /opt/render-host/
+RUN chmod 0555 /opt/render-host/entrypoint.sh /opt/render-host/render-host.mjs /opt/render-host/cache.mjs \
+ && mkdir -p /var/cache/sharpner-render
+ENV CHROME_BIN=/usr/bin/chromium-headless-shell RENDER_HOST_CHROME_USER=1001 RENDER_HOST_CACHE_DIR=/var/cache/sharpner-render
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/render-host/entrypoint.sh"]

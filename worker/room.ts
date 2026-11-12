@@ -6,7 +6,7 @@ import { fileFor, room } from "./data";
 import { prepareRenderDesign } from "./render-fonts";
 import { bytesToBase64, capture, captureThumbnails, documentWeight, loadFrame, loadImagePreview, withTimeout } from "./render";
 import { renderHost } from "./render-host";
-import { planSprites, renderSprite, type SpritePhases } from "./render-sprite";
+import { planSprites, renderSprite, SPRITE_LIMITS, type SpritePhases } from "./render-sprite";
 import { openBrowser, openTab, releaseBrowser } from "./browser-session";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
 import { imagePreviewFor } from "../shared/image-preview";
@@ -1212,7 +1212,7 @@ export class FileRoom extends DurableObject<Env> {
               try {
                 if (w.sprite) {
                   sprites++;
-                  const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases, timing);
+                  const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases, timing, hosted);
                   // A failed sprite may leave its page wedged, so that tab retires; the other tabs keep going, and
                   // the failed sprite's nodes render alone.
                   if (result === false) { tabs.delete(tab); healthy = false; break; }
@@ -1266,10 +1266,11 @@ export class FileRoom extends DurableObject<Env> {
     valid: () => boolean,
     phases: SpritePhases,
     timing: { store: number },
+    hosted: boolean,
   ): Promise<number | false> {
     let result: Awaited<ReturnType<typeof renderSprite>>;
     try {
-      result = await withTimeout(renderSprite(tab, jobs, base, design), THUMBNAIL_POLICY.spriteMs, "sprite");
+      result = await withTimeout(renderSprite(tab, jobs, base, design, SPRITE_LIMITS, hosted), THUMBNAIL_POLICY.spriteMs, "sprite");
     } catch (err) {
       console.warn("thumbnail sprite failed", jobs.length, String(err));
       // A session that is closing aborts its sprites; that says nothing about their nodes.

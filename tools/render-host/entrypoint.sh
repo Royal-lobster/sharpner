@@ -19,6 +19,10 @@ RULES
 # The rules must be in force, or this host does not start.
 nft list chain inet render_host output | grep -q "192.168.0.0/16" || { echo "The network rules did not load; refusing to start." >&2; exit 1; }
 
+# The cache volume belongs to the host program alone: Chromium's user can neither read what other files' sprites
+# stored nor change it.
+chmod 0700 /var/cache/sharpner-render && chown 1000:1000 /var/cache/sharpner-render
+
 [ -r /run/secrets/render_host_token ] || { echo "Mount the token as the secret render_host_token." >&2; exit 1; }
 # The token goes to the host program on its standard input, so it is in no environment or file a browser's user
 # could read. The program keeps the three capabilities it needs to start, stop and clean up after Chromium as
