@@ -112,11 +112,26 @@ export function documentDesign(html: string, design: RenderDesign): RenderDesign
   return scoped === design ? design : { ...scoped, ...(design.fonts !== undefined ? { fonts: design.fonts } : {}) };
 }
 
+/** Characters of a document's own HTML and of the component definitions it embeds: a rough measure of the work to load it. */
+export function documentWeight(html: string, design: RenderDesign) {
+  return documentDesign(html, design).components.reduce((chars, c) => chars + c.html.length, html.length);
+}
+
+const CLASS_ATTRIBUTE = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+const classNames = (source: string) => [...source.matchAll(CLASS_ATTRIBUTE)].flatMap((match) => (match[1] ?? match[2] ?? match[3]!).split(/\s+/));
+/** The classes written in each component definition, read once however many documents embed it. */
+const componentClasses = new WeakMap<object, string[]>();
+
 export function seedInput(html: string, base: string, design: RenderDesign) {
-  const initial = frameDocument(html, { base, design, compiledTailwind: true });
+  // Component definitions are script text in a document, so its Tailwind styles are those of its head and its own
+  // HTML. Leaving the definitions out keeps this from building, and holding, megabytes per document.
+  const initial = frameDocument(html, { base, design: { ...design, components: [] }, compiledTailwind: true });
   const cssSource = [...initial.matchAll(/<style\b[^>]*type=["']text\/tailwindcss["'][^>]*>([\s\S]*?)<\/style>/gi)].map((match) => match[1]).join("\n");
-  const sources = [html, ...design.components.map((c) => c.html)].join("\n");
-  const candidates = [...sources.matchAll(/\bclass\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi)].flatMap((match) => (match[1] ?? match[2] ?? match[3]!).split(/\s+/));
+  const candidates = [...classNames(html), ...design.components.flatMap((c) => {
+    let classes = componentClasses.get(c);
+    if (!classes) componentClasses.set(c, classes = classNames(c.html));
+    return classes;
+  })];
   return { cssSource, candidates };
 }
 

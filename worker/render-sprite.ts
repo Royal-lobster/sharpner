@@ -9,7 +9,11 @@ import { pruneFontFaces, type RenderDesign } from "./render-fonts";
  * definitions and authored scripts resolve exactly as in a page of its own. The page is loaded, styled, fitted and
  * laid out once; each node is then captured from its own rectangle with its own scale.
  */
-export type SpriteJob = { id: string; html: string; width: number; height: number | null; measuredHeight?: number | null };
+export type SpriteJob = {
+  id: string; html: string; width: number; height: number | null; measuredHeight?: number | null;
+  /** Characters of the node's HTML and the component definitions it embeds (`documentWeight`), for planning. */
+  weight?: number;
+};
 export type SpriteCapture = { width: number; measured: number; height: number; hi: Uint8Array; lo: Uint8Array };
 /** `fallback` nodes did not render in the sprite (slow to load, never settled, or no room) and render on their own. */
 export type SpriteResult = { captured: Map<string, SpriteCapture>; fallback: string[]; phases: SpritePhases };
@@ -30,8 +34,18 @@ export const SPRITE_LIMITS = {
   height: 16_384,
   /** Planned area of one sprite, from each node's known or estimated height. */
   pixels: 32 * 1024 * 1024,
+  /**
+   * Planned weight of one sprite: the characters of its nodes' HTML and component definitions. A sprite's documents
+   * load on one thread, so megabyte documents (a playable prototype carrying its app as data) each get a sprite
+   * nearly to themselves; packed five to a sprite, production timed them out at `spriteMs` on every turn.
+   */
+  chars: 6_000_000,
   /** A node still loading after this renders on its own, so one slow image cannot hold the whole sprite. */
   loadMs: 8000,
+  /** Characters sent to the page in one message. Bounds the Worker memory a sprite's documents take in transit. */
+  batchChars: 2_000_000,
+  /** Shared content at least this long travels once per sprite; anything shorter stays in each document. */
+  partChars: 1024,
   /** `atlas`: lossless captures of bands of the sprite, cropped in the page. `clips`: one WebP capture per node. */
   capture: "atlas" as "atlas" | "clips",
   /**
@@ -53,6 +67,7 @@ export function alignment(width: number) {
 }
 
 const FONT_MARK = "/*sharpner-sprite-fonts*/";
+const TOKEN_STYLE = `<style type="text/tailwindcss">`;
 const SHELL = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0}iframe{position:absolute;left:0;top:0;border:0;display:block}</style></head><body></body></html>`;
 
 const roundWidth = (width: number) => Math.max(1, Math.round(width));
@@ -61,9 +76,10 @@ const estimate = (job: Pick<SpriteJob, "width" | "height" | "measuredHeight">) =
 
 /**
  * Splits jobs, in order, into at most `parts` sprites when they fit, so every browser tab gets a share. Each sprite
- * holds at most `limits.nodes` nodes and `limits.pixels` of planned area; the first jobs land in the first sprites.
+ * holds at most `limits.nodes` nodes, `limits.pixels` of planned area and `limits.chars` of planned weight; the
+ * first jobs land in the first sprites.
  */
-export function planSprites<T extends Pick<SpriteJob, "width" | "height" | "measuredHeight">>(jobs: T[], parts: number, limits: Pick<typeof SPRITE_LIMITS, "nodes" | "pixels"> = SPRITE_LIMITS): T[][] {
+export function planSprites<T extends Pick<SpriteJob, "width" | "height" | "measuredHeight" | "weight">>(jobs: T[], parts: number, limits: Pick<typeof SPRITE_LIMITS, "nodes" | "pixels"> & Partial<Pick<typeof SPRITE_LIMITS, "chars">> = SPRITE_LIMITS): T[][] {
   if (!jobs.length) return [];
   const target = Math.min(limits.nodes, Math.max(1, Math.ceil(jobs.length / Math.max(1, parts))));
   // A sprite is captured at one scale, so frames wider than the sharp tier group by width; the rest share scale 1.
@@ -74,18 +90,48 @@ export function planSprites<T extends Pick<SpriteJob, "width" | "height" | "meas
   }
   const sprites: T[][] = [];
   for (const group of groups.values()) {
-    let current: T[] = [], pixels = 0;
+    let current: T[] = [], pixels = 0, chars = 0;
     for (const job of group) {
-      const cost = estimate(job);
-      if (current.length && (current.length >= target || pixels + cost > limits.pixels)) {
+      const cost = estimate(job), weight = job.weight ?? 0;
+      if (current.length && (current.length >= target || pixels + cost > limits.pixels || chars + weight > (limits.chars ?? Infinity))) {
         sprites.push(current);
-        current = []; pixels = 0;
+        current = []; pixels = 0; chars = 0;
       }
-      current.push(job); pixels += cost;
+      current.push(job); pixels += cost; chars += weight;
     }
     sprites.push(current);
   }
   return sprites;
+}
+
+/** The first Tailwind pass: each distinct Tailwind source compiles once, with the classes of every node that shares it. */
+async function seedTailwind(jobs: SpriteJob[], base: string, designs: RenderDesign[]) {
+  const seeds = jobs.map((job, i) => seedInput(job.html, base, designs[i]!));
+  const seedCss = new Map<string, Promise<string>>();
+  for (const source of new Set(seeds.map((s) => s.cssSource))) {
+    seedCss.set(source, tailwindCss(source, [...new Set(seeds.filter((s) => s.cssSource === source).flatMap((s) => s.candidates))]));
+  }
+  return Promise.all(seeds.map((s) => seedCss.get(s.cssSource)!));
+}
+
+/** A component definition as a document's script holds it (see `componentScript`), made once per component. */
+const definitions = new WeakMap<object, string>();
+function definition(component: { html: string }) {
+  let text = definitions.get(component);
+  if (text === undefined) definitions.set(component, text = JSON.stringify(component.html).replace(/</g, "\\u003c"));
+  return text;
+}
+
+/**
+ * The long content a document is likely to share with others in its sprite, in the order it appears: the compiled
+ * CSS, the token sheet and each component definition. A guess that is wrong costs nothing but its own search:
+ * a part is only taken out of a document it is found in.
+ */
+function sharedParts(doc: string, css: string, design: RenderDesign): { key: object | string; text: string }[] {
+  const compiled = css.replace(/<\//g, "<\\/");
+  const from = doc.indexOf(TOKEN_STYLE), to = from < 0 ? -1 : doc.indexOf("</style>", from);
+  const tokens = to < 0 ? "" : doc.slice(from + TOKEN_STYLE.length, to);
+  return [{ key: compiled, text: compiled }, { key: tokens, text: tokens }, ...design.components.map((c) => ({ key: c, text: definition(c) }))];
 }
 
 type Loaded = { css: string; classes: string[] } | null;
@@ -99,17 +145,10 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   if (!jobs.length) return { captured, fallback: [], phases };
   let mark = Date.now();
   const lap = (phase: keyof SpritePhases) => { const now = Date.now(); phases[phase] += now - mark; mark = now; };
-  // Seed each distinct Tailwind source once, with the classes of every node that shares it.
   const designs = jobs.map((job) => documentDesign(job.html, design));
-  const seeds = jobs.map((job, i) => seedInput(job.html, base, designs[i]!));
-  const seedCss = new Map<string, Promise<string>>();
-  for (const source of new Set(seeds.map((s) => s.cssSource))) {
-    seedCss.set(source, tailwindCss(source, [...new Set(seeds.filter((s) => s.cssSource === source).flatMap((s) => s.candidates))]));
-  }
-  const seeded = await Promise.all(seeds.map((s) => seedCss.get(s.cssSource)!));
-  const docs = jobs.map((job, i) => frameDocument(job.html, { base, design: designs[i], compiledTailwind: true, tailwindCss: seeded[i], fontCss: design.fonts ? FONT_MARK : undefined }));
+  const seeded = await seedTailwind(jobs, base, designs);
   const sizes = jobs.map((job) => ({ w: roundWidth(job.width), h: Math.round(job.height ?? AUTO_VIEWPORT) }));
-  // The Worker side: the first Tailwind pass and the documents.
+  // The Worker side: the first Tailwind pass.
   lap("seed");
 
   await page.goto("about:blank");
@@ -117,12 +156,68 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
   // Only the font subsets these documents' characters need travel to the page. Text a script writes need not be in
   // its source, so documents with authored scripts keep every subset.
   const scripted = jobs.some((job) => runsScripts(job.html, design));
-  const fonts = design.fonts && !scripted ? pruneFontFaces(design.fonts, docs.join("")) : design.fonts ?? "";
-  phases.sentKB += Math.round((docs.reduce((n, doc) => n + doc.length, 0) + fonts.length) / 1024);
+  const points = design.fonts && !scripted ? new Set<number>() : null;
+  // Each document repeats its tokens, compiled CSS and component definitions, which can be megabytes, so a sprite's
+  // documents together can pass the Worker's memory limit. The Worker builds them one at a time and sends each
+  // distinct part once, with a mark in every document it belongs to; the page puts them back. Messages are bounded,
+  // so the Worker never holds a whole sprite's documents, or one message carrying them.
+  const open = `@@sharpner-part-${crypto.randomUUID()}-`, close = "@@";
+  const partIndex = new Map<object | string, number>();
+  const scan = (text: string) => { if (points) for (const char of text) points.add(char.codePointAt(0)!); };
+  let batch = { parts: [] as string[], docs: [] as string[] }, batchChars = 0, sent = 0;
+  const flush = async () => {
+    if (!batchChars) return;
+    await page.evaluate((received: { parts: string[]; docs: string[] }) => {
+      const w = window as unknown as { spriteParts?: string[]; spriteDocs?: string[] };
+      (w.spriteParts ??= []).push(...received.parts);
+      (w.spriteDocs ??= []).push(...received.docs);
+    }, batch);
+    batch = { parts: [], docs: [] }; batchChars = 0;
+  };
+  const queue = async (list: "parts" | "docs", text: string) => {
+    if (batchChars && batchChars + text.length > limits.batchChars) await flush();
+    batch[list].push(text); batchChars += text.length; sent += text.length;
+  };
+  for (const [i, job] of jobs.entries()) {
+    const doc = frameDocument(job.html, { base, design: designs[i], compiledTailwind: true, tailwindCss: seeded[i], fontCss: design.fonts ? FONT_MARK : undefined });
+    // Joined, not concatenated: a slice keeps the whole document it was cut from alive.
+    const pieces: string[] = [];
+    let at = 0;
+    for (const part of sharedParts(doc, seeded[i]!, designs[i]!)) {
+      if (part.text.length < limits.partChars) continue;
+      const found = doc.indexOf(part.text, at);
+      if (found < 0) continue;
+      let n = partIndex.get(part.key);
+      if (n === undefined) {
+        // A part cut from this document is copied, so the index does not keep the whole document for the sprite.
+        const text = typeof part.key === "string" ? part.text.split("").join("") : part.text;
+        partIndex.set(typeof part.key === "string" ? text : part.key, n = partIndex.size);
+        scan(text);
+        await queue("parts", text);
+      }
+      const before = doc.slice(at, found);
+      scan(before);
+      pieces.push(before, open, String(n), close);
+      at = found + part.text.length;
+    }
+    const rest = doc.slice(at);
+    scan(rest);
+    pieces.push(rest);
+    await queue("docs", pieces.join(""));
+  }
+  await flush();
+  const fonts = points ? pruneFontFaces(design.fonts!, String.fromCodePoint(...points)) : design.fonts ?? "";
+  phases.sentKB += Math.round((sent + fonts.length) / 1024);
   // As a single render does, a document with authored scripts gets its allowance after load; the frames load together.
   const settle = jobs.map((job, i) => runsScripts(job.html, designs[i]!) ? SCRIPT_SETTLE_MS : 0);
-  const { frames: loaded, ms: pageMs } = await page.evaluate(async ({ docs, sizes, settle, fonts, mark, timeoutMs }) => {
+  const { frames: loaded, ms: pageMs } = await page.evaluate(async ({ sizes, settle, fonts, mark, open, close, timeoutMs }) => {
     const started = performance.now();
+    const w = window as unknown as { spriteParts?: string[]; spriteDocs?: string[] };
+    const parts = w.spriteParts ?? [];
+    // Each document whole again: every mark replaced by the part it stands for. The marks hold no pattern syntax.
+    const marks = new RegExp(`${open}(\\d+)${close}`, "g");
+    const docs = (w.spriteDocs ?? []).map((doc) => doc.replace(marks, (_, n: string) => parts[Number(n)]!));
+    delete w.spriteParts; delete w.spriteDocs;
     // Fonts arrive once as data URLs and become blob URLs every frame shares, instead of megabytes per document.
     const fontCss = fonts ? fonts.replace(/url\(data:([^;,)]+);base64,([^)]+)\)/g, (_: string, type: string, data: string) => {
       const binary = atob(data);
@@ -152,7 +247,7 @@ export async function renderSprite(page: BrowserPage, jobs: SpriteJob[], base: s
       document.body.appendChild(frame);
     })));
     return { frames, ms: Math.round(performance.now() - started) };
-  }, { docs, sizes, settle, fonts, mark: FONT_MARK, timeoutMs: limits.loadMs }) as { frames: Loaded[]; ms: number };
+  }, { sizes, settle, fonts, mark: FONT_MARK, open, close, timeoutMs: limits.loadMs }) as { frames: Loaded[]; ms: number };
   phases.pageLoad += pageMs;
 
   lap("load");

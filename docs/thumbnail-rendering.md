@@ -126,8 +126,24 @@ requested work is admitted, rather than treating deferred work as free capacity.
 At the measured throughput, 1,000 teams with the modeled workload need about
 216 automatic browser-hours/month, still below one continuously occupied browser.
 
-With the daily budgets lifted, the single automatic browser is the only limit: at most 720
-browser-hours in a 30-day month, about $64/month above the included hours if it never stops.
+The budgets were lifted on 4 Nov 2026, which left the single automatic browser as the only
+limit: at most 720 browser-hours in a 30-day month, about $64/month above the included hours
+if it never stops. One file showed what that allows. Nineteen of its frames each embed about
+4 MB of component definitions (a playable prototype carrying its app as data), so a turn
+built about 90 MB of documents in the FileRoom. Production logs on 12 Nov 2026 (15 minutes of
+`wrangler tail`) show 11 turns for that file: 9 failed, 5 of them with the room reset for
+exceeding its memory limit, all 32 sprites timed out, and no preview was recorded. A reset
+room records no failure, so the queue ran the same turn about once a minute, each holding
+the shared browser; explicit screenshots waited 25 to 34 seconds and many failed as busy.
+Browser Run billed about 13 browser hours on 11 Nov.
+
+Since 13 Nov 2026 the budgets are 15 minutes per file, 30 per workspace and 90 overall each
+day: at most 46.5 browser-hours in a 31-day month, about $3.30 above the included hours. A
+failed turn is charged its whole reservation, so the file budget also stops a file whose
+turns keep failing. The FileRoom journals the nodes each tab is rendering (`thumbInFlight`).
+A turn that finds a journal left by a turn whose room was reset renders that turn's sprite
+nodes alone, and counts a failed attempt against a node that was already rendering alone,
+so such turns end at the retry cap.
 
 ## Sprites
 
@@ -137,7 +153,14 @@ so viewport units, media queries, fixed positioning, root styles, custom element
 definitions and authored scripts resolve as they do in a page of their own. The page
 loads every document at once, compiles Tailwind once per distinct stylesheet, shares
 the prepared fonts through blob URLs, fits each auto-height frame to its content, and
-packs the frames into one layout. Lossless captures of bands of rows, at most 4 million
+packs the frames into one layout. A sprite's documents repeat the token sheet, the compiled
+CSS and their component definitions, so the Worker sends each distinct one once per sprite,
+in messages of at most 2 MB, with a mark in each document where it belongs; the page puts
+the documents back together before loading them. On 22 ordinary frames of the file above
+that cut what a turn sends from 9.9 MB to 3.0 MB (same code paths, stand-in page). Sprites
+are also planned by weight, the characters of a node's HTML and the component definitions
+it embeds, at most 6 million per sprite, so megabyte documents are not loaded on one thread
+together. Lossless captures of bands of rows, at most 4 million
 pixels each, cover the sprite; the page then crops each node and encodes its WebP tiers.
 Canvas WebP at 0.8 is the same encoder and setting as a WebP capture at quality 80. A
 band travels to the Worker and back as base64 PNG, so its size bounds Worker memory

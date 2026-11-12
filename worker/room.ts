@@ -4,7 +4,7 @@ import puppeteer from "@cloudflare/puppeteer";
 import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
 import { prepareRenderDesign } from "./render-fonts";
-import { bytesToBase64, capture, captureThumbnails, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { bytesToBase64, capture, captureThumbnails, documentWeight, loadFrame, loadImagePreview, withTimeout } from "./render";
 import { planSprites, renderSprite, type SpritePhases } from "./render-sprite";
 import { openBrowser, openTab, releaseBrowser } from "./browser-session";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
@@ -382,6 +382,8 @@ export class FileRoom extends DurableObject<Env> {
   private library: LibraryInfo | null | undefined;
   /** Explicit screenshots and automatic previews share one browser slot per file. */
   private browserTask: Promise<unknown> | null = null;
+  /** Counts automatic turns, so work a timed-out turn left running cannot write over the next turn's journal. */
+  private thumbTurn = 0;
   private screenshotRequests = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -1078,7 +1080,7 @@ export class FileRoom extends DurableObject<Env> {
         const waiting = Date.now();
         if (coordinator) {
           while (!(lease = await coordinator.acquireScreenshot())) {
-            if (Date.now() - waiting > 30_000) throw new Error("The shared browser is busy; retry the screenshot shortly");
+            if (Date.now() - waiting > THUMBNAIL_POLICY.screenshotWaitMs) throw new Error("The shared browser is busy; retry the screenshot shortly");
             await new Promise((resolve) => setTimeout(resolve, 250));
           }
         }
@@ -1123,6 +1125,7 @@ export class FileRoom extends DurableObject<Env> {
     if (Date.now() > notAfter) return { more: true, browserMs: 0, rendered: 0 };
     // Edits and library refreshes reconcile when they happen; only the migration backfill remains.
     this.reconcileMigrated();
+    this.recoverInterruptedTurn();
     if (!this.hasPendingThumbnails()) {
       if (this.backfill()) this.setMeta("backfill", "");
       return { more: false, browserMs: 0, rendered: 0 };
@@ -1142,8 +1145,17 @@ export class FileRoom extends DurableObject<Env> {
     let healthy = true;
     let stopped = false;
     const valid = () => !stopped;
-    // Stop while an edit's debounce is pending; without I/O, Date.now() cannot advance past it.
-    const due = () => !stopped && Date.now() - started < quantumMs && Date.now() >= Number(this.meta("thumbAfter") ?? 0) && this.hasRenderAudience();
+    // Stop while an edit's debounce is pending; without I/O, Date.now() cannot advance past it. A screenshot of this
+    // file waits for this turn, so the turn ends after the sprites it is running and hands the browser slot over.
+    const due = () => !stopped && !this.screenshotRequests && Date.now() - started < quantumMs && Date.now() >= Number(this.meta("thumbAfter") ?? 0) && this.hasRenderAudience();
+    // The journal of what is rendering now. A turn that ends, however badly, leaves it empty; one whose room was
+    // reset under it (the memory limit) leaves its last entries for the next turn to find.
+    const turn = ++this.thumbTurn;
+    const flying = new Map<string, boolean>();
+    const journal = (jobs: { id: string; rev: number }[], sprite: boolean | null) => {
+      for (const n of jobs) sprite === null ? flying.delete(`${n.id}:${n.rev}`) : flying.set(`${n.id}:${n.rev}`, sprite);
+      if (turn === this.thumbTurn) this.setMeta("thumbInFlight", flying.size ? JSON.stringify([...flying]) : "");
+    };
     try {
       const run = async () => {
         const session = await openBrowser(this.env.BROWSER!, warm, THUMBNAIL_POLICY.keepAliveMs);
@@ -1174,25 +1186,28 @@ export class FileRoom extends DurableObject<Env> {
           const solo = this.soloNodes();
           const single = queue.filter((n) => solo.has(`${n.id}:${n.rev}`));
           const work = [
-            ...planSprites(queue.filter((n) => !solo.has(`${n.id}:${n.rev}`)), tabs.size).map((jobs) => ({ jobs, sprite: true })),
+            ...planSprites(queue.filter((n) => !solo.has(`${n.id}:${n.rev}`)).map((n) => ({ ...n, weight: documentWeight(n.html, design) })), tabs.size).map((jobs) => ({ jobs, sprite: true })),
             ...[...single, ...images].map((n) => ({ jobs: [n], sprite: false })),
           ];
           await Promise.all([...tabs].map(async (tab) => {
             for (let w = work.shift(); w && due(); w = work.shift()) {
-              if (w.sprite) {
-                sprites++;
-                const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases, timing);
-                // A failed sprite may leave its page wedged, so that tab retires; the other tabs keep going, and
-                // the failed sprite's nodes render alone.
-                if (result === false) { tabs.delete(tab); healthy = false; break; }
-                rendered += result;
-                continue;
-              }
-              alone++;
-              // A timed-out tab is never reused; close the whole session before retrying.
-              if (!await this.renderThumb(tab, w.jobs[0]!, fileId, base, design, valid)) { stopped = true; healthy = false; break; }
-              rendered++;
-              this.broadcast({ type: "sync", nodes: this.nodes([w.jobs[0]!.id]), by: null });
+              journal(w.jobs, w.sprite);
+              try {
+                if (w.sprite) {
+                  sprites++;
+                  const result = await this.renderSpriteThumbs(tab, w.jobs, fileId, base, design, valid, phases, timing);
+                  // A failed sprite may leave its page wedged, so that tab retires; the other tabs keep going, and
+                  // the failed sprite's nodes render alone.
+                  if (result === false) { tabs.delete(tab); healthy = false; break; }
+                  rendered += result;
+                  continue;
+                }
+                alone++;
+                // A timed-out tab is never reused; close the whole session before retrying.
+                if (!await this.renderThumb(tab, w.jobs[0]!, fileId, base, design, valid)) { stopped = true; healthy = false; break; }
+                rendered++;
+                this.broadcast({ type: "sync", nodes: this.nodes([w.jobs[0]!.id]), by: null });
+              } finally { journal(w.jobs, null); }
             }
           }));
         }
@@ -1258,6 +1273,25 @@ export class FileRoom extends DurableObject<Env> {
     return stored.length;
   }
 
+  /**
+   * A turn whose room was reset while it rendered recorded no failure, so the queue would run the same turn again,
+   * and again, each one holding the shared browser. The journal names what was rendering: nodes from a sprite
+   * render alone next time, and a node that was already alone counts a failed attempt, which ends at the retry cap.
+   */
+  private recoverInterruptedTurn() {
+    let entries: [string, boolean][] = [];
+    try { entries = JSON.parse(this.meta("thumbInFlight") || "[]") as [string, boolean][]; } catch { /* unreadable: nothing to recover */ }
+    if (!entries.length) return;
+    this.setMeta("thumbInFlight", "");
+    const parse = (key: string) => ({ id: key.slice(0, key.lastIndexOf(":")), rev: Number(key.slice(key.lastIndexOf(":") + 1)) });
+    for (const { id, rev } of entries.filter(([, sprite]) => !sprite).map(([key]) => parse(key))) {
+      this.sql.exec(`UPDATE nodes SET thumb_tries = thumb_tries + 1 WHERE id = ? AND rev = ? AND kind = 'image'`, id, rev);
+      this.sql.exec(`UPDATE node_thumbnails SET tries = tries + 1 WHERE node_id = ? AND theme = '' AND rev = ?`, id, rev);
+    }
+    this.markSolo(entries.filter(([, sprite]) => sprite).map(([key]) => parse(key)));
+    console.warn("thumbnail turn interrupted", JSON.stringify({ fileId: this.meta("fileId"), sprites: entries.filter(([, sprite]) => sprite).length, alone: entries.filter(([, sprite]) => !sprite).length }));
+  }
+
   private soloNodes() {
     try { return new Set(JSON.parse(this.meta("thumbSolo") || "[]") as string[]); }
     catch { return new Set<string>(); }
@@ -1265,7 +1299,11 @@ export class FileRoom extends DurableObject<Env> {
 
   /** Keeps only revisions still waiting for a preview, newest last, within MAX_SOLO. */
   private markSolo(nodes: { id: string; rev: number }[]) {
-    const current = new Set(this.pendingThumbnails(THUMB_BATCH * 8).map((n) => `${n.id}:${n.rev}`));
+    // Keys only: this runs when a sprite failed, the wrong moment to read every pending node's source.
+    const current = new Set(this.sql.exec<{ id: string; rev: number }>(
+      `SELECT n.id, n.rev FROM nodes n JOIN node_thumbnails t ON t.node_id = n.id AND t.rev = n.rev
+       WHERE t.thumb_lo IS NULL AND t.tries < ${THUMB_MAX_TRIES} AND t.theme = ''`,
+    ).toArray().map((n) => `${n.id}:${n.rev}`));
     const keys = [...this.soloNodes(), ...nodes.map((n) => `${n.id}:${n.rev}`)].filter((key) => current.has(key));
     this.setMeta("thumbSolo", JSON.stringify([...new Set(keys)].slice(-MAX_SOLO)));
   }

@@ -34,12 +34,20 @@ export const THUMBNAIL_POLICY = {
   // Browser lifetime is reserved before starting, then refunded to actual elapsed time.
   reservationMs: 60_000,
   screenshotSessionMs: 110_000,
+  // How long a screenshot waits for the shared browser slot: as long as an automatic turn can hold it, including a
+  // turn whose file was reset mid-turn, which keeps its whole reservation. A shorter wait failed screenshots taken
+  // while a large file's turn ran.
+  screenshotWaitMs: 60_000,
   screenshotLeaseMs: 150_000,
-  // Daily budgets were 30 min per file, 60 min per team, 4 h overall and 60 min of backfill. The owner lifted them
-  // on 4 Nov 2026 until someone abuses previews; spend is still recorded per file and team, so they can return.
-  fileDailyMs: 1_000_000_000,
-  teamDailyMs: 1_000_000_000,
-  globalDailyMs: 1_000_000_000,
-  backfillDailyMs: 1_000_000_000,
+  // Daily browser time for automatic previews. The owner lifted these on 4 Nov 2026; with no cap, one file whose
+  // turns failed every minute kept the browser running most of the day (about 13 browser hours on 11 Nov). They are
+  // back as the bound on the bill whatever a file does: 90 minutes a day is at most 46.5 browser hours a month, about
+  // $3.30 after the 10 included hours at $0.09 an hour (Browser Run pricing, read 13 Nov 2026). A failed turn is
+  // charged its whole reservation, so the file budget also stops a file that keeps failing. Explicit screenshots
+  // are not budgeted.
+  fileDailyMs: 15 * 60_000,
+  teamDailyMs: 30 * 60_000,
+  globalDailyMs: 90 * 60_000,
+  backfillDailyMs: 15 * 60_000,
   maxQueuedFiles: 1000,
 } as const;

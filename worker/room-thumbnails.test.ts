@@ -477,6 +477,88 @@ describe("thumbnail scheduling", () => {
     await render();
     expect(renderer.launch).toHaveBeenCalledTimes(3);
   });
+
+  it("renders a sprite's nodes alone after a turn whose room was reset, and stops retrying a node that resets it alone", async () => {
+    // Timers never fire, so a turn left hanging stands for a room that was reset: it never returns or records anything.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const {create,wake,db,flush} = fixture(true);
+      const ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      for (const id of ids) await create(id);
+      const until = async (ready: () => boolean) => { for (let i = 0; i < 2000 && !ready(); i++) await new Promise((resolve) => setImmediate(resolve)); expect(ready()).toBe(true); };
+      const turn = (room: FileRoom) => { db.exec("DELETE FROM meta WHERE k = 'thumbAfter'"); return room.renderThumbnails(); };
+      const journal = () => JSON.parse((db.prepare("SELECT v FROM meta WHERE k = 'thumbInFlight'").get() as { v: string } | undefined)?.v || "[]") as [string, boolean][];
+      const tries = () => Object.fromEntries((db.prepare("SELECT node_id AS id, tries FROM node_thumbnails WHERE theme = '' ORDER BY node_id").all() as { id: string; tries: number }[]).map((r) => [r.id, r.tries]));
+      const rendered = () => (db.prepare("SELECT count(*) AS n FROM node_thumbnails WHERE theme = '' AND thumb_lo IS NOT NULL").get() as { n: number }).n;
+      // The room is reset (its memory limit) while four sprites of two nodes render.
+      renderer.renderSprite.mockImplementation(() => new Promise(() => {}));
+      void turn(wake());
+      await until(() => renderer.renderSprite.mock.calls.length === 4);
+      expect(journal().sort()).toEqual(ids.map((id) => [`${id}:1`, true]));
+      // The next turn, in a new instance of the room, renders them alone instead of repeating the sprites. "b"
+      // resets the room again when it renders alone.
+      renderer.renderSprite.mockClear();
+      renderer.loadFrame.mockImplementation((_tab: unknown, n: { id: string }) => n.id === "b" ? new Promise(() => {}) : Promise.resolve({ width: 400, height: 600, measured: 600 }));
+      void turn(wake());
+      await until(() => rendered() === 7);
+      await flush();
+      expect(renderer.renderSprite).not.toHaveBeenCalled();
+      expect(journal()).toEqual([["b:1", false]]);
+      expect(tries().b).toBe(0);
+      // Each later turn counts the reset against "b", so the turns end at the retry cap instead of repeating.
+      for (const attempt of [1, 2]) {
+        renderer.loadFrame.mockClear();
+        void turn(wake());
+        await until(() => renderer.loadFrame.mock.calls.length === 1);
+        expect((renderer.loadFrame.mock.calls[0]![1] as { id: string }).id).toBe("b");
+        expect(tries().b).toBe(attempt);
+      }
+      renderer.loadFrame.mockClear();
+      expect(await turn(wake())).toMatchObject({ rendered: 0, more: false, browserMs: 0 });
+      expect(renderer.loadFrame).not.toHaveBeenCalled();
+      expect(tries()).toEqual({ a: 0, b: 3, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0 });
+      expect(journal()).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("leaves no journal after a turn that ends on its own", async () => {
+    const {create,render,db} = fixture(true);
+    for (const id of ["a", "b"]) await create(id);
+    renderer.renderSprite.mockRejectedValueOnce(new Error("sprite failed"));
+    expect(await render()).toMatchObject({ rendered: 2 });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'thumbInFlight'").get()).toEqual({ v: "" });
+  });
+
+  it("ends a running turn after its current sprites when a screenshot of the file is waiting", async () => {
+    const {room,create,render} = fixture(true);
+    for (let i = 0; i < 200; i++) await create(`screen-${i}`);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    renderer.renderSprite.mockImplementation(async (...args: Parameters<typeof spriteOfSingles>) => { await gate; return spriteOfSingles(...args); });
+    const turn = render();
+    while (renderer.renderSprite.mock.calls.length < 4) await new Promise((resolve) => setTimeout(resolve, 0));
+    const screenshot = room.screenshotNodes(["screen-0"],"https://sharpner.example");
+    release();
+    expect(await turn).toMatchObject({more:true,rendered:96});
+    // Only the sprites already running finished; the next batch waits for a later turn.
+    expect(renderer.renderSprite).toHaveBeenCalledTimes(4);
+    expect((await screenshot).content.filter((c)=>c.type==="image")).toHaveLength(1);
+  });
+
+  it("waits for the shared browser as long as an automatic turn can hold it", async () => {
+    const {room,create,env} = fixture(true);
+    await create("screen");
+    vi.useFakeTimers();
+    try {
+      const freeAt = Date.now() + 45_000;
+      const acquireScreenshot = vi.fn(async () => Date.now() >= freeAt ? "lease" : null);
+      (env as unknown as { THUMBNAIL_QUEUE: { get: () => unknown } }).THUMBNAIL_QUEUE.get = () => ({ acquireScreenshot, releaseScreenshot: async () => {} });
+      const screenshot = room.screenshotNodes(["screen"],"https://sharpner.example");
+      void screenshot.catch(() => {});
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect((await screenshot).content.filter((c)=>c.type==="image")).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe("theme removal migration", () => {
