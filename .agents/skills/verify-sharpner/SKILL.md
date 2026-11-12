@@ -32,6 +32,10 @@ user-facing feature. Read it before you drive a feature.
   values. `mcp-login` uses one fixed callback port, so run one `mcp-login` at a
   time on the machine.
 
+To try a render host (`tools/render-host`), add `RENDER_HOST_TOKEN` and
+`RENDER_HOST_WORKSPACES=*` to `.dev.vars` before `launch`, then run
+`render-host.mjs` with `SHARPNER_ORIGIN` set to the run's origin.
+
 ## Launch
 
 ```sh

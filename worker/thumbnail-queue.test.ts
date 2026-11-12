@@ -7,7 +7,7 @@ vi.mock("./browser-session", () => ({ closeBrowser: calls.close }));
 import { ThumbnailQueue } from "./thumbnail-queue";
 import { BACKFILL, THUMBNAIL_POLICY as policy } from "./thumbnail-policy";
 const databases: DatabaseSync[] = [];
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000); calls.render.mockReset().mockResolvedValue({ more: false, browserMs: 1000, rendered: 4 }); calls.close.mockReset(); calls.quantum.length = 0; calls.warm.length = 0; calls.keepWarm.length = 0; });
+beforeEach(() => { vi.stubGlobal("WebSocketRequestResponsePair", class {}); vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000); calls.render.mockReset().mockResolvedValue({ more: false, browserMs: 1000, rendered: 4 }); calls.close.mockReset(); calls.quantum.length = 0; calls.warm.length = 0; calls.keepWarm.length = 0; });
 afterEach(() => { vi.useRealTimers(); for (const db of databases.splice(0)) db.close(); });
 function fixture() {
   const db = new DatabaseSync(":memory:"); databases.push(db);
@@ -18,7 +18,8 @@ function fixture() {
     return { toArray: () => rows };
   } };
   let alarm: number | null = null;
-  const ctx = { storage: { sql, getAlarm: async () => alarm, setAlarm: async (at: number) => { alarm = at; } } } as unknown as DurableObjectState;
+  // No render host is connected in these tests; see render-host.test.ts.
+  const ctx = { storage: { sql, getAlarm: async () => alarm, setAlarm: async (at: number) => { alarm = at; } }, getWebSockets: () => [], setWebSocketAutoResponse: () => {} } as unknown as DurableObjectState;
   const env = { BROWSER: {}, DB: { prepare: () => ({ bind: (fileId: string) => ({ first: async () => fileId === "deleted" ? null : {workspace_id:fileId.split("-")[0]} }) }) } } as unknown as Env;
   const wake = () => new ThumbnailQueue(ctx, env), queue = wake();
   const fire = async () => { alarm = null; await queue.alarm(); };

@@ -45,6 +45,7 @@ edits and fan out changes.
 | `worker/render.ts` | Shared document loading, compiled thumbnail CSS, and single-capture previews |
 | `worker/render-sprite.ts` | Sprite previews: many nodes' documents in one page, laid out, captured once and cropped |
 | `worker/thumbnail-queue.ts` | Shared browser admission, fair file/workspace turns, and automatic rendering budgets |
+| `worker/render-host.ts`, `tools/render-host/` | A machine that lends its Chromium for previews and screenshots, with Browser Run as the fallback |
 | `worker/thumbnail-policy.ts` | Automatic preview budgets and queue limits, including the temporary `BACKFILL` exception |
 | `worker/thumbnail-css.ts`, `worker/render-fonts.ts` | Compiled Tailwind CSS and prepared fonts for rendered previews |
 | `shared/types.ts` | Wire messages, documents, and design-system composition |

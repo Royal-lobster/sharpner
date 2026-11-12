@@ -1,0 +1,21 @@
+# A systemd user unit for the render host. Copy it to ~/.config/systemd/user/, set the two paths, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now sharpner-render-host
+# `loginctl enable-linger $USER` keeps it running while you are logged out.
+[Unit]
+Description=Sharpner render host (Chromium in a container, lent to a Sharpner deployment)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Environment=SHARPNER_ORIGIN=https://sharpner.example
+Environment=RENDER_HOST_POOL=2
+ExecStart=/path/to/sharpner/tools/render-host/run.sh
+ExecStop=/usr/bin/podman stop -t 5 sharpner-render-host
+Restart=always
+RestartSec=10
+# A second bound, outside the container's own memory limit.
+MemoryMax=10G
+MemorySwapMax=512M
+
+[Install]
+WantedBy=default.target

@@ -15,7 +15,8 @@ It is one Cloudflare Worker (Hono) and a React 19 single-page app. Use the terms
 - `worker/mcp.ts`: MCP tools. `worker/skills/sharpner/`: the skill text agents read
   through `read_skill`.
 - `worker/thumbnail-queue.ts`, `worker/thumbnail-policy.ts`, `worker/render.ts`: preview
-  admission, its settings, and Browser Rendering.
+  admission, its settings, and Browser Rendering. `worker/render-host.ts` and
+  `tools/render-host/`: an optional machine that renders instead of Browser Run.
 - `src/Editor.tsx` (file chrome), `src/Canvas.tsx` (canvas), `src/room.ts` (realtime
   client), `src/canvas-render-plan.ts` (which frames render live).
 - `shared/`: code the browser, the Worker and screenshots must agree on. Geometry goes in
