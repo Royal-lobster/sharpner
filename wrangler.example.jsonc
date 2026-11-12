@@ -31,5 +31,8 @@
     // Publish your registered public OAuth client and its loopback callback port for agent setup.
     "CLERK_MCP_CLIENT_ID": "",
     "CLERK_MCP_CALLBACK_PORT": ""
+    // Optional render host (tools/render-host/README.md): the workspace ids whose files it renders, or "*".
+    // It also needs the RENDER_HOST_TOKEN secret.
+    // "RENDER_HOST_WORKSPACES": ""
   }
 }

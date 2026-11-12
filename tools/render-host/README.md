@@ -1,0 +1,62 @@
+# Render host
+
+A render host lends a machine's Chromium to a Sharpner deployment. While one is connected, previews and
+`screenshot_nodes` for the workspaces it serves run on it and use no Browser Run time. When none is connected, or a
+file's workspace is not served, Sharpner uses Browser Run as before, inside its daily budgets.
+
+## How it connects
+
+The host dials out. It opens one WebSocket per idle browser to `/api/render-host/socket` on the deployment and
+presents a token. The deployment's ThumbnailQueue parks those sockets and pairs one with a FileRoom for a session;
+the DevTools protocol then travels over that socket (`worker/render-host.ts`). Each browser serves one session and
+is replaced. The machine opens no port, and nothing connects in to it.
+
+## What protects the machine
+
+Chromium on the host loads HTML and scripts that members' agents wrote. `run.sh` and the image are built so that
+this cannot reach the machine or its networks:
+
+| Limit | How |
+| --- | --- |
+| No way in | The host only makes outbound connections. Chromium is driven over a pipe, so there is no debugging port. |
+| Its networks are closed | The entrypoint loads firewall rules that drop every private, link-local and carrier-grade NAT (tailnet) destination and all IPv6, then gives up the right to change them. The rules match addresses, so a public name that resolves to a private address is blocked too. The container uses public DNS resolvers, and the gateway is not mapped to the machine. It refuses to start if the rules did not load. |
+| Nothing of the machine inside | No volume is mounted and the root filesystem is read-only. Profiles live in a memory filesystem and are deleted after each session. |
+| No privileges | Rootless podman: the container's users are unprivileged ids on the machine. Chromium runs as a user of its own with no capabilities and `no-new-privileges`, inside Chromium's own sandbox (`seccomp.py` allows the one call it needs). |
+| The token stays out of reach | It is a podman secret readable only by the entrypoint, handed to the host program on an open descriptor. The program runs as a different user from Chromium, so a browser process cannot read its memory or environment. |
+| Bounded use | Memory, process and CPU limits on the container, a second memory limit on the systemd unit, and a five-minute limit on any session. |
+| Only chosen workspaces | The deployment sends a host only the files of the workspaces named in `RENDER_HOST_WORKSPACES`. |
+
+What it does not do: pages still reach the public internet, as any page does, from this machine's address. A
+Chromium flaw that escapes its sandbox would run as an unprivileged user in the container, behind the same rules.
+Serve only workspaces you trust until you have decided that is enough for strangers' files.
+
+## Set up
+
+On the deployment (see CONTRIBUTING.md, "Deploy your own instance"):
+
+```sh
+openssl rand -base64 32 | tr -d '\n' > token          # keep this file private
+pnpm exec wrangler secret put RENDER_HOST_TOKEN < token
+```
+
+Set `RENDER_HOST_WORKSPACES` in `wrangler.jsonc`'s `vars` to the workspace ids to serve, comma separated, or `*`
+for every workspace, and deploy. Without the token the socket route does not exist; without the variable no file
+is sent to a host.
+
+On the machine (podman 5 with pasta, rootless):
+
+```sh
+podman secret create render_host_token token && rm token
+SHARPNER_ORIGIN=https://your.sharpner.example tools/render-host/run.sh
+```
+
+`run.sh` builds the image on first use. `sharpner-render-host.service` runs it as a systemd user unit. The log
+shows each browser `parked`, then `session started` and `session ended`. On the deployment, `thumbnail-turn` and
+`screenshot-browser` log `hosted: true` for work a host did.
+
+Settings: `RENDER_HOST_POOL` (browsers kept ready, default 2), `RENDER_HOST_MEMORY` (default `8g`),
+`RENDER_HOST_CPUS` (default 6). Rebuild after an update with `podman build -t localhost/sharpner-render-host:latest
+tools/render-host`; rebuild regularly to pick up Chromium security updates.
+
+`render-host.mjs` also runs directly (`SHARPNER_ORIGIN`, `RENDER_HOST_TOKEN_FILE`, `CHROME_BIN`) for development
+against a local instance. Without the container none of the limits above apply.

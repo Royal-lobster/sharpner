@@ -5,6 +5,7 @@ import { clerkIssuer } from "./auth";
 import { fileFor, room } from "./data";
 import { prepareRenderDesign } from "./render-fonts";
 import { bytesToBase64, capture, captureThumbnails, documentWeight, loadFrame, loadImagePreview, withTimeout } from "./render";
+import { renderHost } from "./render-host";
 import { planSprites, renderSprite, type SpritePhases } from "./render-sprite";
 import { openBrowser, openTab, releaseBrowser } from "./browser-session";
 import { selectThumbnail, type ThemeThumbnails } from "../shared/thumbnails";
@@ -1060,9 +1061,9 @@ export class FileRoom extends DurableObject<Env> {
    * leaves its browser running only then, or when this file has previews left; otherwise it closes the browser,
    * because idle browser time is billed.
    */
-  async renderThumbnails(notAfter = Date.now() + 20_000, quantumMs: number = THUMBNAIL_POLICY.quantumMs, warm?: string, keepWarm = false): Promise<TurnResult> {
+  async renderThumbnails(notAfter = Date.now() + 20_000, quantumMs: number = THUMBNAIL_POLICY.quantumMs, warm?: string, keepWarm = false, hosted = false): Promise<TurnResult> {
     if (this.browserTask) return { more: true, browserMs: 0, rendered: 0 };
-    return this.withFileBrowser(() => this.renderThumbnailsNow(notAfter, Math.min(quantumMs, THUMBNAIL_POLICY.soloQuantumMs), warm, keepWarm));
+    return this.withFileBrowser(() => this.renderThumbnailsNow(notAfter, Math.min(quantumMs, THUMBNAIL_POLICY.soloQuantumMs), warm, keepWarm, hosted));
   }
 
   private async withFileBrowser<T>(run: () => Promise<T>): Promise<T> {
@@ -1095,10 +1096,14 @@ export class FileRoom extends DurableObject<Env> {
         }
         const started = Date.now();
         let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
-        let stopped = false;
+        let stopped = false, hosted = false;
         try {
           const run = async () => {
-            browser = await puppeteer.launch(this.env.BROWSER!, { keep_alive: 10_000 });
+            // A render host's browser when one is free and serves this file; Browser Run otherwise.
+            const host = renderHost(this.env, this.meta("fileId") ?? "");
+            browser = host ? await puppeteer.launch(host).catch(() => undefined) : undefined;
+            hosted = !!browser;
+            browser ??= await puppeteer.launch(this.env.BROWSER!, { keep_alive: 10_000 });
             if (stopped) { await browser.close(); return { content: [] }; }
             const tab = await browser.newPage();
             const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [];
@@ -1117,13 +1122,13 @@ export class FileRoom extends DurableObject<Env> {
           stopped = true;
           if (browser) await withTimeout(browser.close(), 5000, "browser close");
           if (coordinator && lease) await coordinator.releaseScreenshot(lease);
-          console.log("screenshot-browser", JSON.stringify({ fileId: this.meta("fileId"), screens: nodes.length, browserMs: Date.now() - started }));
+          console.log("screenshot-browser", JSON.stringify({ fileId: this.meta("fileId"), screens: nodes.length, browserMs: Date.now() - started, hosted }));
         }
       });
     } finally { this.screenshotRequests--; }
   }
 
-  private async renderThumbnailsNow(notAfter: number, quantumMs: number, warm: string | undefined, keepWarm: boolean): Promise<TurnResult> {
+  private async renderThumbnailsNow(notAfter: number, quantumMs: number, warm: string | undefined, keepWarm: boolean, hosted: boolean): Promise<TurnResult> {
     const fileId = this.meta("fileId"), base = this.meta("origin") ?? "";
     if (!this.env.BROWSER || !fileId || !this.hasRenderAudience()) return { more: false, browserMs: 0, rendered: 0 };
     const readyAt = Number(this.meta("thumbAfter") ?? 0);
@@ -1167,7 +1172,10 @@ export class FileRoom extends DurableObject<Env> {
     };
     try {
       const run = async () => {
-        const session = await openBrowser(this.env.BROWSER!, warm, THUMBNAIL_POLICY.keepAliveMs);
+        // A hosted turn was admitted without budget, so it renders on the render host or not at all.
+        const host = hosted ? renderHost(this.env, fileId) : null;
+        if (hosted && !host) throw new Error("No render host is configured");
+        const session = host ? { browser: await puppeteer.launch(host), reused: false } : await openBrowser(this.env.BROWSER!, warm, THUMBNAIL_POLICY.keepAliveMs);
         reused = session.reused;
         launchMs = Date.now() - started;
         // The session deadline passed while connecting; the cleanup below has already run.
@@ -1223,20 +1231,22 @@ export class FileRoom extends DurableObject<Env> {
       };
       await withTimeout(run(), THUMBNAIL_POLICY.sessionMs, "thumbnail session");
     } catch (err) {
-      retryAt = Date.now() + 30_000;
+      // A host that left before the turn opened its browser costs nothing; the queue picks a browser again shortly.
+      retryAt = Date.now() + (hosted && !browser ? 2000 : 30_000);
       healthy = false;
       console.warn("thumbnail session failed", String(err));
     } finally {
       stopped = true;
       // A browser stays warm only for a turn that is due at once: this file's remaining previews, or another file.
       const releasing = Date.now();
-      if (browser) left = await releaseBrowser(browser, opened, healthy && (keepWarm || this.pendingCount() > 0));
+      // A host's browser serves one session; the host replaces it when this one closes.
+      if (browser) left = await releaseBrowser(browser, opened, !hosted && healthy && (keepWarm || this.pendingCount() > 0));
       timing.release = Date.now() - releasing;
     }
     const browserMs = Date.now() - started;
     // `pending` previews still trail their node's revision after this turn; 0 means the file is in sync.
     const pending = this.pendingCount();
-    console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, pending, sprites, alone, browserMs, launchMs, reused, warm: !!left, quantumMs, phases, timing }));
+    console.log("thumbnail-turn", JSON.stringify({ fileId, rendered, pending, sprites, alone, browserMs, launchMs, reused, warm: !!left, hosted, quantumMs, phases, timing }));
     this.updateCover(fileId);
     const more = pending > 0;
     if (!more && this.backfill()) { this.setMeta("backfill", ""); console.log("thumbnail-backfill-done", JSON.stringify({ fileId })); }

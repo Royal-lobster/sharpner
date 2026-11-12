@@ -4,6 +4,7 @@ import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, newShareToken, room, sharedFile, workspaceFiles, workspaceFor } from "./data";
 import { mcp } from "./mcp";
 import { oauth } from "./oauth";
+import { hostToken } from "./render-host";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
 
 export { FileRoom } from "./room";
@@ -15,6 +16,17 @@ app.route("/auth", auth);
 app.route("/mcp", mcp);
 app.route("/.well-known", oauth);
 app.onError((err, c) => c.json({ error: err.message }, authErrorStatus(err) ?? 500));
+
+// ---- render host: a machine lending its Chrome; its token is the only credential ----
+
+/** A render host parks one idle browser per socket. See worker/render-host.ts. */
+app.get("/api/render-host/socket", async (c) => {
+  const queue = c.env.THUMBNAIL_QUEUE;
+  // A browser never opens this socket, and a page could not set the header.
+  if (!queue || c.req.header("origin") || !await hostToken(c.env, /^Bearer (.+)$/.exec(c.req.header("authorization") ?? "")?.[1])) return c.json({ error: "not found" }, 404);
+  if (c.req.header("upgrade")?.toLowerCase() !== "websocket") return c.json({ error: "Expected a WebSocket upgrade" }, 426);
+  return queue.get(queue.idFromName("global")).fetch("https://render-host/socket", { headers: { upgrade: "websocket" } });
+});
 
 // ---- view-only links: the token is the only credential ------------------------
 

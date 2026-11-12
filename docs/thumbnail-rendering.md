@@ -152,6 +152,25 @@ A turn that finds a journal left by a turn whose room was reset renders that tur
 nodes alone, and counts a failed attempt against a node that was already rendering alone,
 so such turns end at the retry cap.
 
+## Render host
+
+A deployment can render on a machine of its own instead of Browser Run. A render host
+(`tools/render-host`) dials out to the deployment with one socket per idle Chromium;
+the ThumbnailQueue parks them, and `renderHost` in `worker/render-host.ts` presents a
+parked browser to `@cloudflare/puppeteer` as it would a Browser Run binding, so
+previews and screenshots run the same code on either. A turn for a workspace named
+in `RENDER_HOST_WORKSPACES` is admitted without budget while a host's browser is
+free, and logs `hosted: true`. With no free browser, or for any other workspace,
+admission and rendering are as described above. A host's browser serves one session:
+it ends when either side closes, including when a FileRoom is reset, so a failed
+hosted turn frees the browser slot at once. The host's README lists what keeps the
+machine safe from the pages it renders.
+
+Checked on 13 Nov 2026 in a local instance: previews and `screenshot_nodes` rendered
+on the host's Chromium 156 (`hosted: true`), and on Browser Run again as soon as the
+host stopped. A Chromium on a host and Browser Run's are different builds with
+different fonts installed, so the same node can differ slightly between them.
+
 ## Sprites
 
 Frames, components and token sheets render in sprites. A sprite is one browser page

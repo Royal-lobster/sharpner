@@ -268,8 +268,10 @@ async function launch(args) {
     db.migrations_dir = path.join(REPO, db.migrations_dir ?? "migrations");
   }
   if (options["no-browser-rendering"]) delete config.browser;
-  config.vars = { CLERK_MCP_CLIENT_ID: "", CLERK_MCP_CALLBACK_PORT: "", CLERK_API_KEYS_ENABLED: "" };
-  config.secrets = { required: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"] };
+  // An optional render host (tools/render-host) for this run: its token and the workspaces it serves, from .dev.vars.
+  const renderHost = vars.RENDER_HOST_TOKEN ? { RENDER_HOST_TOKEN: vars.RENDER_HOST_TOKEN } : {};
+  config.vars = { CLERK_MCP_CLIENT_ID: "", CLERK_MCP_CALLBACK_PORT: "", CLERK_API_KEYS_ENABLED: "", ...(vars.RENDER_HOST_TOKEN ? { RENDER_HOST_WORKSPACES: vars.RENDER_HOST_WORKSPACES ?? "" } : {}) };
+  config.secrets = { required: ["CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY", ...Object.keys(renderHost)] };
   const configFile = path.join(scratch, "wrangler.verify.json");
   writeJson(configFile, config);
   writeJson(path.join(evidence, "wrangler.verify.json"), config);
@@ -284,6 +286,7 @@ async function launch(args) {
     CLERK_MCP_CLIENT_ID: vars.CLERK_MCP_CLIENT_ID ?? "",
     CLERK_MCP_CALLBACK_PORT: vars.CLERK_MCP_CALLBACK_PORT ?? "",
     CLERK_API_KEYS_ENABLED: vars.CLERK_API_KEYS_ENABLED ?? "",
+    ...renderHost,
     CI: "1",
     NO_COLOR: "1",
     FORCE_COLOR: "0",
