@@ -346,6 +346,15 @@ const MIGRATIONS = [
   // A catalog component that lists no state prop gets a row per state its Tailwind variants style (hover, focus,
   // checked, disabled and the like), so catalog cells are derived again; a component whose cells change renders again.
   `INSERT OR REPLACE INTO meta (k, v) VALUES ('specimensStale', '1');`,
+  // Browser Rendering has none of the fonts a system font stack names, so previews and screenshots draw such text
+  // in an embedded stand-in (`prepareRenderDesign`). Tailwind's default stack and Sharpner's own specimen CSS are
+  // system stacks, so any frame, component or token sheet may change: each renders once more.
+  (sql: SqlStorage) => {
+    if (sql.exec(`SELECT 1 FROM meta WHERE k = 'systemFontStandIn'`).toArray().length) return;
+    sql.exec(`INSERT INTO meta (k, v) VALUES ('systemFontStandIn', '1')`);
+    sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE ${RENDERED}`);
+    sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */

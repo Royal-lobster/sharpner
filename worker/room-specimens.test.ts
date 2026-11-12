@@ -105,13 +105,13 @@ describe("catalog specimens in the FileRoom", () => {
     put("loose", { kind: "component", name: "Promo/Banner", source: button });
     refresh();
     const before = { primary: room.node("primary")!.rev, loose: room.node("loose")!.rev };
-    db.exec(`DELETE FROM meta WHERE k = 'catalogThemeClass'; UPDATE meta SET v = v - 5 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'catalogThemeClass'; UPDATE meta SET v = v - 6 WHERE k = 'schema'`);
     const reopened = open();
     expect(reopened.node("primary")!.rev).toBe(before.primary + 1);
     expect(reopened.node("loose")!.rev).toBe(before.loose);
     expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
     // Guarded: running it again changes nothing.
-    db.exec(`UPDATE meta SET v = v - 5 WHERE k = 'schema'`);
+    db.exec(`UPDATE meta SET v = v - 6 WHERE k = 'schema'`);
     expect(open().node("primary")!.rev).toBe(before.primary + 1);
   });
 
@@ -120,7 +120,7 @@ describe("catalog specimens in the FileRoom", () => {
     put("tokens", { kind: "tokens", source: `@theme { --text-xl: 20px; @keyframes pop { to { opacity: 1 } } }` });
     put("screen", { kind: "frame", source: "<p>Hi</p>" });
     const before = { tokens: room.node("tokens")!.rev, screen: room.node("screen")!.rev };
-    db.exec(`DELETE FROM meta WHERE k = 'nestedThemeTokens'; UPDATE meta SET v = v - 4 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k = 'nestedThemeTokens'; UPDATE meta SET v = v - 5 WHERE k = 'schema'`);
     const reopened = open();
     expect(reopened.node("tokens")!.rev).toBe(before.tokens + 1);
     expect(reopened.node("screen")!.rev).toBe(before.screen);
@@ -132,14 +132,14 @@ describe("catalog specimens in the FileRoom", () => {
     put("screen", { kind: "frame", source: "<p>Hi</p>" });
     put("primary", { kind: "component", name: "Button/Primary", source: button });
     const before = { tokens: room.node("tokens")!.rev, screen: room.node("screen")!.rev, primary: room.node("primary")!.rev };
-    db.exec(`DELETE FROM meta WHERE k IN ('foundationsSheet', 'thumbReconcile'); UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
+    db.exec(`DELETE FROM meta WHERE k IN ('foundationsSheet', 'thumbReconcile'); UPDATE meta SET v = v - 4 WHERE k = 'schema'`);
     const reopened = open();
     expect(reopened.node("tokens")!.rev).toBe(before.tokens + 1);
     expect(reopened.node("screen")!.rev).toBe(before.screen);
     expect(reopened.node("primary")!.rev).toBe(before.primary);
     expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
     // Guarded: running it again changes nothing.
-    db.exec(`UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
+    db.exec(`UPDATE meta SET v = v - 4 WHERE k = 'schema'`);
     expect(open().node("tokens")!.rev).toBe(before.tokens + 1);
   });
 
@@ -149,7 +149,7 @@ describe("catalog specimens in the FileRoom", () => {
     put("screen", { kind: "frame", source: "<p>Hi</p>" });
     put("tokens", { kind: "tokens", source: `@theme { --color-primary: #d4ff00; }` });
     const before = { chart: room.node("chart")!.rev, screen: room.node("screen")!.rev, tokens: room.node("tokens")!.rev };
-    const rewind = () => db.exec(`DELETE FROM meta WHERE k IN ('scriptSettle', 'thumbReconcile'); UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
+    const rewind = () => db.exec(`DELETE FROM meta WHERE k IN ('scriptSettle', 'thumbReconcile'); UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
     rewind();
     let reopened = open();
     expect(reopened.node("chart")!.rev).toBe(before.chart + 1);
@@ -157,7 +157,7 @@ describe("catalog specimens in the FileRoom", () => {
     expect(reopened.node("tokens")!.rev).toBe(before.tokens);
     expect(db.prepare(`SELECT v FROM meta WHERE k = 'thumbReconcile'`).get()).toEqual({ v: "1" });
     // Guarded: running it again changes nothing.
-    db.exec(`UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
+    db.exec(`UPDATE meta SET v = v - 3 WHERE k = 'schema'`);
     expect(open().node("chart")!.rev).toBe(before.chart + 1);
     // A component with a script may be embedded by any frame, so every frame and component renders once more.
     put("runtime", { kind: "component", name: "Chart/Runtime", source: "<script type='text/plain' data-runtime>draw()</script>" });
@@ -176,7 +176,7 @@ describe("catalog specimens in the FileRoom", () => {
     put("label", { kind: "component", parentId: "catalog", name: "Label/Default", width: 180, source: `<label class="text-sm">{{text|Email}}</label>` });
     refresh();
     // As stored before states were inferred.
-    db.exec(`UPDATE nodes SET specimen = NULL WHERE id = 'check'; UPDATE meta SET v = v - 1 WHERE k = 'schema'`);
+    db.exec(`UPDATE nodes SET specimen = NULL WHERE id = 'check'; UPDATE meta SET v = v - 2 WHERE k = 'schema'`);
     const before = { check: room.node("check")!.rev, label: room.node("label")!.rev };
     const reopened = open();
     expect(reopened.node("check")!.specimen!.rows).toEqual({ axis: "state", values: ["", "checked", "disabled", "checked disabled"], inferred: true });

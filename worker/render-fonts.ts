@@ -31,12 +31,25 @@ async function fontSheet(href: string) {
   return css.replace(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/g, (_, url: string) => `url(${embedded.get(url)!})`);
 }
 
+/**
+ * Browser Rendering has none of the fonts a member's system stack resolves to (San Francisco, Segoe UI, Roboto), so
+ * its text ran wider than the live frame and wrapped differently. Inter stands in for them, under a family name
+ * @font-face may claim; `aliasSystemFonts` in render.ts points the names it may not claim at this one.
+ */
+const SYSTEM_FONT_SHEET = "https://fonts.googleapis.com/css2?family=Inter:wght@100..900";
+let systemFaces: Promise<string> | undefined;
+// Kept apart from `sheets`, so files that import four families never evict it. A failed fetch is retried next time.
+const systemFontFaces = () => systemFaces ??= fontSheet(SYSTEM_FONT_SHEET)
+  .then((css) => css.replace(/font-family:[^;]+;/g, "font-family: ui-sans-serif;"))
+  .catch(() => { systemFaces = undefined; return ""; });
+
 /** Design plus embedded @font-face rules, kept out of the Tailwind source so megabytes of font data never reach the compiler. */
 export type RenderDesign = DesignSystem & { fonts?: string };
 
 /** Fetch shared public web fonts before launching the paid browser, once per cached stylesheet. */
 export async function prepareRenderDesign(design: DesignSystem): Promise<RenderDesign> {
   let tokens = design.tokens;
+  const system = systemFontFaces();
   const imports = [...tokens.matchAll(/@import\s+(?:url\()?\s*["']?(https:\/\/fonts\.googleapis\.com\/[^"')\s]+)["']?\s*\)?\s*;/g)];
   // A file may import many families. Prepare at most four in parallel; the rest retain links.
   const prepared = await Promise.all(imports.slice(0, MAX_SHEETS).map(async ([declaration, href]) => {
@@ -50,7 +63,7 @@ export async function prepareRenderDesign(design: DesignSystem): Promise<RenderD
     try { return { declaration, css: await sheet }; }
     catch { return null; } // Keep the original link on transient upstream failures.
   }));
-  let fonts = "";
+  let fonts = await system;
   for (const result of prepared) if (result) { tokens = tokens.replace(result.declaration, ""); fonts += result.css; }
   return fonts ? { ...design, tokens, fonts } : design;
 }

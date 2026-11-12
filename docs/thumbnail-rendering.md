@@ -36,7 +36,14 @@ scripts often build their view from a timer or an animation frame, and a preview
 captured at load showed a chart's empty frame at the wrong height.
 Shared Google Fonts styles and font bytes are fetched before browser launch,
 with bounded caching and an original-link fallback. Other font providers retain
-normal browser loading. One WebP capture produces the sharp tier; a detached
+normal browser loading. Browser Rendering has no San Francisco, Segoe UI or
+Roboto, so a system font stack fell to a wider font and text wrapped differently
+from the live frame. Previews and screenshots embed Inter as a stand-in under the
+family `ui-sans-serif`, which `@font-face` may claim. Chrome never looks up the
+generic `system-ui` in `@font-face` rules, so compiled Tailwind CSS names
+`ui-sans-serif` before `system-ui`, `-apple-system` and `BlinkMacSystemFont`.
+Authored CSS outside Tailwind (a plain `<style>` or a `style` attribute) that
+names those three directly still gets the browser's own font. One WebP capture produces the sharp tier; a detached
 canvas derives the overview tier. Frames no wider than 256px share one object.
 
 ## Admission and limits
