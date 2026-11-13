@@ -90,6 +90,24 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     if (canInteract(room.nodes.get(id)) && room.status === "open") onInteract?.(id);
   }, [room, onInteract]);
   const playback = useMemo(() => ({ reset: playbackReset, stop: stopInteraction }), [playbackReset, stopInteraction]);
+  // A member clicks or taps a design that is already selected to interact with it. The start waits out the
+  // double-click window, and the next press cancels it, so a double-click on the selection still fits it.
+  const startSoon = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const startRef = useRef(startInteraction);
+  startRef.current = startInteraction;
+  /** Returns whether a start was pending, which makes this press the second of a double-click. */
+  const cancelStart = () => {
+    const pending = startSoon.current !== undefined;
+    clearTimeout(startSoon.current);
+    startSoon.current = undefined;
+    return pending;
+  };
+  const interactSoon = (id: string) => {
+    cancelStart();
+    if (!onInteract || !canInteract(room.nodes.get(id))) return;
+    startSoon.current = setTimeout(() => { startSoon.current = undefined; startRef.current(id); }, CLICK_TO_INTERACT_DELAY_MS);
+  };
+  useEffect(() => () => { cancelStart(); }, []);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const saved = useMemo(() => {
     try {
@@ -418,7 +436,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   // Members only view the canvas: dragging a design pans, it never moves it. Agents rearrange designs.
 
   const gesture = useRef<
-    | { kind: "pan"; sx: number; sy: number; moved: boolean; hit?: boolean }
+    | { kind: "pan"; sx: number; sy: number; moved: boolean; hit?: boolean; again?: string }
     | { kind: "marquee"; wx: number; wy: number; base: string[]; selection: string[] | null }
     | null
   >(null);
@@ -453,6 +471,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       if (navigationOnly) return;
       if (commentMode) return placeComment(action.x, action.y);
       const hit = hitTest(action.x, action.y);
+      if (hit && selection.length === 1 && selection[0] === hit) interactSoon(hit);
       onSelect(hit ? [hit] : []);
     } else if (action.type !== "none") {
       setCam((c) => applyTouch(c, action, navigationRef.current.minZoom, MAX_CANVAS_ZOOM));
@@ -460,6 +479,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
+    const doublePress = cancelStart();
     if (e.pointerType === "touch") {
       stopTween();
       rootRef.current!.setPointerCapture(e.pointerId);
@@ -479,7 +499,8 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     if (hit && e.button === 0 && !spaceDown) {
       onSelect(e.shiftKey ? (selection.includes(hit) ? selection.filter((s) => s !== hit) : [...selection, hit]) : selection.includes(hit) ? selection : [hit]);
     }
-    gesture.current = { kind: "pan", sx, sy, moved: false, hit: !!hit };
+    const again = hit && e.button === 0 && !spaceDown && !e.shiftKey && !doublePress && selection.length === 1 && selection[0] === hit ? hit : undefined;
+    gesture.current = { kind: "pan", sx, sy, moved: false, hit: !!hit, again };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -512,6 +533,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     setMarquee(null);
     // A click on empty canvas clears the selection; a click on a design selected it on pointer down.
     if (g?.kind === "pan" && !g.moved && !g.hit && !navigationOnly) onSelect([]);
+    if (g?.kind === "pan" && !g.moved && g.again && !navigationOnly) interactSoon(g.again);
     if (g?.kind === "marquee") {
       // The URL update renders together with the cleared marquee, so the old selection never shows in between.
       const next = marqueeCommit(selection, g.selection);
@@ -520,6 +542,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
+    cancelStart();
     if (commentMode) return;
     const b = rootRef.current!.getBoundingClientRect();
     const id = hitTest(e.clientX - b.left, e.clientY - b.top);
@@ -742,6 +765,9 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
     </div>
   );
 });
+
+/** Long enough for the second press of a double-click (which fits the design) to cancel a click-to-interact. */
+const CLICK_TO_INTERACT_DELAY_MS = 300;
 
 /** Below this on-screen width a design is too small to use, and the button would cover it. */
 const PLAY_BUTTON_MIN_WIDTH = 160;

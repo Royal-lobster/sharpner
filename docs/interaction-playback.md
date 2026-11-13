@@ -1,8 +1,10 @@
 # Interaction playback
 
-Any frame or component can be played in place. Members select it and choose
-**Interact** in the selection toolbar; shared-link viewers, who cannot select,
-use the **Interact** button on the design. Nothing is saved: there is no flag,
+Any frame or component can be played in place. Members select it, then click or
+tap it again, press Enter, or choose **Interact** in the selection toolbar.
+The second click waits out the double-click window, so a double-click on the
+selection still fits it. Shared-link viewers, who cannot select, use the
+**Interact** button on the design. Nothing is saved: there is no flag,
 no schema change and no room operation. Interaction studies are ordinary frames
 and components beside the designs they belong to.
 
