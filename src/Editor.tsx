@@ -144,6 +144,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
   const [dialog, setDialog] = useState<"help" | null>(null);
   const [interactionId, setInteractionId] = useState<string | null>(null);
+  const playableRef = useRef<string | null>(null);
   const [hideComponents, setHideComponents] = useHiddenComponents();
   const fileTrigger = useRef<HTMLButtonElement>(null);
   const commentsTrigger = useRef<HTMLButtonElement>(null);
@@ -184,13 +185,18 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     const key = (event: KeyboardEvent) => {
       if ((event.target as HTMLElement).closest?.("input,textarea,[contenteditable=true],[role=dialog],[role=menu]")) return;
       if (event.key === "Escape") { setCommentMode(false); setCommentsOpen(false); }
-      else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
+      else if (event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && !event.repeat) {
+        // Enter on a focused control activates that control instead.
+        const playable = playableRef.current;
+        if (!playable || commentMode || room.status !== "open" || (event.target as HTMLElement).closest?.("button,a,select,[role=button]")) return;
+        event.preventDefault(); setInteractionId(playable);
+      } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c") {
         event.preventDefault(); startComment();
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [readOnly, draftComment, interactionId]);
+  }, [readOnly, draftComment, interactionId, commentMode, room.status]);
 
   useEffect(() => {
     if (!page) return;
@@ -221,6 +227,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   for (const n of room.nodes.values()) if (n.kind !== "section") counts.set(n.pageId, (counts.get(n.pageId) ?? 0) + 1);
   const selected = (marqueeSelection ?? liveSelection).flatMap((id) => hidden(id) ? [] : room.nodes.get(id) ?? []);
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
+  playableRef.current = playable?.id ?? null;
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
   return (
     <div className="editor" ref={trackKeyboardInset}>
@@ -240,7 +247,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             {playable && <Separator orientation="vertical" className="selection-divider" />}
             {playable && <Tooltip><TooltipTrigger asChild>
               <Button variant="ghost" size="sm" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}><IconPlayerPlay aria-hidden />Interact</Button>
-            </TooltipTrigger><TooltipContent side="bottom">Try clicks, typing and scrolling. Nothing you do is saved.</TooltipContent></Tooltip>}
+            </TooltipTrigger><TooltipContent side="bottom">Try clicks, typing and scrolling. Nothing you do is saved. <Kbd>Enter</Kbd>, or click the design again.</TooltipContent></Tooltip>}
           </div>
         )}
         {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
@@ -361,7 +368,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Zoom</dt><dd>Pinch with two fingers</dd>
               {!readOnly && <><dt>Select</dt><dd>Tap a design to show it to agents</dd></>}
               <dt>Fit</dt><dd>Fit button, or double-tap a design</dd>
-              <dt>Interact</dt><dd>Try a design’s clicks and typing; Stop returns to the canvas</dd>
+              <dt>Interact</dt><dd>{readOnly ? "Try a design’s clicks and typing" : "Tap a selected design"}; Stop returns to the canvas</dd>
             </dl>
             {!readOnly && <p>The canvas is view only. Ask an agent to add, move or remove designs.</p>}
           </div>
@@ -370,7 +377,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Pan</dt><dd>Drag, scroll, or hold Space</dd>
               <dt>Zoom</dt><dd>Pinch, <Kbd>⌘</Kbd> scroll, <Kbd>⌘+</Kbd> / <Kbd>⌘−</Kbd></dd>
               <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
-              <dt>Interact</dt><dd>Try a design’s clicks and typing; <Kbd>Esc</Kbd> stops, Reset starts again</dd>
+              <dt>Interact</dt><dd>{readOnly ? "Try a design’s clicks and typing" : <><Kbd>Enter</Kbd>, or click a selected design</>}; <Kbd>Esc</Kbd> stops, Reset starts again</dd>
               {!readOnly && <>
                 <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag, to show designs to agents</dd>
                 <dt>Comment</dt><dd><Kbd>C</Kbd>, then click a spot</dd>
