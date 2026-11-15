@@ -130,9 +130,12 @@ api.patch("/files/:id", async (c) => {
   return c.body(null, 204);
 });
 
+/** Deletes a file and its canvas. Only workspace owners (Clerk org admins) may delete. */
 api.delete("/files/:id", async (c) => {
   const file = await fileFor(c.env, c.get("user").id, c.req.param("id"));
   if (!file) return c.json({ error: "not found" }, 404);
+  const workspace = await workspaceFor(c.env, c.get("user").id, file.workspace_id);
+  if (workspace?.role !== "owner") return c.json({ error: "Only workspace owners can delete files" }, 403);
   const dependents = await c.env.DB.prepare(`SELECT id FROM files WHERE library_id = ?`).bind(file.id).all<{ id: string }>();
   await room(c.env, file.id).destroy(file.id);
   await c.env.DB.prepare(`DELETE FROM files WHERE id = ?`).bind(file.id).run();
