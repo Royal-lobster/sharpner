@@ -93,6 +93,8 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
     catch (e) { setError((e as Error).message); }
   };
 
+  // Only workspace owners (Clerk org admins) may delete; the API enforces it too.
+  const canDelete = (detail?.workspace ?? current)?.role === "owner";
   const deleteFile = async (file: FileSummary) => {
     const ok = await askConfirm({
       title: `Delete “${file.name}”?`, confirm: "Delete file", danger: true,
@@ -184,7 +186,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
                         <CardTitle><Link href={`/f/${file.id}`} className="block truncate" tabIndex={-1} title={file.name}>{file.name}</Link></CardTitle>
                         <CardDescription className="truncate" title={fileMeta(file, names)}>{fileMeta(file, names)}</CardDescription>
                       </div>
-                      <FileMenu file={file} onRename={() => void renameFile(file)} onDelete={() => void deleteFile(file)} />
+                      <FileMenu file={file} onRename={() => void renameFile(file)} onDelete={canDelete ? () => void deleteFile(file) : undefined} />
                     </CardFooter>
                   </Card>
                 ))}
@@ -207,7 +209,7 @@ function fileMeta(file: FileSummary, names: Map<string, string>) {
 }
 
 /** The file's rare actions live behind one quiet button instead of on the card. */
-function FileMenu({ file, onRename, onDelete }: { file: FileSummary; onRename: () => void; onDelete: () => void }) {
+function FileMenu({ file, onRename, onDelete }: { file: FileSummary; onRename: () => void; onDelete?: () => void }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const openAction = (action: () => void) => requestAnimationFrame(() => {
     // The menu item unmounts; make the persistent trigger the modal's focus-return target.
@@ -221,7 +223,7 @@ function FileMenu({ file, onRename, onDelete }: { file: FileSummary; onRename: (
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-40">
         <DropdownMenuItem onSelect={() => openAction(onRename)}><IconPencil aria-hidden />Rename</DropdownMenuItem>
-        <DropdownMenuItem variant="destructive" onSelect={() => openAction(onDelete)}><IconTrash aria-hidden />Delete…</DropdownMenuItem>
+        {onDelete && <DropdownMenuItem variant="destructive" onSelect={() => openAction(onDelete)}><IconTrash aria-hidden />Delete…</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
   );
