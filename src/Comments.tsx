@@ -29,7 +29,8 @@ export function CommentsPanel({ room, userId, open, activeId, draft, onSelect, o
   const active = activeId ? room.comments.get(activeId) : undefined;
   const openCount = threads.filter((t) => t.resolvedAt === null).length;
   const online = room.status === "open";
-  const draftKey = draft ? `new:${draft.pageId}:${draft.nodeId}:${draft.x}:${draft.y}` : "new";
+  // One new comment is drafted at a time. Placing it again moves it, so its text stays with it.
+  const draftKey = "new";
   const composer = (key: string) => ({ body: drafts[key] ?? "", members, onBodyChange: (body: string) => setDrafts((previous) => {
     const next = { ...previous };
     if (body) next[key] = body; else delete next[key];

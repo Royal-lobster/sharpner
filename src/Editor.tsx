@@ -179,10 +179,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     return () => document.removeEventListener("visibilitychange", hide);
   }, []);
   const closeComments = () => { setCommentsOpen(false); commentsTrigger.current?.focus({ preventScroll: true }); };
+  // The tool, C and the panel's Add a comment always ask for a spot. An unposted draft is not reopened in its old
+  // spot: that sent the canvas back to a design the member had left, and their next click there selected instead.
+  // The click moves the draft and keeps its text (see draftKey in Comments.tsx).
   const startComment = () => {
     setActiveCommentId(null); setOpen(null);
-    if (draftComment) { setCommentMode(false); setCommentsOpen(true); }
-    else { setCommentMode(true); setCommentsOpen(false); }
+    setCommentMode(true); setCommentsOpen(false);
   };
   const selectComment = (thread: CommentThread | null) => {
     setActiveCommentId(thread?.id ?? null); setCommentMode(false); setCommentsOpen(true);

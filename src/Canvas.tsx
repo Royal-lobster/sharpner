@@ -673,7 +673,10 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
       <Button variant="ghost" size="lg" className="selection-action" aria-label="Reset interaction" onClick={() => setPlaybackReset((value) => value + 1)}><IconRotateClockwise aria-hidden />Reset</Button>
       <Button variant="secondary" size="lg" className="selection-action" aria-label="Stop interaction" onClick={() => stopInteraction()}><IconPlayerStop aria-hidden />Stop<kbd className="selection-kbd" aria-hidden>Esc</kbd></Button>
     </div>}
-    <div className={`zoom notch ${narrow ? "notch-br" : "notch-b"}`} role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+    <div className={`zoom notch ${narrow ? "notch-br" : "notch-b"}`} role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()}
+      // Space and Enter press the focused tool; they must not pan the canvas or start Interact. Shortcuts such as C
+      // (comment) and Escape still work after a click on Fit or a tool.
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") e.stopPropagation(); }}>
       {onCommentMode && !narrow && <span className="zoom-well well">
         <Button variant="ghost" size="icon-lg" className="zoom-tool" aria-pressed={!commentMode} onClick={() => onCommentMode(false)} title="Select (Esc)" aria-label="Select">
           <IconPointer aria-hidden />
