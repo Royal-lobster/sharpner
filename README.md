@@ -28,7 +28,7 @@ Agents write the designs and inspect their rendered screenshots.
 
 - **An infinite canvas.** Pan, pinch, zoom to fit, and organize work across pages.
   Preview navigation stays around the designs, with the fitted overview as its
-  zoom-out limit. Controls stay out of the way in a compact floating dock.
+  zoom-out limit. Controls sit in notches carved into the canvas edge.
 - **Sections that breathe.** Screens flow into rows, catalogs and other groups
   tile into balanced columns, and content height changes reflow the layout. Agents
   arrange pages by order and grouping, so nothing overlaps.

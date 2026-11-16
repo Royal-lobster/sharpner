@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardDescription, CardFooter, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -108,29 +107,28 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
   };
 
   return (
-    <div className="home">
+    <div className="home shell">
       <header className="home-header">
-        <div className="home-header-inner">
-          <Button variant="ghost" size="icon" asChild className="brand"><Link href="/" aria-label="Sharpner home"><img src="/mark.svg" width={26} height={26} alt="" /></Link></Button>
-          <span className="home-header-divider" aria-hidden>/</span>
-          <OrganizationSwitcher hidePersonal organizationProfileMode="modal" createOrganizationMode="modal"
-            afterCreateOrganizationUrl="/" afterSelectOrganizationUrl="/"
-            appearance={{ elements: { rootBox: "workspace-switcher", organizationSwitcherTrigger: "workspace-trigger", organizationPreviewMainIdentifier: "workspace-name", organizationPreviewAvatarBox: "workspace-avatar" } }} />
-          <div className="home-header-actions">
-            <Button variant="ghost" onClick={(e) => void openAgent(e.currentTarget)} aria-disabled={agentLoading} aria-busy={agentLoading} aria-label="Connect an agent" title="Connect an agent">
-              {agentLoading ? <Spinner aria-hidden /> : <IconTerminal2 aria-hidden />}<span className="hidden sm:inline">Connect agent</span>
-            </Button>
-            <UserButton />
-          </div>
+        <Link href="/" className="home-mark mark-tile" aria-label="Sharpner home"><img className="mark" src="/mark.svg" width={18} height={18} alt="" /></Link>
+        <span className="home-header-divider" aria-hidden>/</span>
+        <OrganizationSwitcher hidePersonal organizationProfileMode="modal" createOrganizationMode="modal"
+          afterCreateOrganizationUrl="/" afterSelectOrganizationUrl="/"
+          appearance={{ elements: { rootBox: "workspace-switcher", organizationSwitcherTrigger: "workspace-trigger", organizationSwitcherTriggerIcon: "workspace-trigger-icon", organizationPreviewMainIdentifier: "workspace-name", organizationPreviewAvatarBox: "workspace-avatar key" } }} />
+        <div className="home-header-actions">
+          <Button variant="secondary" className="connect-agent" onClick={(e) => void openAgent(e.currentTarget)} aria-disabled={agentLoading} aria-busy={agentLoading} aria-label="Connect an agent" title="Connect an agent">
+            {agentLoading ? <Spinner aria-hidden /> : <IconTerminal2 aria-hidden />}<span className="connect-agent-label">Connect agent</span>
+          </Button>
+          <UserButton />
         </div>
       </header>
-      <main className="home-main">
+      <main className="home-sheet sheet rim">
+        <div className="home-main">
         {!me.workspaces.length ? (
           <section className="workspace-onboarding rise">
             <Empty className="flex-none p-0">
               <EmptyHeader>
                 <EmptyMedia variant="icon"><IconFolder aria-hidden /></EmptyMedia>
-                <EmptyTitle role="heading" aria-level={1}>Create a workspace</EmptyTitle>
+                <EmptyTitle role="heading" aria-level={1} className="workspace-onboarding-title">Create a workspace</EmptyTitle>
                 <EmptyDescription>Keep your files, shared libraries, and members together.</EmptyDescription>
               </EmptyHeader>
             </Empty>
@@ -143,58 +141,66 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
             <div className="home-head">
               <div className="home-title">
                 <h1>Files</h1>
-                {detail && <Badge variant="secondary" aria-label={`${files.length} files`}>{files.length}</Badge>}
+                {detail && <span className="home-count" aria-label={`${files.length} files`}>{files.length}</span>}
               </div>
-              <TabsList className="[grid-area:tabs]" aria-label="File views">
+              <TabsList className="home-tabs" aria-label="File views">
                 <TabsTrigger value="all">All files <Badge variant="secondary">{files.length}</Badge></TabsTrigger>
                 <TabsTrigger value="libraries">Libraries <Badge variant="secondary">{libraries.length}</Badge></TabsTrigger>
               </TabsList>
-              <InputGroup className="[grid-area:search]">
+              <InputGroup className="home-search">
                 <InputGroupAddon><IconSearch aria-hidden /></InputGroupAddon>
                 <InputGroupInput aria-label="Search files" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files" type="search" enterKeyHint="search" />
               </InputGroup>
-              <Button className="new-file" onClick={newFile} disabled={creating} aria-label="New file">
+              <Button size="lg" className="new-file" onClick={newFile} disabled={creating} aria-label="New file">
                 {creating ? <Spinner aria-hidden /> : <IconPlus aria-hidden />}
                 <span className="new-file-long">{creating ? "Creating…" : "New file"}</span><span className="new-file-short" aria-hidden>{creating ? "…" : "New"}</span>
               </Button>
             </div>
             <TabsContent value={view}>
-            {error && <Alert variant="destructive" className="mb-4"><IconAlertCircle aria-hidden /><AlertDescription className="flex flex-wrap items-center gap-3"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="secondary" onClick={() => { setError(null); void load().catch((e: Error) => setError(e.message)); }}>Try again</Button></AlertDescription></Alert>}
-            {!detail && !error ? <div className="file-grid" role="status" aria-label="Loading files">{Array.from({ length: 4 }, (_, i) => <Skeleton key={i} className="aspect-video" />)}</div> : detail && !visible.length ? (
-              <Empty className="rise py-20">
+            {error && <Alert variant="destructive" className="mb-6"><IconAlertCircle aria-hidden /><AlertDescription className="flex flex-wrap items-center gap-3"><span className="min-w-0 flex-1 break-words">{error}</span><Button variant="secondary" onClick={() => { setError(null); void load().catch((e: Error) => setError(e.message)); }}>Try again</Button></AlertDescription></Alert>}
+            {!detail && !error ? <div className="file-grid" role="status" aria-label="Loading files">{Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className="file-card">
+                <Skeleton className="file-cover" />
+                <Skeleton className="mt-4 h-3.5 w-28 rounded-full" />
+                <Skeleton className="mt-2.5 h-3 w-48 max-w-full rounded-full" />
+              </div>
+            ))}</div> : detail && !visible.length ? (
+              <Empty className="home-empty well rise">
                 <EmptyHeader>
                   <EmptyMedia variant="icon">{query ? <IconSearch aria-hidden /> : view === "libraries" ? <IconLibrary aria-hidden /> : <IconFile aria-hidden />}</EmptyMedia>
                   <EmptyTitle role="heading" aria-level={2}>{query ? "No files match" : view === "libraries" ? "No shared libraries yet" : "Start with a file"}</EmptyTitle>
                   <EmptyDescription>{query ? `Nothing in ${current.name} is called “${query.trim()}”.` : view === "libraries" ? "When a file uses another file’s design system, that file shows up here." : "Create one, then ask your agent to design in it. Everyone in the workspace sees changes live."}</EmptyDescription>
                 </EmptyHeader>
                 {(query || view === "all") && <EmptyContent>
-                  {query ? <Button variant="secondary" onClick={() => setQuery("")}>Clear search</Button> : <div className="flex flex-wrap justify-center gap-2">
-                    <Button onClick={newFile}><IconPlus aria-hidden />New file</Button>
-                    <Button variant="secondary" onClick={(e) => void openAgent(e.currentTarget)} aria-disabled={agentLoading} aria-busy={agentLoading}>{agentLoading ? <Spinner aria-hidden /> : <IconTerminal2 aria-hidden />}Connect an agent</Button>
+                  {query ? <Button variant="secondary" size="lg" onClick={() => setQuery("")}>Clear search</Button> : <div className="flex flex-wrap justify-center gap-3">
+                    <Button size="lg" onClick={newFile}><IconPlus aria-hidden />New file</Button>
+                    <Button variant="secondary" size="lg" onClick={(e) => void openAgent(e.currentTarget)} aria-disabled={agentLoading} aria-busy={agentLoading}>{agentLoading ? <Spinner aria-hidden /> : <IconTerminal2 aria-hidden />}Connect an agent</Button>
                   </div>}
                 </EmptyContent>}
               </Empty>
             ) : (
               <div className="file-grid">
                 {visible.map((file, i) => (
-                  <Card key={file.id} size="sm" className="rise min-w-0 gap-0 pt-0" style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
-                    <Link href={`/f/${file.id}`} className="block outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`Open ${file.name}`}>
-                      <div className="grid aspect-video place-items-center overflow-hidden bg-muted/30">{file.cover ? <img src={file.cover} alt="" loading="lazy" className="h-full w-full object-contain" /> : <Empty className="gap-1 p-2"><EmptyMedia className="mb-0 text-muted-foreground"><IconLayout2 className="size-4" aria-hidden /></EmptyMedia><EmptyDescription>Empty canvas</EmptyDescription></Empty>}</div>
+                  <article key={file.id} className="file-card rise" style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
+                    <Link href={`/f/${file.id}`} className="file-cover well" aria-label={`Open ${file.name}`}>
+                      {file.cover ? <img src={file.cover} alt="" loading="lazy" /> : <span className="file-cover-empty"><span className="key"><IconLayout2 aria-hidden /></span>Empty canvas</span>}
+                      {file.used_by > 0 && <span className="file-cover-chip key" aria-hidden>Library</span>}
                     </Link>
-                    <CardFooter className="items-start gap-1 pt-3">
+                    <div className="file-card-foot">
                       <div className="min-w-0 flex-1">
-                        <CardTitle><Link href={`/f/${file.id}`} className="block truncate" tabIndex={-1} title={file.name}>{file.name}</Link></CardTitle>
-                        <CardDescription className="truncate" title={fileMeta(file, names)}>{fileMeta(file, names)}</CardDescription>
+                        <h3><Link href={`/f/${file.id}`} tabIndex={-1} title={file.name}>{file.name}</Link></h3>
+                        <p title={fileMeta(file, names)}>{fileMeta(file, names)}</p>
                       </div>
                       <FileMenu file={file} onRename={() => void renameFile(file)} onDelete={canDelete ? () => void deleteFile(file) : undefined} />
-                    </CardFooter>
-                  </Card>
+                    </div>
+                  </article>
                 ))}
               </div>
             )}
             </TabsContent>
           </Tabs>
         )}
+        </div>
       </main>
       {AgentSettings && <AgentSettings config={agentConfig} open={agentOpen} onOpenChange={setAgentOpen} />}
     </div>
@@ -219,9 +225,9 @@ function FileMenu({ file, onRename, onDelete }: { file: FileSummary; onRename: (
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button ref={trigger} variant="ghost" size="icon" className="-mt-1 -mr-1" aria-label={`More actions for ${file.name}`}><IconDots aria-hidden /></Button>
+        <Button ref={trigger} variant="ghost" size="icon" className="file-menu-trigger" aria-label={`More actions for ${file.name}`}><IconDots aria-hidden /></Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
+      <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuItem onSelect={() => openAction(onRename)}><IconPencil aria-hidden />Rename</DropdownMenuItem>
         {onDelete && <DropdownMenuItem variant="destructive" onSelect={() => openAction(onDelete)}><IconTrash aria-hidden />Delete…</DropdownMenuItem>}
       </DropdownMenuContent>

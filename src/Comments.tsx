@@ -33,13 +33,14 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
     return next;
   }) });
 
-  // Only the mobile sheet reserves canvas space, and only as much as it actually uses.
+  // On wide screens the panel is a column beside the canvas, which narrows to make room. The phone sheet floats
+  // over the canvas instead, which reserves only as much space as the sheet actually uses (see .comments-open .canvas).
   useEffect(() => {
-    const element = panel.current, stage = element?.parentElement;
-    if (!element || !stage) return;
-    const observer = new ResizeObserver(() => stage.style.setProperty("--comments-panel-height", `${element.getBoundingClientRect().height}px`));
+    const element = panel.current, editor = element?.parentElement;
+    if (!element || !editor) return;
+    const observer = new ResizeObserver(() => editor.style.setProperty("--comments-panel-height", `${element.getBoundingClientRect().height}px`));
     observer.observe(element);
-    return () => { observer.disconnect(); stage.style.removeProperty("--comments-panel-height"); };
+    return () => { observer.disconnect(); editor.style.removeProperty("--comments-panel-height"); };
   }, []);
 
   useEffect(() => {
@@ -82,15 +83,16 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
   };
   const currentDetail = detail?.id === active?.id ? detail : null;
 
-  return <aside ref={panel} id="comments-panel" hidden={!open} className="comments-panel canvas-glass" aria-label="Comments" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onClose(); } }} onPointerDown={(e) => e.stopPropagation()}>
+  return <aside ref={panel} id="comments-panel" hidden={!open} className="comments-panel panel" aria-label="Comments" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { e.preventDefault(); onClose(); } }} onPointerDown={(e) => e.stopPropagation()}>
     <p className="sr-only" role="status">{announcement}</p>
     <header className="comments-heading">
-      <h2>Comments <span className="comment-count">{openCount}</span></h2>
-      <div className="flex gap-1">
+      <h2>Comments <span className="comment-count" aria-label={`${openCount} open`}>{openCount}</span></h2>
+      <div className="flex gap-1 text-muted-foreground">
         <Button variant="ghost" size="icon-sm" aria-label="Add a comment" title="Add a comment (C)" onClick={onNew} disabled={!online}><IconPlus aria-hidden /></Button>
         <Button variant="ghost" size="icon-sm" aria-label="Close comments" onClick={onClose}><IconX aria-hidden /></Button>
       </div>
     </header>
+    <div className="comments-rule" aria-hidden />
     {draft && !active ? <div className="comment-draft">
       <p className="comment-location">{label(draft)}</p>
       <CommentComposer key={draftKey} {...composer(draftKey)} label="Your comment" placeholder="What could be better here?" submit="Post comment" disabled={!online}
@@ -99,8 +101,8 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
       <p className="comment-hint">Your agent can read this feedback when you ask it to address comments.</p>
     </div> : active ? <>
       <div className="comment-thread-toolbar">
-        <Button variant="ghost" size="sm" onClick={() => onSelect(null)}><IconArrowLeft aria-hidden />All comments</Button>
-        <Button variant="secondary" size="sm" disabled={busy || !online} onClick={() => void resolve(active)}>
+        <Button variant="ghost" size="lg" onClick={() => onSelect(null)}><IconArrowLeft aria-hidden />All comments</Button>
+        <Button variant="secondary" size="lg" disabled={busy || !online} onClick={() => void resolve(active)}>
           {active.resolvedAt ? <IconRefresh aria-hidden /> : <IconCheck aria-hidden />}{active.resolvedAt ? "Reopen" : "Resolve"}
         </Button>
       </div>
@@ -109,11 +111,11 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
         {error ? <div className="comment-load-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((v) => v + 1)}>Try again</Button></div>
           : !currentDetail ? <p className="comment-hint" role="status">Loading conversation…</p>
           : currentDetail.messages.map((message) => <article className="comment-message" key={message.id}>
-            <div className="comment-author">
-              <Avatar name={message.author.name} id={message.author.id} src={message.author.avatar} agent={message.author.agent} />
-              <div><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()} title={new Date(message.createdAt).toLocaleString()}>{timeAgo(message.createdAt)}</time></div>
+            <Avatar name={message.author.name} id={message.author.id} src={message.author.avatar} agent={message.author.agent} />
+            <div className="comment-message-body">
+              <div className="comment-author"><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()} title={new Date(message.createdAt).toLocaleString()}>{timeAgo(message.createdAt)}</time></div>
+              <p>{message.body}</p>
             </div>
-            <p>{message.body}</p>
           </article>)}
         {active.resolvedAt !== null && <p className="comment-resolved"><IconCheck aria-hidden />Resolved by {active.resolvedBy?.name ?? "a member"}</p>}
       </div>
@@ -125,17 +127,19 @@ export function CommentsPanel({ room, open, activeId, draft, onSelect, onNew, on
           }} />
       </div>
     </> : <>
-      <div className="comment-filters" aria-label="Filter comments">
+      <div className="comment-filters well" aria-label="Filter comments">
         <Button variant={filter === "open" ? "secondary" : "ghost"} size="sm" aria-pressed={filter === "open"} onClick={() => setFilter("open")}>Open <span>{openCount}</span></Button>
         <Button variant={filter === "resolved" ? "secondary" : "ghost"} size="sm" aria-pressed={filter === "resolved"} onClick={() => setFilter("resolved")}>Resolved <span>{threads.length - openCount}</span></Button>
       </div>
       <div className="comment-list">
         {threads.filter((t) => (t.resolvedAt === null) === (filter === "open")).sort((a, b) => b.updatedAt - a.updatedAt || b.number - a.number).map((thread) => <div className="comment-card" key={thread.id}>
           <button className="comment-card-open" onClick={() => onSelect(thread)}>
-            <span className="comment-card-top"><strong>{thread.firstMessage.author.name}</strong><span>#{thread.number}</span></span>
-            <span className="comment-card-body">{thread.firstMessage.body}</span>
-            <span className="comment-card-meta">{label(thread.anchor)}</span>
-            <span className="comment-card-meta">{timeAgo(thread.updatedAt)}{thread.messageCount > 1 && ` · ${thread.messageCount - 1} ${thread.messageCount === 2 ? "reply" : "replies"}`}</span>
+            <Avatar id={thread.firstMessage.author.id} name={thread.firstMessage.author.name} src={thread.firstMessage.author.avatar} agent={thread.firstMessage.author.agent} />
+            <span className="comment-card-text">
+              <span className="comment-card-top"><strong>{thread.firstMessage.author.name}</strong><span>#{thread.number}</span></span>
+              <span className="comment-card-body">{thread.firstMessage.body}</span>
+              <span className="comment-card-meta">{label(thread.anchor)} · {timeAgo(thread.updatedAt)}{thread.messageCount > 1 && ` · ${thread.messageCount - 1} ${thread.messageCount === 2 ? "reply" : "replies"}`}</span>
+            </span>
           </button>
           <Button variant="ghost" size="icon-sm" className="comment-card-resolve" disabled={busy || !online}
             aria-label={`${thread.resolvedAt ? "Reopen" : "Resolve"} comment ${thread.number}`} title={thread.resolvedAt ? "Reopen comment" : "Resolve comment"}

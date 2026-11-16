@@ -11,11 +11,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item";
 import { Spinner } from "@/components/ui/spinner";
+
+/** A disclosure row: full width, label left, a chevron that turns over while open. */
+const disclosure = "h-8 w-full justify-between px-2 text-[13px] data-[state=open]:bg-accent [&>svg]:text-muted-foreground [&>svg]:transition-transform data-[state=open]:[&>svg]:rotate-180";
 
 export function AgentSettings({ config, open, onOpenChange }: { config: AgentConnectionConfig; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [keysOpen, setKeysOpen] = useState(false);
@@ -54,22 +56,22 @@ export function AgentSettings({ config, open, onOpenChange }: { config: AgentCon
             <TabsTrigger value="manual">Manual setup</TabsTrigger>
           </TabsList>
           <TabsContent value="agent" className="flex min-w-0 flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium">Let your agent connect</h3>
+            <div className="flex flex-col gap-1">
+              <h3 className="text-[13px] font-medium">Let your agent connect</h3>
               <p className="m-0 text-xs leading-relaxed text-muted-foreground">Paste this prompt into your coding agent. It can set up the connection and guide you through sign-in.</p>
             </div>
-            <CopyButton text={prompt} label="Copy setup prompt" variant="default" size="lg" className="w-full" />
+            <CopyButton text={prompt} label="Copy setup prompt" variant="default" size="lg" className="h-9 w-full text-[13px] font-semibold" />
             <Collapsible open={promptOpen} onOpenChange={setPromptOpen}>
-              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">{promptOpen ? "Hide prompt" : "Show prompt"}<IconChevronDown className={promptOpen ? "rotate-180" : undefined} aria-hidden /></Button></CollapsibleTrigger>
-              <CollapsibleContent className="pt-2"><pre className="m-0 max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{prompt}</pre></CollapsibleContent>
+              <CollapsibleTrigger asChild><Button variant="ghost" className={disclosure}>{promptOpen ? "Hide prompt" : "Show prompt"}<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleContent className="pt-2"><pre className="well m-0 max-h-64 overflow-auto rounded-[12px] px-3 py-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{prompt}</pre></CollapsibleContent>
             </Collapsible>
           </TabsContent>
           <TabsContent value="manual" className="flex min-w-0 flex-col gap-3">
             <CopyBlock label="MCP endpoint" text={url} />
             {publicClient && <CopyBlock label="OAuth client ID" text={publicClient.id} />}
-            <p className="m-0 text-xs leading-relaxed text-muted-foreground">Use Streamable HTTP and sign in with OAuth through your client’s connection settings.{callback && <> If your client asks for an OAuth client, use this client ID with the callback <code className="font-mono">{callback}</code>.</>} The <a href={guideUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4">setup guide</a> covers native connections and a local bridge.</p>
+            <p className="m-0 text-xs leading-relaxed text-muted-foreground">Use Streamable HTTP and sign in with OAuth through your client’s connection settings.{callback && <> If your client asks for an OAuth client, use this client ID with the callback <code className="font-mono">{callback}</code>.</>} The <a href={guideUrl} target="_blank" rel="noreferrer" className="text-foreground underline underline-offset-4">setup guide</a> covers native connections and a local bridge.</p>
             <Collapsible className="border-t pt-2">
-              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">Claude Code commands<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleTrigger asChild><Button variant="ghost" className={disclosure}>Claude Code commands<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
               <CollapsibleContent className="pt-3">
                 <ItemGroup>
                   <Item role="listitem" className="items-start p-0">
@@ -88,13 +90,13 @@ export function AgentSettings({ config, open, onOpenChange }: { config: AgentCon
               </CollapsibleContent>
             </Collapsible>
             <Collapsible className="border-t pt-2">
-              <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">{bridge ? "Local MCP bridge" : "JSON configuration"}<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+              <CollapsibleTrigger asChild><Button variant="ghost" className={disclosure}>{bridge ? "Local MCP bridge" : "JSON configuration"}<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
               <CollapsibleContent className="flex min-w-0 flex-col gap-3 pt-3"><p className="text-xs leading-relaxed text-muted-foreground">{bridge ? "For clients that can run local MCP servers. Requires Node.js and opens browser sign-in. Adapt this JSON to your client’s configuration format." : "Example for clients that read mcpServers JSON. Authentication also needs a compatible OAuth client and callback."}</p><CopyBlock label="mcp.json" text={json} pre /></CollapsibleContent>
             </Collapsible>
           </TabsContent>
         </Tabs>
         {config.agentKeysEnabled && <Collapsible open={keysOpen} onOpenChange={setKeysOpen} className="border-t pt-2">
-          <CollapsibleTrigger asChild><Button variant="ghost" className="w-full justify-between">Use an agent key instead<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
+          <CollapsibleTrigger asChild><Button variant="ghost" className={disclosure}>Use an agent key instead<IconChevronDown aria-hidden /></Button></CollapsibleTrigger>
           <CollapsibleContent className="pt-3">{keysOpen && <AgentKeys />}</CollapsibleContent>
         </Collapsible>}
       </div>
@@ -102,12 +104,13 @@ export function AgentSettings({ config, open, onOpenChange }: { config: AgentCon
   );
 }
 
+/** Copyable text in a recessed well. */
 function CopyBlock({ label, text, pre }: { label: string; text: string; pre?: boolean }) {
   return (
-    <Card size="sm" className="min-w-0 gap-2">
-      <CardHeader className="flex items-center justify-between gap-2"><span className="text-muted-foreground">{label}</span><CopyButton text={text} /></CardHeader>
-      <CardContent>{pre ? <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{text}</pre> : <code className="block select-all whitespace-pre-wrap break-words font-mono text-xs leading-relaxed">{text}</code>}</CardContent>
-    </Card>
+    <div className="well flex min-w-0 flex-col gap-1.5 rounded-[12px] py-2.5 text-xs/relaxed">
+      <div className="flex items-center justify-between gap-2 pr-1.5 pl-3"><span className="text-muted-foreground">{label}</span><CopyButton text={text} /></div>
+      {pre ? <pre className="m-0 max-h-56 overflow-auto px-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{text}</pre> : <code className="block px-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words select-all">{text}</code>}
+    </div>
   );
 }
 
@@ -146,7 +149,7 @@ function AgentKeys() {
       finally { if (alive.current) setBusy(false); }
     }}><Field><FieldLabel htmlFor="agent-key-name">Agent key name</FieldLabel><div className="flex items-center gap-2"><Input id="agent-key-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} required /><Button variant="secondary" disabled={busy}>{busy && <Spinner aria-hidden />}{busy ? "Creating…" : "Create key"}</Button></div></Field></form>
     {fresh && <><Alert><IconKey aria-hidden /><AlertTitle>Save this key now</AlertTitle><AlertDescription>It won’t be shown again.</AlertDescription></Alert><CopyBlock label="Claude Code with key" text={cli} /></>}
-    {loading ? <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status"><Spinner aria-hidden />Loading agent keys…</div> : keys.length > 0 ? <ItemGroup>{keys.map((key) => <Item key={key.id} role="listitem" variant="outline" size="xs"><ItemContent className="min-w-0"><ItemTitle>{key.name}</ItemTitle><ItemDescription>{key.last_used_at ? `Used ${timeAgo(key.last_used_at)}` : "Never used"}</ItemDescription></ItemContent><ItemActions><Button variant="destructive" size="sm" onClick={async () => {
+    {loading ? <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status"><Spinner aria-hidden />Loading agent keys…</div> : keys.length > 0 ? <ItemGroup className="well gap-0 rounded-[12px] p-1 has-data-[size=xs]:gap-0">{keys.map((key) => <Item key={key.id} role="listitem" size="xs" className="rounded-[9px] py-1.5 pr-1 pl-2.5 not-first:rounded-t-none not-first:border-t-border"><ItemContent className="min-w-0"><ItemTitle>{key.name}</ItemTitle><ItemDescription>{key.last_used_at ? `Used ${timeAgo(key.last_used_at)}` : "Never used"}</ItemDescription></ItemContent><ItemActions><Button variant="ghost" size="sm" onClick={async () => {
       if (!await askConfirm({ title: `Revoke “${key.name}”?`, message: "Agents using this key lose access immediately.", confirm: "Revoke key", danger: true })) return;
       try { await api(`/keys/${key.id}`, { method: "DELETE" }); await load(); }
       catch (e) { if (alive.current) setError((e as Error).message); }

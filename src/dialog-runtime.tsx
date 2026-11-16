@@ -145,7 +145,7 @@ function AskDialog({ ask }: { ask: Ask & { id: number } }) {
   return (
     <ResponsiveDialog open={open} onOpenChange={(next) => { if (!next) answer(false); }} title={ask.title} description={ask.message} opener={ask.opener}
       footer={<>
-        <Button type="button" variant="outline" onClick={() => answer(false)} data-autofocus={ask.kind === "confirm" ? "" : undefined}>Cancel</Button>
+        <Button type="button" variant="secondary" onClick={() => answer(false)} data-autofocus={ask.kind === "confirm" ? "" : undefined}>Cancel</Button>
         <Button {...ask.kind === "text" ? { type: "submit", form: formId } : { type: "button", onClick: () => answer(true) }} variant={ask.kind === "confirm" && ask.danger ? "destructive" : "default"} disabled={invalid}>{ask.confirm}</Button>
       </>}>
       {ask.kind === "text" && (

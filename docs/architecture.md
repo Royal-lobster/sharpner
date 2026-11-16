@@ -8,8 +8,8 @@ edits and fan out changes.
 
 | Module | Responsibility |
 | --- | --- |
-| `src/App.tsx` | Clerk sign-in, routing, and workspace bootstrap |
-| `src/Landing.tsx` | Minimal signed-out introduction and hosted sign-in action |
+| `src/App.tsx` | Clerk sign-in pages and theme, routing, and workspace bootstrap |
+| `src/Landing.tsx` | Minimal signed-out introduction and sign-in action |
 | `src/Home.tsx` | Workspace file grid, search, and agent connection |
 | `src/Editor.tsx` | File lifecycle, page organization, sharing, and presence |
 | `src/file-startup.ts` | Bounded direct-file preconnection, identity verification, and ownership transfer |
@@ -182,7 +182,7 @@ for lifecycle, resource policy and isolation limits.
 
 Visible frames, components, and token sheets can sharpen on the canvas before reaching the DOM threshold. Once the initial small-preview pass is complete and the camera stops, nodes at least 64 device pixels wide can load their sharper preview through a separate queue capped at 32 entries, 32 million decoded pixels, and two concurrent image loads. A separate transport uses one stable high-preview batch at a time while retaining the two-image decode limit. Admission estimates match the renderer's maximum width of 1280px without assuming smaller frames are enlarged. This keeps the working set stable instead of replacing batches as actual image sizes arrive. The small preview stays visible until the sharper one is ready. Data Saver and limited connection hints disable this optional work; browsers without those hints use the bounded queue. These upgrades fetch neither live sources nor original image uploads, and cached sharp previews remain visible during navigation.
 
-Initial sync sends geometry, with HTML fetched only for live nodes and the file's design-system definitions. The reusable screen-source cache is limited to 128 entries / 8 MiB of UTF-16 text; the current live working set and required design definitions remain pinned. Matching source revisions survive reconnects. Source requests have backpressure, and responses stream in byte-bounded batches. The HTML starts public sign-in configuration and Clerk script preloads while the application bundle downloads; React shares the parsed configuration and retains its normal retry flow. Shared view links skip this bootstrap, and old hostnames wait to redirect before loading Clerk. The workspace bootstrap returns the verified account and active workspace's file summaries together, avoiding a second authenticated request before showing file cards; later file changes refresh through the workspace detail route. The editor and signed-out landing page load in separate chunks. On direct file and shared links, the initial HTML preloads the emitted editor chunk and its static imports while sign-in initializes; workspace and landing routes skip those downloads. Editor mounting uses an explicit loading state, avoiding a Suspense fallback delay before file metadata and the socket can start even when editor modules are cached. The landing page redirects to Clerk's hosted Account Portal for sign-in and sign-up, preserving the current same-origin file/page/selection URL; it contains no embedded authentication form. Agent setup and imperative dialogs download on their first action; the dialog interface captures the initiating control before loading, safely cancels failed downloads or disconnected controls, and preserves focus restoration. Direct file loads start metadata and the socket concurrently, obtain the verified author with file metadata, and skip the separate account bootstrap request. Current Clerk user and membership reads run concurrently without caching authorization.
+Initial sync sends geometry, with HTML fetched only for live nodes and the file's design-system definitions. The reusable screen-source cache is limited to 128 entries / 8 MiB of UTF-16 text; the current live working set and required design definitions remain pinned. Matching source revisions survive reconnects. Source requests have backpressure, and responses stream in byte-bounded batches. The HTML starts public sign-in configuration and Clerk script preloads while the application bundle downloads; React shares the parsed configuration and retains its normal retry flow. Shared view links skip this bootstrap, and old hostnames wait to redirect before loading Clerk. The workspace bootstrap returns the verified account and active workspace's file summaries together, avoiding a second authenticated request before showing file cards; later file changes refresh through the workspace detail route. The editor and signed-out landing page load in separate chunks. On direct file and shared links, the initial HTML preloads the emitted editor chunk and its static imports while sign-in initializes; workspace and landing routes skip those downloads. Editor mounting uses an explicit loading state, avoiding a Suspense fallback delay before file metadata and the socket can start even when editor modules are cached. The landing page opens the in-app `/sign-in` page, which renders Clerk's prebuilt sign-in (and `/sign-up`) with hash routing and returns to the current same-origin file/page/selection URL through `redirect_url`. Agent OAuth still signs in on Clerk's hosted Account Portal. Agent setup and imperative dialogs download on their first action; the dialog interface captures the initiating control before loading, safely cancels failed downloads or disconnected controls, and preserves focus restoration. Direct file loads start metadata and the socket concurrently, obtain the verified author with file metadata, and skip the separate account bootstrap request. Current Clerk user and membership reads run concurrently without caching authorization.
 
 Hashed build assets under `/assets/` have immutable browser caching, so cached refreshes do not revalidate each JavaScript, CSS, and font file. HTML and authenticated responses retain their separate cache policies. The direct-file preload script runs before the built stylesheet, after the public auth bootstrap, avoiding a stylesheet wait before editor downloads. Ready canvas content appears immediately, without a blur-and-fade entrance.
 
@@ -227,6 +227,12 @@ Known limitations: the initial sync still includes geometry for the whole file, 
 
 Touch navigation uses one finger to pan, two to pinch, and a double-tap to fit a design. Native non-passive touch and Safari gesture handlers keep canvas gestures from becoming page gestures, including when a finger leaves the surface. The editor contains document overscroll; workspace pages and menu scrolling retain their browser behavior. Navbar marks use a tightly framed transparent SVG, separate from the tile used for the favicon and Clerk branding. Responsive layouts retain the same Mira component sizes and padding; mobile changes rearrange controls and constrain widths, rather than enlarging buttons, tabs, inputs, or menus.
 
+The editor is a shell around the canvas sheet. The sheet is the camera's viewport: it is inset from the
+window and narrows when the comments column opens, and every gesture measures its own rect, so a resize only
+re-applies the camera constraints (an open thread re-centres on its pin). Toolbars sit in notches carved into the
+sheet's edge. The pages popover lists every page and, for the current page, its sections with the screens of open
+sections; choosing a screen selects and fits it, as a link to it would.
+
 Preview navigation locks panning at the fitted overview, which is also the minimum
 zoom. Above that zoom, panning is free on both axes so any part of a design can be
 centered and titles can be moved clear of floating controls. Returning to Fit or
@@ -251,7 +257,7 @@ Links without a target retain the remembered-page behavior.
 
 ## Identity and access
 
-The bottom dock displays a compact avatar stack for connected members, grouped
+The collaboration notch displays a compact avatar stack for connected members, grouped
 by member across tabs. Its people list shows their open pages. Disconnecting
 clears stale peers until the socket reconnects; agent edit activity is separate.
 Presence messages supply geometry only and cannot override verified identities.

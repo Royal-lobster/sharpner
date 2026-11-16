@@ -153,8 +153,9 @@ See the [design-system reference](../worker/skills/sharpner/references/design-sy
 
 ## Addressing feedback
 
-Members press **C**, then click or tap a spot on the canvas to leave a comment.
-The comments button in the bottom dock opens threads across the file, with
+Members press **C** or pick the comment tool beside the zoom controls, then click or tap a spot on the
+canvas to leave a comment.
+The comments button beside Share opens threads across the file, with
 separate open/resolved lists. Pins follow their designs through layout and page
 changes. Deleting a design leaves its feedback at its last position; deleting a
 page removes its threads. Comments and active-member identities are private to
