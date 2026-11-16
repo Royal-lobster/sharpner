@@ -13,7 +13,8 @@ import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./can
 import { withoutComponents } from "./canvas-layout";
 import { pageOutline, type OutlineItem } from "./page-outline";
 import { Room } from "./room";
-import { Link } from "./router";
+import { Link, navigate, useLocation } from "./router";
+import { NotificationBell } from "./Notifications";
 import { askConfirm, askText } from "./dialog";
 import { ResponsiveDialog } from "./dialog-runtime";
 import { Loading, Notice } from "./states";
@@ -189,6 +190,18 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     if (thread) { selectPage(thread.anchor.pageId); setCommentFocus((f) => ({ id: thread.id, request: (f?.request ?? 0) + 1 })); }
   };
 
+  // A notification links to `?comment=<thread>`: open that thread once the file has loaded, then drop the parameter.
+  const linkedComment = new URL(useLocation(), location.origin).searchParams.get("comment");
+  useEffect(() => {
+    if (readOnly || !linkedComment || room.status !== "open") return;
+    const url = new URL(location.href);
+    url.searchParams.delete("comment");
+    navigate(url.pathname + url.search + url.hash, { replace: true });
+    const thread = room.comments.get(linkedComment);
+    if (thread) selectComment(thread);
+    else toast("That comment was deleted along with its page.", { tone: "error" });
+  }, [readOnly, linkedComment, room.status]);
+
   useEffect(() => {
     if (readOnly || interactionId) return;
     const key = (event: KeyboardEvent) => {
@@ -285,7 +298,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           </div>
         )}
       </main>
-      {!readOnly && <CommentsPanel room={room} open={commentsShown} activeId={activeCommentId} draft={draftComment}
+      {!readOnly && <CommentsPanel room={room} userId={user.id} open={commentsShown} activeId={activeCommentId} draft={draftComment}
         onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       {/* Keyboard interaction with the notches and their panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
       <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>
@@ -369,6 +382,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               An agent is working in this file
             </div>}
           </DockPanel>
+          <NotificationBell size="lg" className="dock-button" side="bottom" onOpenChange={(next) => { if (next) setOpen(null); }} />
           <Button ref={commentsTrigger} variant="ghost" size="lg" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
             aria-expanded={commentsShown} aria-controls="comments-panel"
             title="Comments (C to add)" onClick={() => { setCommentsOpen((value) => !value); setCommentMode(false); setOpen(null); }}>

@@ -67,6 +67,8 @@ Use `resolved: false` to reopen a thread. Resolution preserves messages and chan
 
 Use `add_comment` to leave feedback. With nodeId, x/y start at the node's computed top-left. Otherwise, use page coordinates. Comments show agent attribution.
 
+Tag a member only when the member asks you to. Take ids from the workspace's `members` in `get_app_state`, write `@Name` in `body`, and pass the ids in `mentions`. Each tagged member gets a notification with the comment.
+
 ## Report tool problems
 
 Check `list_friction` before `report_friction`. Use `sameAs` for an existing issue. State the task, result, expected result, and workaround.

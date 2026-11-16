@@ -109,9 +109,9 @@ export async function syncAccount(env: Env, client: ClerkClient, clerkUserId: st
   const now = Date.now();
   const statements = [
     env.DB.prepare(
-      `INSERT INTO users (id, login, name, avatar_url, created_at, clerk_user_id) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(clerk_user_id) DO UPDATE SET login = excluded.login, name = excluded.name, avatar_url = excluded.avatar_url`,
-    ).bind(clerkUserId, login, name, clerkUser.imageUrl || null, now, clerkUserId),
+      `INSERT INTO users (id, login, name, avatar_url, email, created_at, clerk_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(clerk_user_id) DO UPDATE SET login = excluded.login, name = excluded.name, avatar_url = excluded.avatar_url, email = excluded.email`,
+    ).bind(clerkUserId, login, name, clerkUser.imageUrl || null, primaryEmail ?? null, now, clerkUserId),
   ];
   for (const membership of allowed) {
     const org = membership.organization;

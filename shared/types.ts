@@ -93,13 +93,24 @@ export type Actor = { id: string; name: string; avatar: string | null; agent?: b
 
 /** Coordinates are relative to the node's computed bounds, or to the page when nodeId is null. */
 export type CommentAnchor = { pageId: string; nodeId: string | null; x: number; y: number };
-export type CommentMessage = { id: string; author: Actor; body: string; createdAt: number };
+/** `mentions` are the workspace members the body tags as `@Name`; each was notified when the message was posted. */
+export type CommentMessage = { id: string; author: Actor; body: string; createdAt: number; mentions?: Actor[] };
 /** Lightweight pin/list metadata. firstMessage.body is an excerpt; fetch the thread for full messages. */
 export type CommentThread = {
   id: string; number: number; anchor: CommentAnchor; firstMessage: CommentMessage; messageCount: number;
   createdAt: number; updatedAt: number; resolvedAt: number | null; resolvedBy: Actor | null; revision: number;
 };
 export type CommentDetail = CommentThread & { messages: CommentMessage[] };
+
+/** A workspace member a comment can tag. */
+export type MentionableMember = { id: string; name: string; login: string; avatar: string | null };
+
+/** Tells a member they were tagged, and why: who tagged them, where, and what the comment says. */
+export type MentionNotification = {
+  id: string; fileId: string; fileName: string; threadId: string; threadNumber: number; pageId: string;
+  /** "Page · Design", as the comments panel labels the thread. */
+  location: string; excerpt: string; actor: Actor; createdAt: number; readAt: number | null;
+};
 
 export type Presence = {
   pageId: string | null;

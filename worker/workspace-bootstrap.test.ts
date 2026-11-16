@@ -36,7 +36,7 @@ function fixture() {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
   db.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql"]) db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql", "0005_mention_notifications.sql"]) db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   db.exec(`
     INSERT INTO users (id, login, name, created_at, clerk_user_id) VALUES ('local_author', 'alice', 'Alice', 1, 'user_clerk_alice');
     INSERT INTO workspaces (id, name, created_at, clerk_organization_id) VALUES

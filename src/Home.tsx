@@ -1,4 +1,5 @@
 import { CreateOrganization, OrganizationSwitcher, UserButton, useClerk } from "@clerk/react";
+import { NotificationBell } from "./Notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentConnectionConfig, Me } from "./App";
 import { api, timeAgo, type FileSummary, type Workspace } from "./api";
@@ -118,6 +119,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
           <Button variant="secondary" className="connect-agent" onClick={(e) => void openAgent(e.currentTarget)} aria-disabled={agentLoading} aria-busy={agentLoading} aria-label="Connect an agent" title="Connect an agent">
             {agentLoading ? <Spinner aria-hidden /> : <IconTerminal2 aria-hidden />}<span className="connect-agent-label">Connect agent</span>
           </Button>
+          <NotificationBell />
           <UserButton />
         </div>
       </header>

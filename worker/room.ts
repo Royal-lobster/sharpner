@@ -533,7 +533,7 @@ export class FileRoom extends DurableObject<Env> {
   comments(): CommentThread[] { return this.commentStore.list(); }
   comment(id: string): CommentDetail { return this.commentStore.get(id); }
 
-  createComment(fileId: string, anchor: CommentAnchor, body: string, by: Actor): CommentDetail {
+  createComment(fileId: string, anchor: CommentAnchor, body: string, by: Actor, mentions: Actor[] = []): CommentDetail {
     let thread!: CommentDetail;
     this.ctx.storage.transactionSync(() => {
       if (!this.pages().some((p) => p.id === anchor.pageId)) throw new Error("Page not found");
@@ -541,14 +541,14 @@ export class FileRoom extends DurableObject<Env> {
         const node = this.node(anchor.nodeId);
         if (!node || node.pageId !== anchor.pageId) throw new Error("The design is no longer on this page");
       }
-      thread = this.commentStore.create(anchor, body, by);
+      thread = this.commentStore.create(anchor, body, by, mentions);
     });
     this.publishComment(fileId, thread);
     return thread;
   }
 
-  replyComment(fileId: string, id: string, body: string, by: Actor): CommentDetail {
-    const thread = this.ctx.storage.transactionSync(() => this.commentStore.reply(id, body, by));
+  replyComment(fileId: string, id: string, body: string, by: Actor, mentions: Actor[] = []): CommentDetail {
+    const thread = this.ctx.storage.transactionSync(() => this.commentStore.reply(id, body, by, mentions));
     this.publishComment(fileId, thread);
     return thread;
   }
@@ -557,6 +557,12 @@ export class FileRoom extends DurableObject<Env> {
     const thread = this.ctx.storage.transactionSync(() => this.commentStore.resolve(id, resolved, by));
     this.publishComment(fileId, thread);
     return thread;
+  }
+
+  /** "Page · Design" (or "Page · Canvas"), as the comments panel labels a thread, for mention notifications. */
+  commentLocation(anchor: CommentAnchor): string {
+    const node = anchor.nodeId ? this.node(anchor.nodeId) : undefined;
+    return [this.pages().find((p) => p.id === anchor.pageId)?.name, node?.name ?? "Canvas"].filter(Boolean).join(" · ");
   }
 
   private publishComment(fileId: string, thread: CommentDetail) {

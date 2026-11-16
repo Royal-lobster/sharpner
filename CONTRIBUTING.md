@@ -162,6 +162,10 @@ Put optional public OAuth settings in `wrangler.jsonc`'s `vars`; actual credenti
 belong in Worker secrets. Verify sign-in, workspace creation, file creation, and
 agent authorization against your own instance.
 
+To email members when they are mentioned, add the `RESEND_API_KEY` secret and set `EMAIL_FROM` to a sender on a
+domain verified with Resend. Without them, mentions still notify in the app. Mention emails link to `APP_ORIGIN`
+when it is set.
+
 When moving to a custom domain, set `APP_ORIGIN` to its HTTPS origin in `vars`.
 Browser file links on the old host then open the same path on the new domain
 before Clerk initializes. Keep the old hostname enabled while those links are in use.
