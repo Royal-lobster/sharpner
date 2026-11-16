@@ -201,7 +201,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
     navigate(url.pathname + url.search + url.hash, { replace: true });
     const thread = room.comments.get(linkedComment);
     if (thread) selectComment(thread);
-    else toast("That comment was deleted along with its page.", { tone: "error" });
+    else toast("That comment was deleted.", { tone: "error" });
   }, [readOnly, linkedComment, room.status]);
 
   useEffect(() => {
@@ -300,7 +300,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           </div>
         )}
       </main>
-      {!readOnly && <CommentsPanel room={room} userId={user.id} open={commentsShown} activeId={activeCommentId} draft={draftComment}
+      {!readOnly && <CommentsPanel room={room} userId={user.id} owner={meta.workspace.role === "owner"} open={commentsShown} activeId={activeCommentId} draft={draftComment}
         onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       {/* Keyboard interaction with the notches and their panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
       <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>

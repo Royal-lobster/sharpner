@@ -72,6 +72,28 @@ export class Comments {
     return thread;
   }
 
+  /** Removes a thread with all its messages. Returns it as it was. */
+  delete(id: string): CommentDetail {
+    const thread = this.get(id);
+    this.sql.exec(`DELETE FROM comment_messages WHERE thread_id = ?`, id);
+    this.sql.exec(`DELETE FROM comment_threads WHERE id = ?`, id);
+    return thread;
+  }
+
+  /** Removes one reply. The first message is the comment itself: deleting it means deleting the thread. */
+  deleteReply(id: string, messageId: string): CommentDetail {
+    const thread = this.get(id);
+    const index = thread.messages.findIndex((m) => m.id === messageId);
+    if (index === -1) throw new Error("Reply not found");
+    if (index === 0) throw new Error("Delete the comment itself to remove its first message");
+    thread.messages.splice(index, 1);
+    thread.messageCount--;
+    thread.revision++;
+    this.sql.exec(`DELETE FROM comment_messages WHERE id = ? AND thread_id = ?`, messageId, id);
+    this.save(thread);
+    return thread;
+  }
+
   /** Preserve feedback when a node is deleted; follow nodes moved to another page; remove deleted pages' threads. */
   reconcile(nodes: ReadonlyMap<string, CanvasNode>, pages: ReadonlySet<string>, before: ReadonlyMap<string, Rect>) {
     const threads: CommentThread[] = [], deleted: string[] = [];

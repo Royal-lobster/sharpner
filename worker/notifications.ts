@@ -43,9 +43,9 @@ export async function recordMentions(env: Env, event: MentionEvent, recipients: 
   const excerpt = event.message.body.slice(0, EXCERPT_LENGTH);
   const actor = JSON.stringify(event.message.author);
   await env.DB.batch(targets.map((r) => env.DB.prepare(`INSERT INTO notifications
-    (id, user_id, workspace_id, file_id, thread_id, thread_number, page_id, location, excerpt, actor, created_at, read_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).bind(crypto.randomUUID(), r.id, event.workspaceId, event.file.id,
-    event.thread.id, event.thread.number, event.thread.pageId, event.location, excerpt, actor, event.message.createdAt)));
+    (id, user_id, workspace_id, file_id, thread_id, message_id, thread_number, page_id, location, excerpt, actor, created_at, read_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).bind(crypto.randomUUID(), r.id, event.workspaceId, event.file.id,
+    event.thread.id, event.message.id, event.thread.number, event.thread.pageId, event.location, excerpt, actor, event.message.createdAt)));
   return targets;
 }
 
@@ -77,6 +77,13 @@ export async function markNotificationsRead(env: Env, userId: string, target: { 
   } else {
     await env.DB.prepare(`UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL`).bind(now, userId).run();
   }
+}
+
+/** Removes the notifications a deleted comment, or one deleted reply (`messageId`), sent, with their excerpts. */
+export async function forgetMentions(env: Env, fileId: string, threadId: string, messageId?: string) {
+  await (messageId
+    ? env.DB.prepare(`DELETE FROM notifications WHERE file_id = ? AND thread_id = ? AND message_id = ?`).bind(fileId, threadId, messageId)
+    : env.DB.prepare(`DELETE FROM notifications WHERE file_id = ? AND thread_id = ?`).bind(fileId, threadId)).run();
 }
 
 /** The link that opens the file on the thread's page with the thread open. */

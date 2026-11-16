@@ -121,3 +121,60 @@ describe("persistent file comments", () => {
     expect(next.number).toBeGreaterThan(kept.number);
   });
 });
+
+describe("deleting comments", () => {
+  const bob: Actor = { id: "bob", name: "Bob", avatar: null };
+  const bobsAgent: Actor = { ...bob, name: "Bob's agent", agent: true };
+
+  it("lets an author delete their thread, with its replies, for every viewer and across hibernation", () => {
+    const { room, wake, pageId, broadcasts } = fixture();
+    const thread = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Wrong design", human);
+    room.replyComment("file", thread.id, "Agreed", bob);
+    broadcasts.length = 0;
+    room.deleteComment("file", thread.id, human, false);
+    expect(broadcasts).toEqual([{ type: "comments", threads: [], deleted: [thread.id] }]);
+    expect(wake().comments()).toEqual([]);
+    expect(() => wake().comment(thread.id)).toThrow("Comment thread not found");
+  });
+
+  it("lets a member delete their own agent's thread, and an owner delete anyone's", () => {
+    const { room, pageId } = fixture();
+    const byAgent = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Duplicate", agent);
+    room.deleteComment("file", byAgent.id, human, false);
+    const bobs = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Bob's note", bob);
+    expect(() => room.deleteComment("file", bobs.id, human, false)).toThrow("Only its author or a workspace owner");
+    room.deleteComment("file", bobs.id, human, true);
+    expect(room.comments()).toEqual([]);
+  });
+
+  it("lets an agent delete only what it wrote, never a thread others replied to", () => {
+    const { room, pageId } = fixture();
+    const mine = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Agent note", bobsAgent);
+    const replied = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Agent question", bobsAgent);
+    const reply = room.replyComment("file", replied.id, "Bob answers", bob).messages[1]!;
+    expect(() => room.deleteComment("file", replied.id, bobsAgent, false)).toThrow("Only its author");
+    expect(() => room.deleteCommentReply("file", replied.id, reply.id, bobsAgent, false)).toThrow("Only its author");
+    // A member's own thread is never the agent's to delete, even an owner's agent.
+    const members = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Bob's own", bob);
+    expect(() => room.deleteComment("file", members.id, bobsAgent, true)).toThrow("Only its author");
+    room.deleteComment("file", mine.id, bobsAgent, false);
+    expect(room.comments().map((t) => t.id).sort()).toEqual([members.id, replied.id].sort());
+  });
+
+  it("deletes one reply, keeps the thread, and refuses the first message", () => {
+    const { room, wake, pageId, broadcasts } = fixture();
+    const thread = room.createComment("file", { pageId, nodeId: null, x: 0, y: 0 }, "Heading is small", human);
+    const first = room.replyComment("file", thread.id, "Typo here", bob).messages[1]!;
+    room.replyComment("file", thread.id, "Fixed", human);
+    expect(() => room.deleteCommentReply("file", thread.id, first.id, human, false)).toThrow("Only its author");
+    broadcasts.length = 0;
+    const next = room.deleteCommentReply("file", thread.id, first.id, bob, false);
+    expect(next.messages.map((m) => m.body)).toEqual(["Heading is small", "Fixed"]);
+    expect(next.messageCount).toBe(2);
+    expect(next.revision).toBe(thread.revision + 3);
+    expect(broadcasts).toEqual([{ type: "comments", threads: [expect.objectContaining({ id: thread.id, messageCount: 2, revision: next.revision })] }]);
+    expect(wake().comment(thread.id).messages.map((m) => m.body)).toEqual(["Heading is small", "Fixed"]);
+    expect(() => room.deleteCommentReply("file", thread.id, thread.messages[0]!.id, human, true)).toThrow("Delete the comment itself");
+    expect(() => room.deleteCommentReply("file", thread.id, "missing", human, true)).toThrow("Reply not found");
+  });
+});

@@ -1,9 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { IconArrowLeft, IconCheck, IconMessageCircle, IconPlus, IconRefresh, IconX } from "@tabler/icons-react";
+import { IconArrowLeft, IconCheck, IconMessageCircle, IconPlus, IconRefresh, IconTrash, IconX } from "@tabler/icons-react";
 import type { Actor, CommentAnchor, CommentDetail, CommentThread, MentionableMember } from "../shared/types";
-import { MAX_COMMENT_BODY } from "../shared/comments";
+import { MAX_COMMENT_BODY, mayDeleteMessage, mayDeleteThread } from "../shared/comments";
+import { askConfirm } from "./dialog";
 import { insertMention, mentionQuery, mentionSegments, mentionsIn, mentionSuggestions } from "../shared/mentions";
-import { markNotificationsRead } from "./notification-store";
+import { markNotificationsRead, refreshNotifications } from "./notification-store";
 import type { Room } from "./room";
 import { timeAgo } from "./api";
 import { Avatar } from "./Avatar";
@@ -11,8 +12,9 @@ import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
-export function CommentsPanel({ room, userId, open, activeId, draft, onSelect, onNew, onClose, onCancelDraft }: {
-  room: Room; userId: string; open: boolean; activeId: string | null; draft: CommentAnchor | null;
+export function CommentsPanel({ room, userId, owner, open, activeId, draft, onSelect, onNew, onClose, onCancelDraft }: {
+  /** Workspace owners may delete anyone's comment; members delete their own and their agent's. */
+  room: Room; userId: string; owner: boolean; open: boolean; activeId: string | null; draft: CommentAnchor | null;
   onSelect: (thread: CommentThread | null) => void; onNew: () => void; onClose: () => void; onCancelDraft: () => void;
 }) {
   const [filter, setFilter] = useState<"open" | "resolved">("open");
@@ -92,6 +94,34 @@ export function CommentsPanel({ room, userId, open, activeId, draft, onSelect, o
     catch (e) { toast((e as Error).message, { tone: "error" }); }
     finally { setBusy(false); }
   };
+  const viewer = { id: userId };
+  const deleteThread = async (thread: CommentThread, detail: CommentDetail) => {
+    if (busy || !online) return;
+    const replies = detail.messages.length - 1;
+    const ok = await askConfirm({
+      title: `Delete comment #${thread.number}?`, confirm: "Delete comment", danger: true,
+      message: `${replies > 0 ? `Its ${replies === 1 ? "reply is" : `${replies} replies are`} deleted too, for everyone. ` : "It is removed for everyone. "}This can’t be undone.`,
+    });
+    if (!ok) return;
+    setBusy(true);
+    try { await room.deleteComment(thread.id); onSelect(null); setAnnouncement(`Comment #${thread.number} deleted`); void refreshNotifications(); }
+    catch (e) { toast((e as Error).message, { tone: "error" }); }
+    finally { setBusy(false); }
+  };
+  const deleteReply = async (thread: CommentThread, messageId: string) => {
+    if (busy || !online) return;
+    if (!await askConfirm({ title: "Delete reply?", message: "It is removed for everyone. This can’t be undone.", confirm: "Delete reply", danger: true })) return;
+    setBusy(true);
+    try {
+      const next = await room.deleteReply(thread.id, messageId);
+      setDetail((current) => current?.id === next.id && current.revision > next.revision ? current : next);
+      setAnnouncement("Reply deleted");
+      // Mentions the deleted messages sent are gone on the server; show that in the bell now, not at the next poll.
+      void refreshNotifications();
+    }
+    catch (e) { toast((e as Error).message, { tone: "error" }); }
+    finally { setBusy(false); }
+  };
   const label = (anchor: CommentAnchor) => {
     const node = anchor.nodeId ? room.nodes.get(anchor.nodeId) : undefined;
     return [room.pages.find((p) => p.id === anchor.pageId)?.name, node?.name ?? "Canvas"].filter(Boolean).join(" · ");
@@ -117,18 +147,25 @@ export function CommentsPanel({ room, userId, open, activeId, draft, onSelect, o
     </div> : active ? <>
       <div className="comment-thread-toolbar">
         <Button variant="ghost" size="lg" onClick={() => onSelect(null)}><IconArrowLeft aria-hidden />All comments</Button>
-        <Button variant="secondary" size="lg" disabled={busy || !online} onClick={() => void resolve(active)}>
-          {active.resolvedAt ? <IconRefresh aria-hidden /> : <IconCheck aria-hidden />}{active.resolvedAt ? "Reopen" : "Resolve"}
-        </Button>
+        <div className="flex items-center gap-1">
+          {currentDetail && mayDeleteThread(currentDetail.messages, viewer, owner) && <Button variant="ghost" size="icon-lg" aria-label={`Delete comment #${active.number}`}
+            title="Delete comment" disabled={busy || !online} onClick={() => void deleteThread(active, currentDetail)}><IconTrash aria-hidden /></Button>}
+          <Button variant="secondary" size="lg" disabled={busy || !online} onClick={() => void resolve(active)}>
+            {active.resolvedAt ? <IconRefresh aria-hidden /> : <IconCheck aria-hidden />}{active.resolvedAt ? "Reopen" : "Resolve"}
+          </Button>
+        </div>
       </div>
       <p className="comment-location">#{active.number} · {label(active.anchor)}</p>
       <div className="comment-messages" ref={messages} aria-busy={!currentDetail && !error}>
         {error ? <div className="comment-load-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((v) => v + 1)}>Try again</Button></div>
           : !currentDetail ? <p className="comment-hint" role="status">Loading conversation…</p>
-          : currentDetail.messages.map((message) => <article className="comment-message" key={message.id}>
+          : currentDetail.messages.map((message, index) => <article className="comment-message" key={message.id}>
             <Avatar name={message.author.name} id={message.author.id} src={message.author.avatar} agent={message.author.agent} />
             <div className="comment-message-body">
-              <div className="comment-author"><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()} title={new Date(message.createdAt).toLocaleString()}>{timeAgo(message.createdAt)}</time></div>
+              <div className="comment-author"><strong>{message.author.name}</strong><time dateTime={new Date(message.createdAt).toISOString()} title={new Date(message.createdAt).toLocaleString()}>{timeAgo(message.createdAt)}</time>
+                {index > 0 && mayDeleteMessage(message.author, viewer, owner) && <Button variant="ghost" size="icon-sm" className="comment-message-delete" aria-label={`Delete reply by ${message.author.name}`}
+                  title="Delete reply" disabled={busy || !online} onClick={() => void deleteReply(active, message.id)}><IconTrash aria-hidden /></Button>}
+              </div>
               <p><MentionText body={message.body} mentions={message.mentions} userId={userId} /></p>
             </div>
           </article>)}

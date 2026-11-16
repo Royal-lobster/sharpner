@@ -6,7 +6,8 @@ import { mcp } from "./mcp";
 import { oauth } from "./oauth";
 import { hostToken } from "./render-host";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
-import { deliverMentions, listNotifications, markNotificationsRead, mentionActors, resolveMentions, workspaceMembers } from "./notifications";
+import { DELETE_COMMENT_DENIED, mayDeleteMessage, mayDeleteThread } from "../shared/comments";
+import { deliverMentions, forgetMentions, listNotifications, markNotificationsRead, mentionActors, resolveMentions, workspaceMembers } from "./notifications";
 import type { CommentDetail } from "../shared/types";
 import { z } from "zod";
 
@@ -222,6 +223,39 @@ const notificationRead = z.object({ ids: z.array(z.string().min(1)).max(100).opt
 api.post("/notifications/read", async (c) => {
   await markNotificationsRead(c.env, c.get("user").id, notificationRead.parse(await c.req.json()));
   return c.body(null, 204);
+});
+
+// A comment's author (or the member whose agent wrote it) and workspace owners may delete it. Deleting the first message
+// deletes the thread; mention notifications it sent go with it.
+api.delete("/files/:id/comments/:threadId", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const threadId = c.req.param("threadId");
+  const stub = room(c.env, file.id);
+  const [thread, workspace] = await Promise.all([stub.comment(threadId).catch(() => null), workspaceFor(c.env, user.id, file.workspace_id)]);
+  if (!thread) return c.json({ error: "not found" }, 404);
+  const owner = workspace?.role === "owner";
+  if (!mayDeleteThread(thread.messages, { id: user.id }, owner)) return c.json({ error: DELETE_COMMENT_DENIED }, 403);
+  await stub.deleteComment(file.id, threadId, { id: user.id, name: user.name, avatar: user.avatar_url }, owner);
+  await forgetMentions(c.env, file.id, threadId);
+  return c.body(null, 204);
+});
+
+api.delete("/files/:id/comments/:threadId/messages/:messageId", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const { threadId, messageId } = c.req.param();
+  const stub = room(c.env, file.id);
+  const [thread, workspace] = await Promise.all([stub.comment(threadId).catch(() => null), workspaceFor(c.env, user.id, file.workspace_id)]);
+  const message = thread?.messages.find((m) => m.id === messageId);
+  if (!thread || !message) return c.json({ error: "not found" }, 404);
+  const owner = workspace?.role === "owner";
+  if (!mayDeleteMessage(message.author, { id: user.id }, owner)) return c.json({ error: DELETE_COMMENT_DENIED }, 403);
+  const next = await stub.deleteCommentReply(file.id, threadId, messageId, { id: user.id, name: user.name, avatar: user.avatar_url }, owner);
+  await forgetMentions(c.env, file.id, threadId, messageId);
+  return c.json(next);
 });
 
 api.patch("/files/:id/comments/:threadId", async (c) => {

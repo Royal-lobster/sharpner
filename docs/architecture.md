@@ -284,6 +284,14 @@ notification is logged and never fails the comment, because a retry would post t
 `/f/<file>?page=…&comment=<thread>`, and opening a thread marks that thread's notifications read. Agents tag members
 with the `mentions` argument of `add_comment` and `reply_to_comment`, using ids from `get_app_state`.
 
+Deleting: a member deletes a comment or reply they wrote, or one their agent wrote; a workspace owner deletes any
+(`mayDeleteMessage` and `mayDeleteThread` in `shared/comments.ts`). Deleting a thread's first message deletes the
+thread and its replies. `DELETE /api/files/:id/comments/:threadId` and `…/messages/:messageId` check the rule, and the
+FileRoom checks it again inside its transaction. A deleted thread is broadcast as `deleted`, so pins and lists drop it
+for every member; a deleted reply is broadcast as the thread's next revision. The mention notifications the deleted
+messages sent are removed with them (`forgetMentions`, by `message_id`). Agents have no delete tool: the MCP catalog
+is at its size budget, and a member can delete their agent's comments from the panel.
+
 The comment panel floats over the desktop canvas. On mobile, its actual height
 reserves canvas space so focused pins use the visible preview area. Closing the
 panel or switching threads preserves unfinished text during the editor session; closing also returns
