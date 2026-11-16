@@ -709,6 +709,10 @@ body:has(.editor) { --toast-offset: 116px; }
 .comment-author { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 13px; }
 .comment-author strong { font-weight: 500; overflow-wrap: anywhere; }
 .comment-author time { font-size: 12px; color: var(--faint); }
+/* A reply's delete sits at the end of its author row, quiet until the reply is hovered or the button is focused. */
+.comment-message-delete { align-self: center; margin: -4px -4px -4px auto; color: var(--faint); opacity: 0; transition: opacity 0.12s; }
+.comment-message:hover .comment-message-delete, .comment-message-delete:focus-visible { opacity: 1; }
+@media (hover: none) { .comment-message-delete { opacity: 1; } }
 .comment-message-body > p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .comment-resolved { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--faint); }
 .comment-resolved svg { width: 14px; height: 14px; flex: none; }

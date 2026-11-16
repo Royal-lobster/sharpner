@@ -538,6 +538,20 @@ export class Room {
     return this.memberList;
   }
 
+  /** Deletes a thread with its replies. The server checks that the member may (see mayDeleteThread). */
+  async deleteComment(id: string) {
+    if (this.shareToken || this.status !== "open" || this.closed) throw new Error("Reconnect to the file before deleting comments");
+    await api(`/files/${this.fileId}/comments/${id}`, { method: "DELETE" });
+    if (this.closed) return;
+    if (this.comments.delete(id)) this.commentsRevision++;
+    this.deletedComments.add(id);
+    this.emit();
+  }
+
+  async deleteReply(id: string, messageId: string) {
+    return this.writeComment(`/${id}/messages/${messageId}`, "DELETE", undefined);
+  }
+
   async resolveComment(id: string, resolved: boolean) {
     return this.writeComment(`/${id}`, "PATCH", { resolved });
   }

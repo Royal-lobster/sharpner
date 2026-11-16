@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deliverMentions, listNotifications, markNotificationsRead, mentionEmail, resolveMentions, workspaceMembers, type MentionEvent } from "./notifications";
+import { deliverMentions, forgetMentions, listNotifications, markNotificationsRead, mentionEmail, resolveMentions, workspaceMembers, type MentionEvent } from "./notifications";
 import type { Actor } from "../shared/types";
 
 /** D1's small async surface over real SQLite. */
@@ -21,7 +21,7 @@ function fixture(vars: Partial<Env> = {}) {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
   db.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql", "0003_file_share_links.sql", "0004_agent_friction.sql", "0005_mention_notifications.sql"]) {
+  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql", "0003_file_share_links.sql", "0004_agent_friction.sql", "0005_mention_notifications.sql", "0006_notification_messages.sql"]) {
     db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   }
   db.exec(`
@@ -115,6 +115,20 @@ describe("mention notifications", () => {
     expect((await listNotifications(env, "dana")).unread).toBe(2);
     await markNotificationsRead(env, "dana", {});
     expect((await listNotifications(env, "dana")).unread).toBe(0);
+  });
+  it("forgets the notifications of a deleted reply, then of a deleted comment, with their excerpts", async () => {
+    const { env } = fixture();
+    const bob = await resolveMentions(env, "acme", ["bob"]);
+    await deliverMentions(env, event(), bob, locate);
+    const reply = event(alice, "@Bob one more thing");
+    await deliverMentions(env, { ...reply, message: { ...reply.message, id: "m2", createdAt: 60 } }, bob, locate);
+    const elsewhere = event();
+    await deliverMentions(env, { ...elsewhere, thread: { id: "other", number: 8, pageId: "page" } }, bob, locate);
+    expect((await listNotifications(env, "bob")).notifications).toHaveLength(3);
+    await forgetMentions(env, "app", "thread", "m2");
+    expect((await listNotifications(env, "bob")).notifications.map((n) => n.excerpt)).toEqual(["@Bob can you check the <b>spacing</b>?", "@Bob can you check the <b>spacing</b>?"]);
+    await forgetMentions(env, "app", "thread");
+    expect((await listNotifications(env, "bob")).notifications.map((n) => n.threadId)).toEqual(["other"]);
   });
 });
 

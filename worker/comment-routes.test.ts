@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), comment: vi.fn(), create: vi.fn(), reply: vi.fn(), resolve: vi.fn(),
-  commentLocation: vi.fn(), resolveMentions: vi.fn(), deliverMentions: vi.fn(), workspaceMembers: vi.fn(), listNotifications: vi.fn(), markRead: vi.fn() }));
+  commentLocation: vi.fn(), resolveMentions: vi.fn(), deliverMentions: vi.fn(), workspaceMembers: vi.fn(), listNotifications: vi.fn(), markRead: vi.fn(),
+  workspaceFor: vi.fn(), deleteThread: vi.fn(), deleteReply: vi.fn(), forgetMentions: vi.fn() }));
 vi.mock("./notifications", async (original) => ({ ...await original<typeof import("./notifications")>(),
   resolveMentions: mocks.resolveMentions, deliverMentions: mocks.deliverMentions, workspaceMembers: mocks.workspaceMembers,
-  listNotifications: mocks.listNotifications, markNotificationsRead: mocks.markRead }));
+  listNotifications: mocks.listNotifications, markNotificationsRead: mocks.markRead, forgetMentions: mocks.forgetMentions }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
-vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor,
-  room: () => ({ commentLocation: mocks.commentLocation, comment: mocks.comment, createComment: mocks.create, replyComment: mocks.reply, resolveComment: mocks.resolve }),
+vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, workspaceFor: mocks.workspaceFor,
+  room: () => ({ commentLocation: mocks.commentLocation, comment: mocks.comment, createComment: mocks.create, replyComment: mocks.reply, resolveComment: mocks.resolve,
+    deleteComment: mocks.deleteThread, deleteCommentReply: mocks.deleteReply }),
 }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
 vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
@@ -69,6 +71,58 @@ describe("member comment routes", () => {
   it("requires an explicit resolution boolean", async () => {
     expect((await request("/thread", "PATCH", { resolved: "false" })).status).toBe(400);
     expect(mocks.resolve).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleting comments", () => {
+  const msg = (id: string, author: { id: string; agent?: boolean }) => ({ id, author: { name: id, avatar: null, ...author }, body: "x", createdAt: 0 });
+  const thread = { id: "thread", messages: [msg("m1", { id: "alice" }), msg("m2", { id: "bob" }), msg("m3", { id: "alice", agent: true })] };
+  beforeEach(() => {
+    mocks.comment.mockResolvedValue(thread);
+    mocks.workspaceFor.mockResolvedValue({ id: "acme", role: "member" });
+    mocks.deleteReply.mockResolvedValue({ id: "thread", messages: [] });
+  });
+
+  it("lets the author delete their thread and forgets its mention notifications", async () => {
+    expect((await request("/thread", "DELETE")).status).toBe(204);
+    expect(mocks.deleteThread).toHaveBeenCalledWith("file", "thread", actor, false);
+    expect(mocks.forgetMentions).toHaveBeenCalledWith(env, "file", "thread");
+  });
+
+  it("lets a member delete their agent's reply, and forgets that reply's notifications", async () => {
+    expect((await request("/thread/messages/m3", "DELETE")).status).toBe(200);
+    expect(mocks.deleteReply).toHaveBeenCalledWith("file", "thread", "m3", actor, false);
+    expect(mocks.forgetMentions).toHaveBeenCalledWith(env, "file", "thread", "m3");
+  });
+
+  it("refuses a member deleting someone else's thread or reply", async () => {
+    mocks.comment.mockResolvedValue({ ...thread, messages: [msg("m1", { id: "bob" }), msg("m2", { id: "bob" })] });
+    const thread403 = await request("/thread", "DELETE");
+    expect(thread403.status).toBe(403);
+    expect(await thread403.json()).toEqual({ error: "Only its author or a workspace owner can delete this comment" });
+    expect((await request("/thread/messages/m2", "DELETE")).status).toBe(403);
+    expect(mocks.deleteThread).not.toHaveBeenCalled();
+    expect(mocks.deleteReply).not.toHaveBeenCalled();
+    expect(mocks.forgetMentions).not.toHaveBeenCalled();
+  });
+
+  it("lets a workspace owner delete anyone's comment", async () => {
+    mocks.workspaceFor.mockResolvedValue({ id: "acme", role: "owner" });
+    mocks.comment.mockResolvedValue({ ...thread, messages: [msg("m1", { id: "bob" }), msg("m2", { id: "bob" })] });
+    expect((await request("/thread/messages/m2", "DELETE")).status).toBe(200);
+    expect((await request("/thread", "DELETE")).status).toBe(204);
+    expect(mocks.deleteThread).toHaveBeenCalledWith("file", "thread", actor, true);
+  });
+
+  it("returns 404 for an unknown thread or reply, and for a file outside the member's workspaces", async () => {
+    mocks.comment.mockRejectedValue(new Error("Comment thread not found"));
+    expect((await request("/gone", "DELETE")).status).toBe(404);
+    mocks.comment.mockResolvedValue(thread);
+    expect((await request("/thread/messages/missing", "DELETE")).status).toBe(404);
+    mocks.fileFor.mockResolvedValue(null);
+    expect((await request("/thread", "DELETE")).status).toBe(404);
+    expect(mocks.deleteThread).not.toHaveBeenCalled();
+    expect(mocks.deleteReply).not.toHaveBeenCalled();
   });
 });
 

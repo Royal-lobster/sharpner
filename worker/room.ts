@@ -16,6 +16,7 @@ import { familySpecimens, parseExamples, specimenLegend, specimenThemes, specime
 import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
+import { DELETE_COMMENT_DENIED, mayDeleteMessage, mayDeleteThread } from "../shared/comments";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
 import { backfilling, THUMBNAIL_POLICY } from "./thumbnail-policy";
@@ -555,6 +556,28 @@ export class FileRoom extends DurableObject<Env> {
 
   resolveComment(fileId: string, id: string, resolved: boolean, by: Actor): CommentDetail {
     const thread = this.ctx.storage.transactionSync(() => this.commentStore.resolve(id, resolved, by));
+    this.publishComment(fileId, thread);
+    return thread;
+  }
+
+  /** Deletes a thread and its replies if `by` may (see mayDeleteThread). Viewers drop it from their list and canvas. */
+  deleteComment(fileId: string, id: string, by: Actor, owner: boolean): CommentDetail {
+    const thread = this.ctx.storage.transactionSync(() => {
+      if (!mayDeleteThread(this.commentStore.get(id).messages, by, owner)) throw new Error(DELETE_COMMENT_DENIED);
+      return this.commentStore.delete(id);
+    });
+    this.broadcast({ type: "comments", threads: [], deleted: [id] });
+    this.touch(fileId);
+    return thread;
+  }
+
+  /** Deletes one reply if `by` may (see mayDeleteMessage). */
+  deleteCommentReply(fileId: string, id: string, messageId: string, by: Actor, owner: boolean): CommentDetail {
+    const thread = this.ctx.storage.transactionSync(() => {
+      const message = this.commentStore.get(id).messages.find((m) => m.id === messageId);
+      if (message && !mayDeleteMessage(message.author, by, owner)) throw new Error(DELETE_COMMENT_DENIED);
+      return this.commentStore.deleteReply(id, messageId);
+    });
     this.publishComment(fileId, thread);
     return thread;
   }

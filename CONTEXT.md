@@ -11,7 +11,7 @@ The tenant: a group of members who share files and libraries.
 _Avoid_: Team, organization, org, tenant
 
 **Member**:
-A person who belongs to a workspace, either as an owner or a regular member. Members view the canvas, select designs, comment and share; they change the canvas only by asking an agent. Only owners (Clerk organization admins) delete files.
+A person who belongs to a workspace, either as an owner or a regular member. Members view the canvas, select designs, comment and share; they change the canvas only by asking an agent. Only owners (Clerk organization admins) delete files. A member deletes their own comments and their agent's; owners delete anyone's.
 _Avoid_: User (when the workspace relationship matters), collaborator, seat
 
 **Invite**:
