@@ -720,13 +720,13 @@ body:has(.editor) { --toast-offset: 116px; }
 .comment-composer { position: relative; }
 .comment-mention { padding: 0 2px; border-radius: 4px; color: var(--foreground); background: color-mix(in srgb, var(--foreground) 7%, transparent); font-weight: 500; }
 .comment-mention.self { background: color-mix(in srgb, var(--foreground) 16%, transparent); }
-.mention-suggestions { position: absolute; z-index: 20; bottom: calc(100% + 6px); left: 0; right: 0; max-height: 240px; margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: 12px; }
+.mention-suggestions { flex: none; max-height: 200px; margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: 12px; }
 .mention-option { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; font-size: 13px; cursor: pointer; }
 .mention-option[aria-selected=true] { background: color-mix(in srgb, var(--foreground) 8%, transparent); }
 .mention-option > [data-slot=avatar] { width: 22px; height: 22px; flex: none; }
 .mention-option [data-slot=avatar-fallback] { font-size: 10px; font-weight: 600; }
 .mention-option > span { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.mention-option strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.mention-option strong { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .mention-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 12px; }
 .notification-bell { position: relative; }
 .notification-count { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--foreground); color: var(--background); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }

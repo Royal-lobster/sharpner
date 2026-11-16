@@ -109,7 +109,7 @@ export function CommentsPanel({ room, userId, open, activeId, draft, onSelect, o
     <div className="comments-rule" aria-hidden />
     {draft && !active ? <div className="comment-draft">
       <p className="comment-location">{label(draft)}</p>
-      <CommentComposer key={draftKey} {...composer(draftKey)} label="Your comment" placeholder="What could be better here?" submit="Post comment" disabled={!online}
+      <CommentComposer key={draftKey} {...composer(draftKey)} label="Your comment" placeholder="What could be better here?" submit="Post comment" disabled={!online} suggestionsBelow
         onSubmit={async (body, mentions) => { const thread = await room.createComment(draft, body, mentions); onCancelDraft(); onSelect(thread); }} />
       <Button variant="ghost" size="sm" onClick={() => { composer(draftKey).onBodyChange(""); onCancelDraft(); }}>Discard draft</Button>
       <p className="comment-hint">Type @ to tag a teammate; they’ll be notified. Your agent can read this feedback when you ask it to address comments.</p>
@@ -179,9 +179,13 @@ function MentionText({ body, mentions, userId }: { body: string; mentions?: Acto
     : segment.text)}</>;
 }
 
-function CommentComposer({ body, members, onBodyChange, label, placeholder, submit, disabled, onSubmit }: {
+/**
+ * Suggestions sit in the panel's flow, never floating, so no scrolling column or sheet can clip them: under the box
+ * for a new comment, which starts at the top of the panel, and over it for a reply, which sits at the bottom.
+ */
+function CommentComposer({ body, members, onBodyChange, label, placeholder, submit, disabled, onSubmit, suggestionsBelow = false }: {
   body: string; members: MentionableMember[]; onBodyChange: (body: string) => void; label: string; placeholder: string; submit: string; disabled: boolean;
-  onSubmit: (body: string, mentions: string[]) => Promise<void>;
+  onSubmit: (body: string, mentions: string[]) => Promise<void>; suggestionsBelow?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [caret, setCaret] = useState<number | null>(null);
@@ -208,14 +212,15 @@ function CommentComposer({ body, members, onBodyChange, label, placeholder, subm
     catch (e) { toast((e as Error).message, { tone: "error" }); }
     finally { setBusy(false); }
   };
-  return <form className="comment-composer" onSubmit={(e) => { e.preventDefault(); void post(); }}>
-    {suggestions.length > 0 && <ul id={listId} role="listbox" className="mention-suggestions floaty" aria-label="Tag a teammate">
+  const list = suggestions.length > 0 && <ul id={listId} role="listbox" className="mention-suggestions floaty" aria-label="Tag a teammate">
       {suggestions.map((member) => <li key={member.id} id={`${listId}-${member.id}`} role="option" aria-selected={member === choice}
         className="mention-option" onPointerDown={(e) => { e.preventDefault(); pick(member); }} onPointerEnter={() => setActive(suggestions.indexOf(member))}>
         <Avatar id={member.id} name={member.name} src={member.avatar} />
-        <span><strong>{member.name}</strong>{member.login !== member.name && <small>{member.login}</small>}</span>
+        <span><strong>{member.name}</strong>{member.login && member.login !== member.name && <small>@{member.login}</small>}</span>
       </li>)}
-    </ul>}
+    </ul>;
+  return <form className="comment-composer" onSubmit={(e) => { e.preventDefault(); void post(); }}>
+    {!suggestionsBelow && list}
     <Textarea ref={input} aria-label={label} placeholder={placeholder} value={body} maxLength={MAX_COMMENT_BODY} disabled={busy} autoFocus
       role="combobox" aria-autocomplete="list" aria-expanded={suggestions.length > 0} aria-controls={suggestions.length ? listId : undefined}
       aria-activedescendant={choice ? `${listId}-${choice.id}` : undefined}
@@ -233,6 +238,7 @@ function CommentComposer({ body, members, onBodyChange, label, placeholder, subm
         }
         if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void post(); }
       }} />
+    {suggestionsBelow && list}
     <div className="comment-composer-actions"><span>{body.length > MAX_COMMENT_BODY - 500 ? `${body.length}/${MAX_COMMENT_BODY}` : "@ to tag · ⌘ / Ctrl + Enter to post"}</span>
       <Button type="submit" size="sm" disabled={disabled || busy || !body.trim()}>{busy ? "Posting…" : submit}</Button>
     </div>

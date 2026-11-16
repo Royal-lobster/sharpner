@@ -54,6 +54,12 @@ describe("mention recipients", () => {
     expect((await workspaceMembers(env, "acme")).map((m) => m.id)).toEqual(["alice", "bob", "dana"]);
   });
 
+  it("shows a username but withholds a login that is the member's email", async () => {
+    const { db, env } = fixture();
+    db.exec(`UPDATE users SET login = 'bob@example.com' WHERE id = 'bob'`);
+    expect((await workspaceMembers(env, "acme")).map((m) => [m.id, m.login])).toEqual([["alice", "alice"], ["bob", null], ["dana", "dana"]]);
+  });
+
   it("keeps only current, linked members of the file's workspace", async () => {
     const { env } = fixture();
     const found = await resolveMentions(env, "acme", ["bob", "carol", "eve", "ghost", "bob"]);

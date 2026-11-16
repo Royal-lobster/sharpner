@@ -47,7 +47,7 @@ export function mentionQuery(text: string, caret: number): { start: number; quer
 }
 
 /** Members matching a typed query: a name or login that starts with it, or a later word in the name that does. */
-export function mentionSuggestions<T extends { name: string; login?: string }>(members: readonly T[], query: string, limit = 6): T[] {
+export function mentionSuggestions<T extends { name: string; login?: string | null }>(members: readonly T[], query: string, limit = 6): T[] {
   const q = query.toLowerCase();
   const rank = (m: T) => {
     const name = m.name.toLowerCase();

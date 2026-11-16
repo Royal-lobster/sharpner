@@ -7,9 +7,13 @@ const PAGE_SIZE = 30;
 
 type Recipient = Actor & { email: string | null };
 
-/** Linked members of a workspace, for the comment composer's suggestions. */
+/**
+ * Linked members of a workspace, for the comment composer's suggestions. A login is a username, or the member's email
+ * when they have none; emails are withheld (null), so teammates never see each other's addresses.
+ */
 export const workspaceMembers = (env: Env, workspaceId: string) =>
-  env.DB.prepare(`SELECT u.id, u.name, u.login, u.avatar_url AS avatar FROM members m JOIN users u ON u.id = m.user_id
+  env.DB.prepare(`SELECT u.id, u.name, CASE WHEN instr(u.login, '@') > 0 THEN NULL ELSE u.login END AS login, u.avatar_url AS avatar
+    FROM members m JOIN users u ON u.id = m.user_id
     WHERE m.workspace_id = ? AND u.clerk_user_id IS NOT NULL ORDER BY u.name COLLATE NOCASE`)
     .bind(workspaceId).all<MentionableMember>().then((r) => r.results);
 

@@ -102,8 +102,8 @@ export type CommentThread = {
 };
 export type CommentDetail = CommentThread & { messages: CommentMessage[] };
 
-/** A workspace member a comment can tag. */
-export type MentionableMember = { id: string; name: string; login: string; avatar: string | null };
+/** A workspace member a comment can tag. `login` is their username; null when they have only an email, which stays private. */
+export type MentionableMember = { id: string; name: string; login: string | null; avatar: string | null };
 
 /** Tells a member they were tagged, and why: who tagged them, where, and what the comment says. */
 export type MentionNotification = {
