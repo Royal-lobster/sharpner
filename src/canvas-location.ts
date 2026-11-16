@@ -71,5 +71,7 @@ export function useCanvasLocation(fileId: string, room: Room) {
   return { ...view, selectionFocus,
     selectPage: (pageId: string) => { setSelectionFocus(NO_FOCUS); update({ pageId, selection: [] }); },
     selectNodes: (selection: string[]) => { setSelectionFocus(NO_FOCUS); update({ pageId: view.pageId, selection }, true); },
+    /** Select nodes on this page and fit them, as following a link to them would; Back returns to the previous view. */
+    focusNodes: (selection: string[]) => { setSelectionFocus(selectionFocusFor(selection)); update({ pageId: view.pageId, selection }); },
   };
 }

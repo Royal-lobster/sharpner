@@ -1,8 +1,8 @@
-import { ClerkProvider, useAuth, useClerk } from "@clerk/react";
+import { ClerkProvider, SignIn, SignUp, useAuth, useClerk } from "@clerk/react";
 import { Component, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { api, HttpError, setApiTokenGetter, type FileSummary, type User, type Workspace } from "./api";
 import { Home } from "./Home";
-import { useLocation } from "./router";
+import { accountPage, accountReturn, navigate, signInPath, useLocation, type AccountPage } from "./router";
 import { Loading, Notice } from "./states";
 import { Button } from "@/components/ui/button";
 
@@ -18,17 +18,34 @@ type AuthConfig = { publishableKey: string; configured: boolean; appOrigin?: str
 
 type Appearance = NonNullable<ComponentProps<typeof ClerkProvider>["appearance"]>;
 
-// Clerk sizes everything in rem from the document root (16px); the app's own type is set on <body>.
+// Graphite theme for Clerk's prebuilt components. Variables follow the theme tokens, so dark and light both apply;
+// element classes add our wells and keys. Clerk's styles sit in the "clerk" cascade layer that styles.css orders
+// before components and utilities, so our classes win. Clerk sizes in rem from the document root (16px).
 const appearance = {
+  cssLayerName: "clerk",
   variables: {
-    colorPrimary: "var(--primary)", colorPrimaryForeground: "var(--primary-foreground)", colorBackground: "var(--card)",
-    colorForeground: "var(--foreground)", colorMutedForeground: "var(--muted-foreground)", colorNeutral: "var(--foreground)", colorInput: "var(--background)",
-    colorInputForeground: "var(--foreground)", colorBorder: "var(--foreground)", colorDanger: "var(--destructive)", colorShadow: "#000",
-    colorModalBackdrop: "#000",
-    fontFamily: "var(--font)", fontSize: "0.75rem", borderRadius: "var(--radius-md)",
+    colorBackground: "var(--popover)", colorForeground: "var(--foreground)", colorMutedForeground: "var(--muted-foreground)",
+    colorMuted: "var(--muted)", colorNeutral: "var(--foreground)", colorBorder: "var(--foreground)",
+    colorPrimary: "var(--primary)", colorPrimaryForeground: "var(--primary-foreground)",
+    colorInput: "var(--background)", colorInputForeground: "var(--foreground)", colorRing: "var(--ring)",
+    colorDanger: "var(--destructive)", colorSuccess: "var(--live)", colorShadow: "#000", colorModalBackdrop: "rgb(0 0 0 / 0.6)",
+    fontFamily: "var(--font)", fontSize: "0.75rem", borderRadius: "9px",
   },
   options: { shimmer: false, logoImageUrl: "/mark.svg" },
   elements: {
+    cardBox: "lift",
+    popoverBox: "floaty",
+    logoBox: "clerk-logo-tile",
+    logoImage: "mark clerk-logo-mark",
+    formFieldInput: "well",
+    searchInput: "well",
+    formButtonPrimary: "key-primary",
+    membersPageInviteButton: "key-primary",
+    socialButtonsBlockButton: "key",
+    selectButton: "key",
+    avatarImageActionsUpload: "key",
+    organizationSwitcherPopoverActionButton__manageOrganization: "key",
+    navbarButton__active: "key",
     userButtonTrigger: { padding: "0.25rem", borderRadius: "999px", minWidth: "2.75rem", minHeight: "2.75rem" },
     userButtonAvatarBox: { width: "2rem", height: "2rem" },
     userButtonPopoverCard: { width: "min(22rem, calc(100vw - 1.5rem))" },
@@ -108,14 +125,14 @@ function SignedApp() {
   if (!config.configured || !config.publishableKey) return <AuthMessage message="Sign-in is not configured for this app yet." />;
   return (
     <ClerkProvider publishableKey={config.publishableKey} appearance={appearance}
-      signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/">
+      signInUrl="/sign-in" signUpUrl="/sign-up" signInFallbackRedirectUrl="/" signUpFallbackRedirectUrl="/"
+      routerPush={(to) => navigate(to)} routerReplace={(to) => navigate(to, { replace: true })}>
       <ClerkApp agentConfig={config} />
     </ClerkProvider>
   );
 }
 
 function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
-  const clerk = useClerk();
   const { isLoaded, isSignedIn, userId, sessionId, orgId, getToken } = useAuth();
   const loc = useLocation();
   const fileId = new URL(loc, location.origin).pathname.match(/^\/f\/([\w-]+)\/?$/)?.[1] ?? null;
@@ -143,9 +160,10 @@ function ClerkApp({ agentConfig }: { agentConfig: AgentConnectionConfig }) {
 
   if (!isLoaded) return <OpeningLoading />;
   if (!isSignedIn) {
-    // Clerk's hosted sign-in returns to the exact file, page and selection that was opened.
-    const returnTo = new URL(loc.startsWith("/") && !loc.startsWith("//") ? loc : "/", location.origin).href;
-    return <Landing onSignIn={() => clerk.redirectToSignIn({ signInForceRedirectUrl: returnTo, signUpForceRedirectUrl: returnTo })} />;
+    // Sign-in returns to the exact file, page and selection that was opened.
+    const page = accountPage(loc);
+    if (page) return <AccountScreen page={page} />;
+    return <Landing onSignIn={async () => navigate(signInPath(loc))} />;
   }
   // An identity or workspace change must never retain a previous editor's socket or data.
   return <AuthenticatedApp key={`${userId}:${sessionId}:${orgId ?? "none"}`} agentConfig={agentConfig} />;
@@ -155,6 +173,8 @@ function AuthenticatedApp({ agentConfig }: { agentConfig: AgentConnectionConfig 
   const loc = useLocation();
   const path = new URL(loc, location.origin).pathname;
   const file = path.match(/^\/f\/([\w-]+)\/?$/);
+  // A signed-in member never stays on an account page; it was only a step on the way to its destination.
+  if (accountPage(path)) return <LeaveAccountPage to={accountReturn(loc, location.origin) ?? "/"} />;
   // File metadata includes the verified author; opening a deep link does not need a workspace bootstrap first.
   if (file) return <EditorRoute key={file[1]} fileId={file[1]!} />;
   return <WorkspaceHome agentConfig={agentConfig} />;
@@ -193,6 +213,30 @@ function WorkspaceHome({ agentConfig }: { agentConfig: AgentConnectionConfig }) 
   }} />;
   if (!me) return <OpeningLoading />;
   return <Home key={me.activeWorkspaceId ?? "none"} me={me} agentConfig={agentConfig} />;
+}
+
+/**
+ * Clerk's prebuilt sign-in or sign-up on the Graphite shell. Hash routing keeps every step on this path;
+ * switching between the two keeps `redirect_url`, so the member still lands where they started.
+ */
+function AccountScreen({ page }: { page: AccountPage }) {
+  const loc = useLocation();
+  const { search } = new URL(loc, location.origin);
+  const back = accountReturn(loc, location.origin) ?? undefined;
+  return (
+    <div className="account-screen shell">
+      <main className="account-sheet canvas-dots">
+        {page === "sign-in"
+          ? <SignIn routing="hash" signUpUrl={`/sign-up${search}`} forceRedirectUrl={back} signUpForceRedirectUrl={back} />
+          : <SignUp routing="hash" signInUrl={`/sign-in${search}`} forceRedirectUrl={back} signInForceRedirectUrl={back} />}
+      </main>
+    </div>
+  );
+}
+
+function LeaveAccountPage({ to }: { to: string }) {
+  useLayoutEffect(() => navigate(to, { replace: true }), [to]);
+  return <OpeningLoading />;
 }
 
 /** Every step before the destination renders keeps its label; a file opens straight onto its canvas. */

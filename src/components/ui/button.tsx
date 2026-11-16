@@ -4,20 +4,21 @@ import { cn } from "cn"
 import { Slot } from "radix-ui"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent bg-clip-padding text-xs/relaxed font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-2 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-md border border-transparent text-xs/relaxed font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:outline-solid aria-invalid:outline-1 aria-invalid:outline-offset-1 aria-invalid:outline-destructive/70 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
+        default:
+          "key-primary hover:[background-image:linear-gradient(color-mix(in_oklab,var(--color-primary-foreground)_10%,transparent),color-mix(in_oklab,var(--color-primary-foreground)_10%,transparent)),var(--pkey)]",
         outline:
-          "border-border hover:bg-input/50 hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:bg-input/30",
+          "border-border bg-transparent text-foreground [box-shadow:inset_0_0.5px_0_var(--hi),0_1px_3px_rgb(0_0_0/.1)] hover:border-transparent hover:[background:var(--key)] hover:[box-shadow:var(--key-shadow)] aria-expanded:border-transparent aria-expanded:[background:var(--key)] aria-expanded:[box-shadow:var(--key-shadow)]",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "key hover:[background-image:linear-gradient(color-mix(in_oklab,var(--color-foreground)_6%,transparent),color-mix(in_oklab,var(--color-foreground)_6%,transparent)),var(--key)]",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "text-muted-foreground hover:text-foreground hover:[background:var(--key)] hover:[box-shadow:var(--key-shadow)] aria-expanded:text-foreground aria-expanded:[background:var(--key)] aria-expanded:[box-shadow:var(--key-shadow)] aria-pressed:text-foreground aria-pressed:[background:var(--key)] aria-pressed:[box-shadow:var(--key-shadow)]",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
-        link: "text-primary underline-offset-4 hover:underline",
+          "key-destructive hover:brightness-110 focus-visible:outline-destructive/60",
+        link: "text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground",
       },
       size: {
         default:

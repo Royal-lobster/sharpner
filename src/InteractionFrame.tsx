@@ -59,6 +59,6 @@ export function InteractionFrame({ id, html, design, width, height, title, onSto
       // The srcdoc's own load precedes readiness. A load after it means authored code navigated away.
       onLoad={() => { if (ready) stopRef.current(); }}
     />
-    {!ready && <div className="interaction-loading" role="status">Starting interaction…</div>}
+    {!ready && <div className="interaction-loading" role="status"><span className="spinner-ring" aria-hidden />Starting interaction…</div>}
   </>;
 }

@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLayoutGrid, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
-import { api, type FileInfo, type User } from "./api";
+import { api, HttpError, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
-import type { CommentAnchor, CommentThread } from "../shared/types";
+import type { CommentAnchor, CommentThread, Page } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canInteract } from "./canvas-render-plan";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
+import { withoutComponents } from "./canvas-layout";
+import { pageOutline, type OutlineItem } from "./page-outline";
 import { Room } from "./room";
 import { Link } from "./router";
 import { askConfirm, askText } from "./dialog";
@@ -22,13 +24,9 @@ import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMe
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDesktop } from "@/hooks/use-media-query";
+import { useDesktop, useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { ButtonGroup } from "@/components/ui/button-group";
-import { Separator } from "@/components/ui/separator";
 import { claimFileStartup, type FileMeta } from "./file-startup";
-import { Item, ItemGroup } from "@/components/ui/item";
 import { Kbd } from "@/components/ui/kbd";
 import { AvatarStack } from "@/components/ui/avatar-stack";
 
@@ -59,7 +57,7 @@ export function SharedEditor({ token }: { token: string }) {
     return () => { controller.abort(); active?.close(); };
   }, [token]);
   if (error) return <Notice title="This link isn’t shared anymore" message="Ask someone in the workspace for a new link." action={<Button asChild size="lg"><a href="/">Open Sharpner</a></Button>} />;
-  if (!room || !meta) return <Loading label="Opening shared file…" canvas />;
+  if (!room || !meta) return <EditorLoading label="Opening shared file…" />;
   return <EditorInner room={room} meta={meta} user={meta.user} readOnly onChange={() => {}} />;
 }
 
@@ -115,16 +113,23 @@ export function Editor({ fileId }: { fileId: string }) {
       expose();
     }).catch((e: Error) => {
       active?.close();
-      if (!cancelled && e.name !== "AbortError") setError(e.message);
+      if (cancelled || e.name === "AbortError") return;
+      // The server's "not found" is terse; say what it means for the member.
+      setError(e instanceof HttpError && e.status === 404 ? "It may have been deleted, or the link is incomplete." : e.message);
     });
     return () => { cancelled = true; controller.abort(); unsubscribe?.(); startup?.dispose(); active?.close(); };
   }, [fileId, userId, sessionId, orgId, clerk]);
 
   if (error) return <Notice title="This file couldn’t open" message={error} action={<Button asChild size="lg"><Link href="/">Back to files</Link></Button>} />;
-  if (!room || !meta) return <Loading label="Opening file…" canvas />;
+  if (!room || !meta) return <EditorLoading label="Opening file…" />;
   return <EditorInner room={room} meta={meta} user={meta.user}
     onChange={(file) => setMeta({ ...meta, file: { ...meta.file, ...file } })}
     onShare={(shareToken) => setMeta({ ...meta, shareToken })} />;
+}
+
+/** Before the room opens: the editor's shell and sheet around the loading canvas, so the editor arrives in place. */
+function EditorLoading({ label }: { label: string }) {
+  return <div className="editor shell"><main className="stage"><Loading label={label} canvas /></main></div>;
 }
 
 function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: {
@@ -132,8 +137,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
 }) {
   useSyncExternalStore(room.subscribe, room.getVersion);
   const desktop = useDesktop();
+  // Phones: the collaboration notch moves to the bottom-left corner and the comments panel becomes a sheet.
+  const narrow = useMediaQuery("(max-width: 700px)");
   const { file, workspace } = meta;
-  const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes } = useCanvasLocation(file.id, room);
+  const { pageId, selection: liveSelection, selectionFocus, selectPage, selectNodes, focusNodes } = useCanvasLocation(file.id, room);
+  // Sections this viewer opened or closed in the pages popover; the rest follow the selection.
+  const [openSections, setOpenSections] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   // A marquee commits to the URL on release; until then the selection toolbar follows what it covers.
   const [marqueeSelection, setMarqueeSelection] = useState<string[] | null>(null);
   const [open, setOpen] = useState<"pages" | "file" | "share" | "people" | null>(null);
@@ -229,48 +238,70 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
   playableRef.current = playable?.id ?? null;
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
+  const commentsShown = !readOnly && commentsOpen && !commentMode;
+  // Agents at work on this page, for the notch above the canvas. The frames themselves show the trace.
+  const working = [...room.agentActivity].flatMap(([id, activity]) => {
+    const node = room.nodes.get(id);
+    return node?.pageId === page?.id && !hidden(id) ? [{ agent: activity.name, node }] : [];
+  });
+  const agents = [...new Set(working.map((w) => w.agent))];
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
   return (
-    <div className="editor" ref={trackKeyboardInset}>
-      <main className={cn("stage", !readOnly && commentsOpen && !commentMode && "comments-open")}>
+    <div className={cn("editor shell", commentsShown && "comments-open")} ref={trackKeyboardInset}>
+      <main className={cn("stage", commentsShown && "comments-open")}>
         {page ? (
           <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} onMarqueeSelection={setMarqueeSelection} readOnly={readOnly} hideComponents={hidingComponents}
             interactionId={playbackValid ? interactionId : null} onInteract={setInteractionId}
-            commentMode={commentMode} activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
+            commentMode={commentMode} onCommentMode={readOnly ? undefined : (on) => on ? startComment() : setCommentMode(false)}
+            activeCommentId={activeCommentId} commentFocus={commentFocus} onOpenComment={selectComment} draftComment={commentsOpen ? draftComment : null}
             onPlaceComment={(anchor) => { setDraftComment(anchor); setActiveCommentId(null); setCommentMode(false); setCommentsOpen(true); }} />
         ) : (
           <Loading label={room.status === "offline" ? "Reconnecting…" : readOnly ? "Opening shared file…" : "Opening file…"} canvas />
         )}
-        {!readOnly && !commentMode && !interactionId && selected.length > 0 && (
-          <div className="selection-bar canvas-glass" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={(event) => event.stopPropagation()}>
-            <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
-            <span className="selection-agents">visible to agents</span>
-            {playable && <Separator orientation="vertical" className="selection-divider" />}
-            {playable && <Tooltip><TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}><IconPlayerPlay aria-hidden />Interact</Button>
-            </TooltipTrigger><TooltipContent side="bottom">Try clicks, typing and scrolling. Nothing you do is saved. <Kbd>Enter</Kbd>, or click the design again.</TooltipContent></Tooltip>}
+        {!readOnly && commentMode ? (
+          <div className={cn("comment-placement", narrow ? "floaty" : "notch notch-t")} role="status">
+            <IconMessageCircle className="size-4 flex-none text-faint" aria-hidden />
+            <span>Click a spot to leave a comment</span>
+            <Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button>
+          </div>
+        ) : working.length > 0 && (
+          <div className={cn("agent-status", narrow ? "floaty" : "notch notch-t")} role="status">
+            <span className="agent-status-mark" aria-hidden><span className="agent-sweep" /><span className="key-primary"><IconSparkles /></span></span>
+            <span className="agent-status-text">
+              <strong>{agents.length === 1 ? agents[0] : `${agents.length} agents`}</strong>{" "}
+              <span>{agents.length === 1 ? "is" : "are"} editing {working.length === 1 ? working[0]!.node.name : `${working.length} designs`}</span>
+            </span>
           </div>
         )}
-        {!readOnly && commentMode && <div className="comment-placement canvas-glass" role="status">Click a spot to leave a comment<Button variant="ghost" size="sm" onClick={() => setCommentMode(false)}>Cancel</Button></div>}
-        {!readOnly && <CommentsPanel room={room} open={commentsOpen && !commentMode} activeId={activeCommentId} draft={draftComment}
-          onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
+        {!readOnly && !commentMode && !interactionId && selected.length > 0 && (
+          <div className="selection-bar floaty" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={stop}>
+            <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
+            <span className="selection-agents">visible to agents</span>
+            {playable && <Tooltip><TooltipTrigger asChild>
+              <Button size="lg" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}>
+                <IconPlayerPlay aria-hidden />Interact<kbd className="selection-kbd" aria-hidden>↵</kbd>
+              </Button>
+            </TooltipTrigger><TooltipContent side="top">Try clicks, typing and scrolling. Nothing you do is saved. <Kbd>Enter</Kbd>, or click the design again.</TooltipContent></Tooltip>}
+          </div>
+        )}
       </main>
-      {/* Keyboard interaction with the dock and its panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
-      <div className="editor-dock editor-navigation" ref={trackNavigationEnd} onKeyDown={(e) => e.stopPropagation()}>
-        <nav aria-label="File and pages"><ButtonGroup className="dock-bar canvas-glass">
-          {readOnly ? (
-            <Button variant="ghost" size="icon" asChild className="back"><a href="/" aria-label="Sharpner"><img src="/mark.svg" width={24} height={24} alt="" /></a></Button>
-          ) : (
-            <Button variant="ghost" size="icon" asChild className="back"><Link href={`/?workspace=${workspace.id}`} aria-label="All files"><img src="/mark.svg" width={24} height={24} alt="" /></Link></Button>
-          )}
+      {!readOnly && <CommentsPanel room={room} open={commentsShown} activeId={activeCommentId} draft={draftComment}
+        onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
+      {/* Keyboard interaction with the notches and their panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
+      <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>
+        <nav aria-label="File and pages" className="dock-bar">
+          {readOnly
+            ? <a href="/" aria-label="Sharpner" className="mark-tile dock-mark"><img src="/mark.svg" width={18} height={18} alt="" className="mark" /></a>
+            : <Link href={`/?workspace=${workspace.id}`} aria-label="All files" className="mark-tile dock-mark"><img src="/mark.svg" width={18} height={18} alt="" className="mark" /></Link>}
           <DropdownMenu open={open === "file"} onOpenChange={toggle("file")}>
             <DropdownMenuTrigger asChild>
-              <Button ref={fileTrigger} variant="ghost" className="dock-button dock-file-button" aria-label={`File menu for ${file.name}`} title={`${file.name} · ${status}`}>
+              <Button ref={fileTrigger} variant="ghost" size="lg" className="dock-button dock-file-button" aria-label={`File menu for ${file.name}`} title={`${file.name} · ${status}`}>
                 <span>{file.name}</span>
-                <span className={`status dock-status ${room.status}`} aria-hidden />
-                <ChevronDown className="dock-chevron size-3" aria-hidden />
+                <span className={`dock-status ${room.status}`} aria-hidden />
+                <ChevronDown className="dock-chevron" aria-hidden />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent side="bottom" align="start" sideOffset={10} collisionPadding={16} className="canvas-glass w-56" aria-label="File actions"
+            <DropdownMenuContent side="bottom" align="start" sideOffset={12} collisionPadding={16} className="dock-menu w-60" aria-label="File actions"
               onCloseAutoFocus={(event) => {
                 const action = pendingFileAction.current;
                 if (!action) return;
@@ -298,36 +329,28 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
             </DropdownMenuContent>
           </DropdownMenu>
           <span className="sr-only" role="status">{status}</span>
-          <Separator orientation="vertical" className="dock-divider" />
+          <span className="dock-slash" aria-hidden>/</span>
           <DockPanel label="Pages" count={room.pages.length} open={open === "pages"} onOpenChange={toggle("pages")} className="dock-pages" side="bottom"
             trigger={
-              <Button variant="ghost" className="dock-button dock-page-button">
-                <FileText className="size-4" aria-hidden />
+              <Button variant="ghost" size="lg" className="dock-button dock-page-button">
                 <span>{page?.name ?? "Pages"}</span>
-                <ChevronDown className="dock-chevron size-3" aria-hidden />
+                <ChevronDown className="dock-chevron" aria-hidden />
               </Button>
             }>
-            <ItemGroup className="page-list gap-1">
-              {room.pages.map((p) => (
-                <Item role="listitem" size="xs" key={p.id} className={cn("page-item flex-nowrap gap-1 p-0", p.id === page?.id && "bg-muted")}>
-                  <Button variant="ghost" className="page-option" aria-current={p.id === page?.id ? "page" : undefined} onClick={() => { selectPage(p.id); setOpen(null); }}>
-                    <span className="page-option-text">
-                      <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
-                      {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
-                    </span><Badge variant="secondary" aria-label={`${counts.get(p.id) ?? 0} designs`}>{counts.get(p.id) ?? 0}</Badge>
-                  </Button>
-                </Item>
-              ))}
-            </ItemGroup>
+            <PageList pages={room.pages} current={page?.id ?? null} counts={counts}
+              outline={open === "pages" && page ? pageOutline(hidingComponents ? withoutComponents(room.pageNodes(page.id)) : room.pageNodes(page.id), { selection: liveSelection, toggled: openSections }) : []}
+              onPage={(id) => { selectPage(id); setOpen(null); }}
+              onToggleSection={(id, next) => setOpenSections((current) => new Map(current).set(id, next))}
+              onDesign={(id) => { focusNodes([id]); setOpen(null); }} />
           </DockPanel>
-        </ButtonGroup></nav>
+        </nav>
       </div>
-      {!readOnly && <div className="editor-dock editor-collaboration" onKeyDown={(e) => e.stopPropagation()}>
-        <nav aria-label="Collaboration"><ButtonGroup className="dock-bar canvas-glass">
-          <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people"
-            trigger={<Button variant="ghost" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
+      {!readOnly && <div className={cn("editor-notch editor-collaboration notch", narrow ? "notch-bl" : "notch-tr")} onKeyDown={stop}>
+        <nav aria-label="Collaboration" className="dock-bar">
+          <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people" side="bottom" align="end"
+            trigger={<Button variant="ghost" size="lg" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
               title={people.map((p) => p.id === user.id ? `${p.name} (you)` : p.name).join(", ") || "Reconnecting…"}>
-              <AvatarStack max={desktop ? 4 : 2} size={28}>{people.length
+              <AvatarStack max={desktop ? 4 : 2} size={24}>{people.length
                 ? people.map((p) => <Avatar key={p.id} id={p.id} name={p.name} src={p.avatar} />)
                 : <Avatar id={user.id} name={user.name} src={user.avatar_url} />}</AvatarStack>
               <span className={`presence-dot${room.status !== "open" ? " disconnected" : ""}`} aria-hidden />
@@ -341,24 +364,26 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <span className="presence-dot" aria-label="Online" />
             </Button>)}
             {room.status !== "open" && <p className="text-xs text-muted-foreground">Reconnecting to see who’s here…</p>}
-            {room.agentActivity.size > 0 && <div className="agent-presence"><IconSparkles aria-hidden />An agent is working in this file</div>}
+            {room.agentActivity.size > 0 && <div className="agent-presence well">
+              <span className="agent-status-mark" aria-hidden><span className="agent-sweep" /><span className="key-primary"><IconSparkles /></span></span>
+              An agent is working in this file
+            </div>}
           </DockPanel>
-          <Button ref={commentsTrigger} variant="ghost" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
-            aria-expanded={commentsOpen && !commentMode} aria-controls="comments-panel"
+          <Button ref={commentsTrigger} variant="ghost" size="lg" className="dock-button dock-comments-button" aria-label={`Comments, ${openComments} open`} aria-pressed={commentsOpen || commentMode}
+            aria-expanded={commentsShown} aria-controls="comments-panel"
             title="Comments (C to add)" onClick={() => { setCommentsOpen((value) => !value); setCommentMode(false); setOpen(null); }}>
-            <IconMessageCircle className="size-4" aria-hidden /><span className="dock-comments-count">{openComments > 99 ? "99+" : openComments || ""}</span>
+            <IconMessageCircle aria-hidden /><span className="dock-comments-count">{openComments > 99 ? "99+" : openComments || ""}</span>
           </Button>
-          <Separator orientation="vertical" className="dock-divider dock-share-divider" />
-          <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share"
+          <DockPanel label="Share" open={open === "share"} onOpenChange={toggle("share")} className="dock-share" side="bottom" align="end"
             trigger={
-              <Button variant="ghost" className="dock-button dock-share-button" aria-label="Share file">
-                <Link2 className="size-4" aria-hidden />
-                <span className="dock-share-label">Share</span>{meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
+              <Button size={narrow ? "icon-lg" : "lg"} className="dock-share-button" aria-label="Share file">
+                {narrow ? <Link2 aria-hidden /> : <span className="dock-share-label">Share</span>}
+                {meta.shareToken && <span className="share-on-dot" aria-label="Link sharing is on" role="img" />}
               </Button>
             }>
             <ShareLink fileId={file.id} token={meta.shareToken} view={{ pageId, selection: liveSelection }} onChange={(token) => onShare?.(token)} />
           </DockPanel>
-        </ButtonGroup></nav>
+        </nav>
       </div>}
       <ResponsiveDialog title="Canvas controls" open={dialog === "help"} onOpenChange={(next) => setDialog(next ? "help" : null)}>
         <div className="canvas-help">
@@ -392,12 +417,12 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
 }
 
 /**
- * One corner control and its panel: a popover beside its dock on wide screens, a bottom sheet on phones.
+ * One notch control and its panel: a popover under its notch on wide screens, a bottom sheet on phones.
  * The panel's label is its one visible heading, so content inside never repeats it.
  */
-function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, trigger, className, side = "top", children }: {
+function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, trigger, className, side = "top", align = "start", children }: {
   label: string; count?: number; action?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void;
-  onEscapeKeyDown?: (e: globalThis.KeyboardEvent) => void; trigger: ReactElement; className?: string; side?: "top" | "bottom"; children: ReactNode;
+  onEscapeKeyDown?: (e: globalThis.KeyboardEvent) => void; trigger: ReactElement; className?: string; side?: "top" | "bottom"; align?: "start" | "end"; children: ReactNode;
 }) {
   const desktop = useDesktop();
   const content = useRef<HTMLDivElement>(null);
@@ -410,16 +435,16 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
   const keepForModal = (e: Event) => { if ((e.target as Element | null)?.closest?.("[data-slot=dialog-content], [data-slot=drawer-content], [data-slot=alert-dialog-content]")) e.preventDefault(); };
   const heading = (Title: typeof DrawerTitle | "h2") => (
     <div className="dock-panel-head">
-      <Title className="dock-panel-title">{label}{count !== undefined && <Badge variant="secondary" aria-label={`${count} total`}>{count}</Badge>}</Title>
+      <Title className="dock-panel-title">{label}{count !== undefined && <span className="dock-panel-count" aria-label={`${count} total`}>{count}</span>}</Title>
       {action}
     </div>
   );
   if (desktop) return (
     <Popover open={open} onOpenChange={change}>
       <PopoverTrigger asChild>{trigger}</PopoverTrigger>
-      <PopoverContent ref={content} side={side} align="start" sideOffset={10} collisionPadding={16} aria-label={label}
+      <PopoverContent ref={content} side={side} align={align} sideOffset={12} collisionPadding={16} aria-label={label}
         onEscapeKeyDown={onEscapeKeyDown} onFocusOutside={keepForModal} onInteractOutside={keepForModal}
-        className={cn("dock-popover canvas-glass w-[340px] gap-0 p-0", className)}>
+        className={cn("dock-popover w-[320px] gap-0 p-0", className)}>
         {heading("h2")}
         <div className="dock-panel-body">{children}</div>
       </PopoverContent>
@@ -429,11 +454,58 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
     <Drawer open={open} onOpenChange={change} autoFocus>
       <DrawerTrigger asChild>{trigger}</DrawerTrigger>
       <DrawerContent ref={content} onEscapeKeyDown={onEscapeKeyDown} aria-describedby={undefined}
-        className={cn("dock-popover canvas-glass", className)}>
+        className={cn("dock-popover", className)}>
         {heading(DrawerTitle)}
         <div className="dock-panel-body">{children}</div>
       </DrawerContent>
     </Drawer>
+  );
+}
+
+const designCount = (n: number) => `${n} design${n === 1 ? "" : "s"}`;
+
+/**
+ * Every page of the file, and the current page's outline: its sections, with the screens of open sections.
+ * Members only navigate here; agents add, rename, reorder and delete pages.
+ */
+function PageList({ pages, current, counts, outline, onPage, onToggleSection, onDesign }: {
+  pages: Page[]; current: string | null; counts: ReadonlyMap<string, number>; outline: OutlineItem[];
+  onPage: (id: string) => void; onToggleSection: (id: string, open: boolean) => void; onDesign: (id: string) => void;
+}) {
+  const tree = (items: OutlineItem[]): ReactNode => items.map((item) => item.kind === "section" ? (
+    <li key={item.node.id} className="outline-section">
+      <button type="button" className="outline-row outline-section-row" aria-expanded={item.open} onClick={() => onToggleSection(item.node.id, !item.open)}
+        title={item.node.description || item.node.name}>
+        <ChevronDown className="outline-chevron" aria-hidden /><span className="truncate">{item.node.name}</span>
+        <span className="outline-count" aria-label={designCount(item.count)}>{item.count}</span>
+      </button>
+      {item.open && item.children.length > 0 && <ul className="outline-children">{tree(item.children)}</ul>}
+    </li>
+  ) : (
+    <li key={item.node.id}>
+      <button type="button" className="outline-row outline-design" aria-current={item.selected || undefined} onClick={() => onDesign(item.node.id)}>
+        <span className="truncate">{item.node.name}</span>{item.selected && <span className="outline-selected">selected</span>}
+      </button>
+    </li>
+  ));
+  return (
+    <ul className="page-list" aria-label="Pages">
+      {pages.map((p) => {
+        const Icon = p.kind === "design-system" ? IconLayoutGrid : FileText;
+        const active = p.id === current;
+        return <li key={p.id} className="page-item">
+          <button type="button" className={cn("page-option", active && "key")} aria-current={active ? "page" : undefined} onClick={() => onPage(p.id)}>
+            <Icon className="page-icon" aria-hidden />
+            <span className="page-option-text">
+              <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
+              {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
+            </span>
+            <span className="page-count" aria-label={designCount(counts.get(p.id) ?? 0)}>{counts.get(p.id) ?? 0}</span>
+          </button>
+          {active && outline.length > 0 && <ul className="page-outline" aria-label={`Sections on ${p.name}`}>{tree(outline)}</ul>}
+        </li>;
+      })}
+    </ul>
   );
 }
 
@@ -461,18 +533,6 @@ function useHiddenComponents() {
     try { next ? localStorage.setItem(HIDE_COMPONENTS_KEY, "1") : localStorage.removeItem(HIDE_COMPONENTS_KEY); } catch { /* private mode keeps it for this tab */ }
   };
   return [hide, update] as const;
-}
-
-/** Publishes where the navigation dock ends as `--nav-end`, so the selection bar centers in the space beside it. */
-function trackNavigationEnd(el: HTMLElement | null) {
-  const editor = el?.closest<HTMLElement>(".editor");
-  if (!el || !editor) return;
-  const update = () => editor.style.setProperty("--nav-end", `${Math.ceil(el.getBoundingClientRect().right - editor.getBoundingClientRect().left)}px`);
-  const observer = new ResizeObserver(update);
-  observer.observe(el);
-  addEventListener("resize", update);
-  update();
-  return () => { observer.disconnect(); removeEventListener("resize", update); };
 }
 
 /** View-only link sharing for a file: off, or one link anyone can open to watch. */

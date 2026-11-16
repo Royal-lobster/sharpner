@@ -15,11 +15,14 @@ export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) 
   const top = Math.min((compact ? 68 : 64) + LABEL_ROOM, (height - 1) / 3);
   const bottom = Math.min(compact ? 92 : 64, (height - 1) / 3);
   const viewport = { x: left, y: top, w: width - left * 2, h: height - top - bottom };
+  // Fitting a selection shows the selection bar above the zoom notch; the fitted designs must clear it too.
+  const selectionBottom = Math.min(112, (height - 1) / 3);
+  const selectionViewport = { ...viewport, h: height - top - Math.max(bottom, selectionBottom) };
 
-  const fitRect = (rect: Rect, maxZoom: number): Camera => {
-    const z = Math.min(maxZoom, viewport.w / Math.max(1, rect.w), viewport.h / Math.max(1, rect.h));
-    return { z, x: viewport.x + (viewport.w - rect.w * z) / 2 - rect.x * z,
-      y: viewport.y + (viewport.h - rect.h * z) / 2 - rect.y * z };
+  const fitRect = (rect: Rect, maxZoom: number, area = viewport): Camera => {
+    const z = Math.min(maxZoom, area.w / Math.max(1, rect.w), area.h / Math.max(1, rect.h));
+    return { z, x: area.x + (area.w - rect.w * z) / 2 - rect.x * z,
+      y: area.y + (area.h - rect.h * z) / 2 - rect.y * z };
   };
   // Small designs open at 100%; large clusters can always fit, even below the old 1% zoom floor.
   const overview = fitRect(bounds, 1);
@@ -37,6 +40,6 @@ export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) 
   };
 
   return { bounds, minZoom, overview, constrain,
-    fit: (targets: Rect[], maxZoom = 1) => constrain(fitRect(targets.length ? union(targets) : bounds, maxZoom)),
+    fit: (targets: Rect[], maxZoom = 1) => constrain(targets.length ? fitRect(union(targets), maxZoom, selectionViewport) : fitRect(bounds, maxZoom)),
   };
 }

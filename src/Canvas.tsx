@@ -17,10 +17,9 @@ import { marqueeCommit, marqueeRect, marqueeSelection, sameSelection } from "./c
 import type { Room } from "./room";
 import { canInteract, HI_RES_MIN_PIXELS, planCanvasRendering, type Camera as Cam, type ProjectedNode } from "./canvas-render-plan";
 import { Button } from "@/components/ui/button";
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
-import { Separator } from "@/components/ui/separator";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { IconLayout, IconMaximize, IconMinus, IconPlayerPlay, IconPlayerStop, IconPlus, IconRotateClockwise } from "@tabler/icons-react";
+import { IconLayout, IconMaximize, IconMessageCircle, IconMinus, IconPlayerPlay, IconPlayerStop, IconPlus, IconPointer, IconRotateClockwise, IconCheck } from "@tabler/icons-react";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { usePreviewPrefetch } from "./hooks/use-preview-prefetch";
 import { MAX_CANVAS_ZOOM } from "./canvas-navigation";
 import { anchoredToHidden, CanvasLayout } from "./canvas-layout";
@@ -65,6 +64,8 @@ type Props = {
   interactionId?: string | null;
   onInteract?: (id: string | null) => void;
   commentMode?: boolean;
+  /** Members switch between selecting and placing comments from the zoom notch's tools. Absent for link viewers. */
+  onCommentMode?: (on: boolean) => void;
   activeCommentId?: string | null;
   commentFocus?: { id: string; request: number } | null;
   onPlaceComment?: (anchor: CommentAnchor) => void;
@@ -72,8 +73,10 @@ type Props = {
   draftComment?: CommentAnchor | null;
 };
 
-export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, onMarqueeSelection, readOnly = false, hideComponents = false, interactionId, onInteract, commentMode = false, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
+export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSelect, onMarqueeSelection, readOnly = false, hideComponents = false, interactionId, onInteract, commentMode = false, onCommentMode, activeCommentId, commentFocus, onPlaceComment, onOpenComment, draftComment }: Props) {
   useSyncExternalStore(room.subscribe, room.getVersion);
+  // Phones keep the zoom level and Fit in the bottom-right notch; the tools and steps need more room.
+  const narrow = useMediaQuery("(max-width: 700px)");
   const rootRef = useRef<HTMLDivElement>(null);
   const [playbackReset, setPlaybackReset] = useState(0);
   // The editor only passes a design that may still be played (see `playbackValid`).
@@ -225,7 +228,12 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
     const anchor = draftComment ?? thread?.anchor;
     if (!anchor || anchor.pageId !== pageId || !size.w) return;
     const point = commentPoint(anchor, rects);
-    const z = clamp(camRef.current.z, 0.5, 2);
+    const current = camRef.current;
+    const z = clamp(current.z, 0.5, 2);
+    // A pin that is already in comfortable view stays put, so opening the comments column, which narrows the canvas,
+    // or choosing a visible pin doesn't move the designs under the pointer.
+    const sx = point.x * current.z + current.x, sy = point.y * current.z + current.y;
+    if (z === current.z && sx >= 48 && sx <= size.w - 48 && sy >= 96 && sy <= size.h - 96) return;
     animateCam({ z, x: size.w / 2 - point.x * z, y: size.h / 2 - point.y * z });
   }, [commentFocus?.request, draftComment, size.w, size.h]);
 
@@ -625,7 +633,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
         })}
         {peers.filter((p) => p.cursor && p.cid).map((p) => (
           <div key={p.cid} className="cursor" style={{ left: p.cursor!.x, top: p.cursor!.y, ["--c" as string]: colorFor(p.id) }}>
-            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1 1l5 14 2-6 6-2z" fill="var(--c)" stroke="#fff" strokeWidth="1.2" /></svg>
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden><path d="M2 1.5 L15.5 8.6 L9.3 10 L6.4 16 Z" fill="var(--c)" stroke="#0b0b0c" strokeWidth="1.2" strokeLinejoin="round" /></svg>
             <span>{p.name}</span>
           </div>
         ))}
@@ -636,11 +644,11 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
             aria-pressed={thread.id === activeCommentId} title={`#${thread.number} · ${thread.firstMessage.author.name}: ${thread.firstMessage.body}`}
             onPointerDown={(e) => e.stopPropagation()} onPointerUp={(e) => e.stopPropagation()} onPointerMove={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onOpenComment?.(thread); }}>
-            <Avatar id={thread.firstMessage.author.id} name={thread.firstMessage.author.name} src={thread.firstMessage.author.avatar} agent={thread.firstMessage.author.agent} />
+            {thread.resolvedAt ? <IconCheck aria-hidden /> : <Avatar id={thread.firstMessage.author.id} name={thread.firstMessage.author.name} src={thread.firstMessage.author.avatar} agent={thread.firstMessage.author.agent} />}
           </button>;
         })}
         {!readOnly && draftComment?.pageId === pageId && <span className="comment-pin draft" role="img" aria-label="New comment location"
-          style={{ left: commentPoint(draftComment, rects).x, top: commentPoint(draftComment, rects).y }}>+</span>}
+          style={{ left: commentPoint(draftComment, rects).x, top: commentPoint(draftComment, rects).y }}><IconPlus aria-hidden /></span>}
       </div>
       {marquee && (
         <div
@@ -658,30 +666,37 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
         </div>
       )}
     </div>
-    {playingNode && <div className="selection-bar interaction-controls canvas-glass" role="toolbar" aria-label="Interaction playback"
+    {playingNode && <div className="selection-bar interaction-controls floaty" role="toolbar" aria-label="Interaction playback"
       onPointerDown={(event) => event.stopPropagation()}>
       <span className="selection-name" title={playingNode.name}>{playingNode.name}</span>
-      <span className="interaction-status">Interacting</span>
-      <Separator orientation="vertical" className="selection-divider" />
-      <Button variant="ghost" size="sm" className="selection-action" aria-label="Reset interaction" onClick={() => setPlaybackReset((value) => value + 1)}><IconRotateClockwise aria-hidden />Reset</Button>
-      <Button variant="ghost" size="sm" className="selection-action" aria-label="Stop interaction" onClick={() => stopInteraction()}><IconPlayerStop aria-hidden />Stop</Button>
+      <span className="interaction-status"><span className="interaction-pulse" aria-hidden />Interacting</span>
+      <Button variant="ghost" size="lg" className="selection-action" aria-label="Reset interaction" onClick={() => setPlaybackReset((value) => value + 1)}><IconRotateClockwise aria-hidden />Reset</Button>
+      <Button variant="secondary" size="lg" className="selection-action" aria-label="Stop interaction" onClick={() => stopInteraction()}><IconPlayerStop aria-hidden />Stop<kbd className="selection-kbd" aria-hidden>Esc</kbd></Button>
     </div>}
-    <ButtonGroup className="zoom canvas-glass" role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-      <Button variant="ghost" size="icon" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
-        <IconMinus aria-hidden />
-      </Button>
-      <Button variant="ghost" className="zoom-pct" onClick={() => zoomAt(size.w / 2, size.h / 2, 1 / cam.z, true)} title="Zoom to 100% (⇧0)" aria-label={`Zoom ${Math.round(cam.z * 100)}%, reset to 100%`}>
-        {Math.round(cam.z * 100)}%
-      </Button>
-      <Button variant="ghost" size="icon" className="zoom-step" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25, true)} title="Zoom in (⌘+)" aria-label="Zoom in">
-        <IconPlus aria-hidden />
-      </Button>
-      <ButtonGroupSeparator className="zoom-divider" />
-      <Button variant="ghost" className="zoom-fit" onClick={() => fitTo([])} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
-        <IconMaximize aria-hidden />
-        <span>Fit</span>
-      </Button>
-    </ButtonGroup>
+    <div className={`zoom notch ${narrow ? "notch-br" : "notch-b"}`} role="toolbar" aria-label="Zoom" onPointerDown={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      {onCommentMode && !narrow && <span className="zoom-well well">
+        <Button variant="ghost" size="icon-lg" className="zoom-tool" aria-pressed={!commentMode} onClick={() => onCommentMode(false)} title="Select (Esc)" aria-label="Select">
+          <IconPointer aria-hidden />
+        </Button>
+        <Button variant="ghost" size="icon-lg" className="zoom-tool" aria-pressed={commentMode} onClick={() => onCommentMode(true)} title="Comment (C)" aria-label="Comment">
+          <IconMessageCircle aria-hidden />
+        </Button>
+      </span>}
+      <span className="zoom-well well">
+        {!narrow && <Button variant="ghost" size="icon-lg" className="zoom-step" disabled={cam.z <= navigation.minZoom} onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8, true)} title="Zoom out (⌘-)" aria-label="Zoom out">
+          <IconMinus aria-hidden />
+        </Button>}
+        <Button variant="ghost" size="lg" className="zoom-pct" onClick={() => zoomAt(size.w / 2, size.h / 2, 1 / cam.z, true)} title="Zoom to 100% (⇧0)" aria-label={`Zoom ${Math.round(cam.z * 100)}%, reset to 100%`}>
+          {Math.round(cam.z * 100)}%
+        </Button>
+        {!narrow && <Button variant="ghost" size="icon-lg" className="zoom-step" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25, true)} title="Zoom in (⌘+)" aria-label="Zoom in">
+          <IconPlus aria-hidden />
+        </Button>}
+        <Button variant="ghost" size="icon-lg" className="zoom-fit" onClick={() => fitTo([])} title="Zoom to fit (⇧1)" aria-label="Zoom to fit">
+          <IconMaximize aria-hidden />
+        </Button>
+      </span>
+    </div>
   </>;
 }
 
@@ -742,7 +757,7 @@ const FrameNode = memo(function FrameNode({ frame: f, label, catalog, x, y, heig
       style={{ left: x, top: y, width: specimenWidth(f), height, ["--peer" as string]: peerColor }}
     >
       {label && <div className="frame-label">{label}</div>}
-      {agent && <div className="agent-chip"><span className="aperture" />{agent}</div>}
+      {agent && <div className="agent-chip"><span className="spinner-ring agent-spinner" aria-hidden />{agent}</div>}
       <div className="frame-body">
         {lo && <img ref={top === lo ? topImage : undefined} src={lo} alt="" draggable={false} decoding="async" onLoad={top === lo ? () => setHandoff(false) : undefined} />}
         {tier === "hi" && hi && hi !== lo && <img ref={topImage} src={hi} alt="" draggable={false} decoding="async" onLoad={() => setHandoff(false)} />}
@@ -797,7 +812,7 @@ function InteractionLoading({ onTimeout }: { onTimeout: () => void }) {
     const timer = setTimeout(() => timeout.current(), INTERACTION_READY_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, []);
-  return <div className="interaction-loading" role="status">Loading interaction…</div>;
+  return <div className="interaction-loading" role="status"><span className="spinner-ring" aria-hidden />Loading interaction…</div>;
 }
 
 /** A negative delay fixed at mount puts a CSS loop on the shared clock: its phase at time t is (t % period) / period. */
@@ -824,11 +839,17 @@ function Trace({ doneAt }: { doneAt: number | undefined }) {
 
 // ---- raster layer -------------------------------------------------------------
 
+/**
+ * Graphite's dark canvas tokens, which the canvas 2D context can't read from CSS: keep them in sync with `.dark` in
+ * styles.css (--foreground, --canvas, --select, --faint, --muted-foreground, --border) and the frame rules beside it.
+ * Selection is a two-tone ring: the canvas color inside, --select outside.
+ */
 const COLORS = {
-  text: "#ece7df",
-  select: "oklch(0.72 0.14 275)", accent: "oklch(0.82 0.17 78)", muted: "#aca397", box: "#24201c", edge: "rgba(255,240,215,0.08)",
-  component: "#c084fc", componentEdge: "rgba(192,132,252,0.6)", tableRule: "rgba(255,240,215,0.14)", tokens: "#f9a8d4", section: "rgba(255,236,200,0.035)", sectionEdge: "rgba(255,240,215,0.08)", sectionText: "#dcd7cf",
-  placeholder: "#171412",
+  text: "#ededed", canvas: "#141415", select: "#fafafa", label: "#6e6e6e", muted: "#a3a3a3",
+  box: "#1d1d20", edge: "rgba(0,0,0,0.55)", placeholder: "#1d1d20",
+  component: "#b9a9d9", componentEdge: "rgba(185,169,217,0.55)", tokens: "#d9a9c2",
+  tableRule: "rgba(255,255,255,0.1)", section: "rgba(237,237,237,0.018)", sectionEdge: "rgba(255,255,255,0.08)", sectionText: "#a3a3a3",
+  chip: "rgba(20,20,21,0.86)", chipEdge: "rgba(255,255,255,0.08)",
 };
 const KIND_PREFIX: Record<CanvasNode["kind"], string> = { frame: "", image: "", section: "", component: "◆ ", tokens: "◎ " };
 
@@ -985,8 +1006,16 @@ export function paintRaster(
     }
     ctx.globalAlpha = 1;
     const ring = selected.has(f.id) ? COLORS.select : peers.get(f.id);
-    // Components keep a purple edge, so they read as definitions rather than screens at any zoom.
-    if (ring || !box || f.kind === "component") {
+    if (selected.has(f.id)) {
+      // Two tones, like .frame.selected: a canvas-colored gap, then the outer ring, so it reads on any design.
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = COLORS.canvas;
+      ctx.strokeRect(x - 0.5, y - 0.5, sw + 1, sh + 1);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = COLORS.select;
+      ctx.strokeRect(x - 1.75, y - 1.75, sw + 3.5, sh + 3.5);
+    } else if (ring || !box || f.kind === "component") {
+      // Components keep a tinted edge, so they read as definitions rather than screens at any zoom.
       ctx.strokeStyle = ring ?? (f.kind === "component" ? COLORS.componentEdge : COLORS.edge);
       ctx.lineWidth = ring ? 2 : 1;
       ctx.strokeRect(x - 0.5, y - 0.5, sw + 1, sh + 1);
@@ -1003,7 +1032,7 @@ export function paintRaster(
       // A label sits above its node while the gap holds it, then moves inside as a chip rather than disappearing.
       if (!f.parentId || labelsFit(catalogs.has(f.parentId) ? CATALOG_ROW_GAP : AUTO_ROW_GAP, cam.z)) {
         if (sw >= 60) {
-          ctx.fillStyle = color ?? COLORS.muted;
+          ctx.fillStyle = color ?? COLORS.label;
           ctx.fillText(fitLabel(ctx, label, sw), x, y - nodeBaseline);
         }
       } else labelChip(ctx, label, x, y, sw, color ?? COLORS.text);
@@ -1067,11 +1096,11 @@ function labelChip(ctx: CanvasRenderingContext2D, label: string, x: number, y: n
   const text = fitLabel(ctx, label, width - 20);
   if (!text) return;
   const w = Math.min(width - 8, ctx.measureText(text).width + 12);
-  ctx.fillStyle = "rgba(18, 16, 14, 0.82)";
+  ctx.fillStyle = COLORS.chip;
   ctx.beginPath();
   ctx.roundRect(Math.round(x + 4), Math.round(y + 4), Math.round(w), 18, 5);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255, 240, 215, 0.1)";
+  ctx.strokeStyle = COLORS.chipEdge;
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.fillStyle = color;
@@ -1096,11 +1125,12 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, width: number, ma
 }
 
 // ---- agent "graphite trace" (canvas layer) ----------------------------------------
+// Drawn in --trace (#ededed in .dark), the neutral light Graphite uses for an agent at work.
 // The raster twin of .trace and .agent-sheen: a comet laps the edge while a sheen glides across the node,
 // and finishing grows the tail into the full outline. Phases come from the shared clock, so a node keeps
 // its place when it moves between layers.
 
-const BLADE = "255,185,0";
+const BLADE = "237,237,237";
 const TRACE_GAP = 4;
 /** Comet dashes as [length, alpha], all ending at the head (fractions of the perimeter). Mirrors .trace-tail/-body/-head. */
 const COMET_TAIL = 0.2;
@@ -1176,11 +1206,11 @@ function sheen(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h
   const cx = x + w * (1.5 - 2 * position), cy = y + h / 2;
   const dx = Math.sin((100 * Math.PI) / 180) * w * 0.3, dy = -Math.cos((100 * Math.PI) / 180) * w * 0.3;
   const band = ctx.createLinearGradient(cx - dx, cy - dy, cx + dx, cy + dy);
-  band.addColorStop(0, "rgba(255,214,120,0)");
-  band.addColorStop(0.4, "rgba(255,214,120,0.14)");
-  band.addColorStop(0.5, "rgba(255,236,190,0.22)");
-  band.addColorStop(0.6, "rgba(255,214,120,0.14)");
-  band.addColorStop(1, "rgba(255,214,120,0)");
+  band.addColorStop(0, "rgba(255,255,255,0)");
+  band.addColorStop(0.4, "rgba(255,255,255,0.1)");
+  band.addColorStop(0.5, "rgba(255,255,255,0.18)");
+  band.addColorStop(0.6, "rgba(255,255,255,0.1)");
+  band.addColorStop(1, "rgba(255,255,255,0)");
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.globalCompositeOperation = "lighter";

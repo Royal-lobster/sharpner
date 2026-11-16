@@ -1,9 +1,10 @@
 "use client"
 
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { cn } from "cn"
 import { IconCircleCheck, IconInfoCircle, IconAlertTriangle, IconAlertOctagon, IconLoader } from "@tabler/icons-react"
 
-const Toaster = ({ theme = "dark", ...props }: ToasterProps) => {
+const Toaster = ({ theme = "dark", toastOptions, ...props }: ToasterProps) => {
 
   return (
     <Sonner
@@ -28,18 +29,24 @@ const Toaster = ({ theme = "dark", ...props }: ToasterProps) => {
       }}
       style={
         {
-          "--normal-bg": "var(--popover)",
+          "--normal-bg": "var(--float)",
           "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          "--normal-border": "transparent",
+          "--border-radius": "calc(var(--radius) * 1.4)",
         } as React.CSSProperties
       }
+      {...props}
       toastOptions={{
+        ...toastOptions,
         classNames: {
-          toast: "cn-toast",
+          ...toastOptions?.classNames,
+          // Sonner's own toast rules are unlayered, so the float shadow, padding and error tone need !important.
+          toast: cn(
+            "cn-toast px-4! py-3! text-xs/relaxed! shadow-(--float-shadow)! backdrop-blur-[20px] backdrop-saturate-130 data-[type=error]:text-destructive!",
+            toastOptions?.classNames?.toast
+          ),
         },
       }}
-      {...props}
     />
   )
 }

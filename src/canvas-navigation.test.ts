@@ -131,6 +131,16 @@ describe("bounded preview navigation", () => {
     }
   });
 
+  it("fits a chosen design above the selection bar that its selection shows", () => {
+    // The selection bar's top sits 100px above the sheet's bottom edge (40px notch, 16px gap, 44px bar).
+    for (const size of [desktop, { w: 390, h: 844 }]) {
+      const tall = { x: 4000, y: 0, w: 390, h: 760 };
+      const nav = canvasNavigation([{ x: 0, y: 0, w: 2000, h: 900 }, tall], size);
+      const target = nav.fit([tall], 4);
+      expect((tall.y + tall.h) * target.z + target.y).toBeLessThanOrEqual(size.h - 100);
+    }
+  });
+
   it("can fit huge pages below the old 1% floor and handles tiny or empty viewports", () => {
     const huge = canvasNavigation([{ x: -1e6, y: -1e6, w: 2e6, h: 2e6 }], desktop);
     expect(huge.minZoom).toBeLessThan(0.01);

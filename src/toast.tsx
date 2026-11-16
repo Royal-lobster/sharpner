@@ -23,12 +23,12 @@ export function toast(text: string, opts: { tone?: Tone; sticky?: boolean } = {}
   };
 }
 
+/** Toasts sit above the editor's zoom notch and selection bar (`--toast-offset`); the primitive gives them the floating surface. */
 export function Toaster() {
   const bottom = "calc(var(--toast-offset, 20px) + var(--safe-bottom))";
   return (
     <ShadcnToaster theme="dark" position="bottom-center" visibleToasts={3} expand duration={2600}
       className="toaster group sharpner-toaster" containerAriaLabel="Notifications"
-      offset={{ bottom }} mobileOffset={{ bottom, left: 16, right: 16 }}
-      toastOptions={{ classNames: { toast: "cn-toast canvas-toast" } }} />
+      offset={{ bottom }} mobileOffset={{ bottom, left: 16, right: 16 }} />
   );
 }
