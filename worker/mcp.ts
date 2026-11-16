@@ -6,13 +6,14 @@ import { authenticate, authErrorStatus, requireScope, type AppEnv, type Identity
 import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
 import { layoutHeight, layoutRects, type Rect } from "../shared/layout";
-import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type NodeInput, type Op, type Page } from "../shared/types";
+import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type CommentDetail, type NodeInput, type Op, type Page } from "../shared/types";
 import { themeNames } from "../shared/themes";
 import { propAxes } from "../shared/catalog-specimens";
 import skill from "./skills/sharpner/SKILL.md?raw";
 import designSystemGuide from "./skills/sharpner/references/design-system.md?raw";
 import screensGuide from "./skills/sharpner/references/screens.md?raw";
-import { commentAnchor, commentBody } from "./comment-schema";
+import { commentAnchor, commentBody, commentMentions } from "./comment-schema";
+import { deliverMentions, mentionActors, resolveMentions, workspaceMembers } from "./notifications";
 import { frictionReports, listFriction, reportFriction, SEVERITIES } from "./friction";
 
 const SKILL_FILES = { "SKILL.md": skill, "references/design-system.md": designSystemGuide, "references/screens.md": screensGuide } as const;
@@ -78,7 +79,8 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     inputSchema: {},
   }, async () => {
     const [workspaces, files, me] = await Promise.all([
-      workspacesFor(env, user.id),
+      workspacesFor(env, user.id).then((list) => Promise.all(list.map(async (w) => ({ ...w,
+        members: (await workspaceMembers(env, w.id)).map(({ id, name }) => ({ id, name })) })))),
       filesFor(env, user.id),
       env.DB.prepare(`SELECT last_file_id FROM users WHERE id = ?`).bind(user.id).first<{ last_file_id: string | null }>(),
     ]);
@@ -145,22 +147,35 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     return json(await stub.comment(threadId));
   });
 
+  const mentions = commentMentions.describe("Workspace member ids to notify. Write each as @Name in body.");
+  /** Tagged members hear about an agent's comment before the tool returns. */
+  const notify = (file: { id: string; name: string; workspace_id: string }, thread: CommentDetail, recipients: Awaited<ReturnType<typeof resolveMentions>>, stub: ReturnType<typeof room>) =>
+    deliverMentions(env, { workspaceId: file.workspace_id, file, origin,
+      thread: { id: thread.id, number: thread.number, pageId: thread.anchor.pageId }, message: thread.messages.at(-1)! },
+    recipients, () => stub.commentLocation(thread.anchor));
+
   server.registerTool("add_comment", {
     description: "Pin a comment to a node or page. With nodeId, x/y are offsets from its computed top-left. Otherwise, use page coordinates.",
-    inputSchema: { fileId: z.string(), anchor: commentAnchor, body: commentBody },
-  }, async ({ fileId, anchor, body }) => {
+    inputSchema: { fileId: z.string(), anchor: commentAnchor, body: commentBody, mentions },
+  }, async ({ fileId, anchor, body, mentions }) => {
     requireScope(identity, "sharpner:write");
-    const { stub } = await access(fileId);
-    return json(await stub.createComment(fileId, anchor, body, actor));
+    const { file, stub } = await access(fileId);
+    const recipients = await resolveMentions(env, file.workspace_id, mentions);
+    const thread = await stub.createComment(fileId, anchor, body, actor, mentionActors(recipients));
+    await notify(file, thread, recipients, stub);
+    return json(thread);
   });
 
   server.registerTool("reply_to_comment", {
     description: "Reply to a comment thread as the member's agent.",
-    inputSchema: { fileId: z.string(), threadId: z.string(), body: commentBody },
-  }, async ({ fileId, threadId, body }) => {
+    inputSchema: { fileId: z.string(), threadId: z.string(), body: commentBody, mentions },
+  }, async ({ fileId, threadId, body, mentions }) => {
     requireScope(identity, "sharpner:write");
-    const { stub } = await access(fileId);
-    return json(await stub.replyComment(fileId, threadId, body, actor));
+    const { file, stub } = await access(fileId);
+    const recipients = await resolveMentions(env, file.workspace_id, mentions);
+    const thread = await stub.replyComment(fileId, threadId, body, actor, mentionActors(recipients));
+    await notify(file, thread, recipients, stub);
+    return json(thread);
   });
 
   server.registerTool("resolve_comment", {

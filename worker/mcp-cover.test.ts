@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(), fileFor: vi.fn(), filesFor: vi.fn(), workspacesFor: vi.fn(),
-  apply: vi.fn(), cover: vi.fn(), outline: vi.fn(),
+  apply: vi.fn(), cover: vi.fn(), outline: vi.fn(), workspaceMembers: vi.fn(),
 }));
+vi.mock("./notifications", async (original) => ({ ...await original<typeof import("./notifications")>(), workspaceMembers: mocks.workspaceMembers }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({
   ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, filesFor: mocks.filesFor, workspacesFor: mocks.workspacesFor,
@@ -33,6 +34,7 @@ beforeEach(() => {
   mocks.fileFor.mockImplementation(async (_env: Env, _user: string, id: string) => id === "file" ? file : null);
   mocks.filesFor.mockResolvedValue([file]);
   mocks.workspacesFor.mockResolvedValue([{ id: "workspace", name: "Example", role: "member", clerkOrganizationId: "org" }]);
+  mocks.workspaceMembers.mockResolvedValue([{ id: "bob", name: "Bob", login: "bob@example.com", avatar: null }]);
   mocks.outline.mockResolvedValue([{ id: "cover-page", name: "Cover", sort: 0, description: "The workspace cover.", nodes: [] }]);
   mocks.cover.mockResolvedValue({ nodeId: "cover", url: "/a/file/t/cover-1-hi.webp" });
 });
@@ -60,6 +62,8 @@ describe("agent file covers", () => {
     expect(detail.value).toMatchObject({ id: "file", cover: expected, pages: [{ id: "cover-page" }] });
     const state = await call("get_app_state", {});
     expect(state.value.active).toMatchObject({ fileId: "file", cover: expected });
+    expect(state.value.workspaces[0].members).toEqual([{ id: "bob", name: "Bob" }]);
+    expect(mocks.workspaceMembers).toHaveBeenCalledWith(expect.anything(), "workspace");
     expect(state.value.workspaces[0].files).toEqual([{ id: "file", name: "Example app", libraryFileId: null }]);
   });
 

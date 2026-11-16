@@ -9,6 +9,9 @@ export const COMMENT_SCHEMA = `CREATE TABLE IF NOT EXISTS comment_threads (
   CREATE TABLE IF NOT EXISTS comment_messages (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, data TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS comment_messages_thread ON comment_messages(thread_id);`;
 
+/** Messages without tags keep their original shape. */
+const mentioning = (mentions: Actor[]) => mentions.length ? { mentions } : {};
+
 /** Synchronous SQLite operations run within the room's transaction. Authors always come from verified identity. */
 export class Comments {
   constructor(private sql: SqlStorage) {}
@@ -26,13 +29,13 @@ export class Comments {
     return { ...JSON.parse(row.data) as CommentThread, messages };
   }
 
-  create(anchor: CommentAnchor, body: string, author: Actor): CommentDetail {
+  create(anchor: CommentAnchor, body: string, author: Actor, mentions: Actor[] = []): CommentDetail {
     anchor = commentAnchor.parse(anchor);
     body = commentBody.parse(body);
     const now = Date.now();
     const number = this.sql.exec<{ n: number }>(`INSERT INTO meta(k, v) VALUES ('commentNumber', '1')
       ON CONFLICT(k) DO UPDATE SET v = CAST(v AS INTEGER) + 1 RETURNING CAST(v AS INTEGER) AS n`).toArray()[0]!.n;
-    const message: CommentMessage = { id: crypto.randomUUID(), author, body, createdAt: now };
+    const message: CommentMessage = { id: crypto.randomUUID(), author, body, createdAt: now, ...mentioning(mentions) };
     const thread: CommentThread = {
       id: crypto.randomUUID(), number,
       anchor, firstMessage: { ...message, body: body.slice(0, 240) }, messageCount: 1,
@@ -43,11 +46,11 @@ export class Comments {
     return { ...thread, messages: [message] };
   }
 
-  reply(id: string, body: string, author: Actor): CommentDetail {
+  reply(id: string, body: string, author: Actor, mentions: Actor[] = []): CommentDetail {
     body = commentBody.parse(body);
     const thread = this.get(id);
     if (thread.messages.length >= 200) throw new Error("This thread is full. Start a new comment to continue.");
-    const message: CommentMessage = { id: crypto.randomUUID(), author, body, createdAt: Date.now() };
+    const message: CommentMessage = { id: crypto.randomUUID(), author, body, createdAt: Date.now(), ...mentioning(mentions) };
     thread.messages.push(message);
     thread.messageCount++;
     thread.updatedAt = message.createdAt;

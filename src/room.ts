@@ -5,7 +5,7 @@ import { api, HttpError } from "./api";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
   componentTag, mergeDesignSystems, emptyBrand,
-  type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type DesignSystem, type LibraryInfo, type Page, type Peer, type Presence, type ServerMsg,
+  type CanvasNode, type ClientMsg, type CommentAnchor, type CommentDetail, type CommentThread, type MentionableMember, type DesignSystem, type LibraryInfo, type Page, type Peer, type Presence, type ServerMsg,
 } from "../shared/types";
 
 type Status = "connecting" | "open" | "offline" | "gone" | "denied";
@@ -521,12 +521,21 @@ export class Room {
     return api<CommentDetail>(`/files/${this.fileId}/comments/${id}`, { signal });
   }
 
-  async createComment(anchor: CommentAnchor, body: string) {
-    return this.writeComment("", "POST", { anchor, body });
+  async createComment(anchor: CommentAnchor, body: string, mentions: string[] = []) {
+    return this.writeComment("", "POST", { anchor, body, ...(mentions.length ? { mentions } : {}) });
   }
 
-  async replyComment(id: string, body: string) {
-    return this.writeComment(`/${id}/replies`, "POST", { body });
+  async replyComment(id: string, body: string, mentions: string[] = []) {
+    return this.writeComment(`/${id}/replies`, "POST", { body, ...(mentions.length ? { mentions } : {}) });
+  }
+
+  private memberList: Promise<MentionableMember[]> | null = null;
+  /** Workspace members a comment can tag, fetched once per open file; a failed fetch is retried next time. */
+  members() {
+    if (this.shareToken) return Promise.resolve([]);
+    this.memberList ??= api<{ members: MentionableMember[] }>(`/files/${this.fileId}/members`).then((r) => r.members)
+      .catch((error: unknown) => { this.memberList = null; throw error; });
+    return this.memberList;
   }
 
   async resolveComment(id: string, resolved: boolean) {

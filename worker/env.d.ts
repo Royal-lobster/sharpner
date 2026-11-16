@@ -14,4 +14,8 @@ type Env = Omit<CloudflareBindings, "BROWSER" | "THUMBNAIL_QUEUE"> & {
   RENDER_HOST_WORKSPACES?: string;
   /** Absent configurations fail closed: no unbudgeted automatic browser work. */
   THUMBNAIL_QUEUE?: DurableObjectNamespace<import("./thumbnail-queue").ThumbnailQueue>;
+  /** Optional mention email through Resend. Without both, tagged members are notified in the app only. */
+  RESEND_API_KEY?: string;
+  /** The sender address for mention email, on a domain verified with Resend, e.g. `Sharpner <notify@example.com>`. */
+  EMAIL_FROM?: string;
 };

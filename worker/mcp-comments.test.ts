@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Actor, CommentDetail, CommentThread } from "../shared/types";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), comments: vi.fn(), comment: vi.fn(), create: vi.fn(), reply: vi.fn(), resolve: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), comments: vi.fn(), comment: vi.fn(), create: vi.fn(), reply: vi.fn(), resolve: vi.fn(),
+  resolveMentions: vi.fn(), deliverMentions: vi.fn(), commentLocation: vi.fn() }));
+vi.mock("./notifications", async (original) => ({ ...await original<typeof import("./notifications")>(),
+  resolveMentions: mocks.resolveMentions, deliverMentions: mocks.deliverMentions }));
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor,
-  room: () => ({ comments: mocks.comments, comment: mocks.comment, createComment: mocks.create, replyComment: mocks.reply, resolveComment: mocks.resolve,
+  room: () => ({ commentLocation: mocks.commentLocation, comments: mocks.comments, comment: mocks.comment, createComment: mocks.create, replyComment: mocks.reply, resolveComment: mocks.resolve,
     pages: async () => [{ id: "page", name: "Screens", sort: 0 }], nodes: async () => [] }),
 }));
 import { mcp } from "./mcp";
@@ -28,7 +31,8 @@ const call = (name: string, args: unknown) => rpc("tools/call", { name, argument
 beforeEach(() => {
   vi.resetAllMocks(); scopes = ["sharpner:read", "sharpner:write"];
   mocks.authenticate.mockImplementation(async () => ({ user, method: "oauth", scopes }));
-  mocks.fileFor.mockResolvedValue({ id: "file" });
+  mocks.fileFor.mockResolvedValue({ id: "file", name: "App", workspace_id: "acme" });
+  mocks.resolveMentions.mockResolvedValue([]);
   mocks.comments.mockResolvedValue([thread]); mocks.comment.mockResolvedValue(detail);
   for (const fn of [mocks.create, mocks.reply, mocks.resolve]) fn.mockResolvedValue(detail);
 });
@@ -52,11 +56,23 @@ describe("agent comment tools", () => {
 
   it("creates, replies and resolves with explicit agent attribution", async () => {
     expect((await call("add_comment", { fileId: "file", anchor, body: "Feedback" })).result?.isError).not.toBe(true);
-    expect(mocks.create).toHaveBeenCalledWith("file", anchor, "Feedback", actor);
+    expect(mocks.create).toHaveBeenCalledWith("file", anchor, "Feedback", actor, []);
     await call("reply_to_comment", { fileId: "file", threadId: "thread", body: "Fixed and checked." });
-    expect(mocks.reply).toHaveBeenCalledWith("file", "thread", "Fixed and checked.", actor);
+    expect(mocks.reply).toHaveBeenCalledWith("file", "thread", "Fixed and checked.", actor, []);
     await call("resolve_comment", { fileId: "file", threadId: "thread", resolved: false });
     expect(mocks.resolve).toHaveBeenCalledWith("file", "thread", false, actor);
+  });
+
+  it("tags only workspace members and notifies them before returning", async () => {
+    const bob = { id: "bob", name: "Bob", avatar: null, email: "bob@example.com" };
+    mocks.resolveMentions.mockResolvedValue([bob]);
+    expect((await call("reply_to_comment", { fileId: "file", threadId: "thread", body: "@Bob please review", mentions: ["bob", "stranger"] })).result?.isError).not.toBe(true);
+    expect(mocks.resolveMentions).toHaveBeenCalledWith(expect.anything(), "acme", ["bob", "stranger"]);
+    expect(mocks.reply).toHaveBeenCalledWith("file", "thread", "@Bob please review", actor, [{ id: "bob", name: "Bob", avatar: null }]);
+    expect(mocks.deliverMentions).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      workspaceId: "acme", file: expect.objectContaining({ id: "file", name: "App" }), origin: "https://sharpner.example",
+      thread: { id: "thread", number: 1, pageId: "page" }, message: detail.messages.at(-1),
+    }), [bob], expect.any(Function));
   });
 
   it("allows read-only connections to read feedback and blocks every comment mutation", async () => {

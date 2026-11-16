@@ -26,7 +26,7 @@ function fixture() {
   const db = new DatabaseSync(":memory:");
   databases.push(db);
   db.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql"]) db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+  for (const name of ["0001_init.sql", "0002_clerk_accounts.sql", "0005_mention_notifications.sql"]) db.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
   const revoked: { fileId: string; userId: string | undefined }[] = [];
   const revokeAccess = vi.fn(async (fileId: string, userId?: string, _reconnect = false) => { revoked.push({ fileId, userId }); });
   const roundTrips = { count: 0 };

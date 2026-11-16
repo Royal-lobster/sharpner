@@ -64,6 +64,14 @@ _Avoid_: Group, area, container, folder
 The nodes a member currently has selected, which their agents can see.
 _Avoid_: Focus, highlight
 
+**Mention**:
+A tag of a workspace member in a comment, written `@Name`. It notifies that member; tagging yourself does not, but your agent tagging you does.
+_Avoid_: Tag (as a noun for the record), ping, @-reply
+
+**Notification**:
+A member's record that they were mentioned: who mentioned them, the file, page and design, the comment's text, and a link that opens the thread. It is shown under the bell and, when email is configured, also emailed.
+_Avoid_: Alert, inbox item, activity
+
 **Interaction playback**:
 A viewer-local session that sends input to one frame or component. Typed values,
 clicked states and animation state belong to the viewer and are never saved.
@@ -140,6 +148,7 @@ _Avoid_: Components page, styles page
 - A **File**'s **Design system** is its **Library**'s **Tokens** and **Components** plus its own; its own win when names collide.
 - A **Frame** uses **Components** through **Instances** and styles itself with **Tokens**.
 - Only an **Agent** changes a canvas: its pages, nodes, cover, Brand and library. A **Member**'s browser cannot.
+- A **Mention** names a **Member** of the file's **Workspace** and creates one **Notification** for them.
 - An **Agent connection** lets an **Agent** act as exactly one **Member** and see that member's **Selection**; it cannot grant access beyond that member's workspaces.
 
 ## Example dialogue

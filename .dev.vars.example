@@ -10,3 +10,7 @@ CLERK_MCP_CALLBACK_PORT=
 CLERK_API_KEYS_ENABLED=
 # Optional HTTPS origin for the hosted app; browser file links on older hosts open here.
 APP_ORIGIN=
+# Optional mention email through Resend. Without both, tagged members are notified in the app only.
+# EMAIL_FROM is a sender on a domain verified with Resend, e.g. "Sharpner <notify@example.com>".
+RESEND_API_KEY=
+EMAIL_FROM=

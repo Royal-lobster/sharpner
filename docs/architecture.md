@@ -13,7 +13,8 @@ edits and fan out changes.
 | `src/Home.tsx` | Workspace file grid, search, and agent connection |
 | `src/Editor.tsx` | File lifecycle, page organization, sharing, and presence |
 | `src/file-startup.ts` | Bounded direct-file preconnection, identity verification, and ownership transfer |
-| `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition |
+| `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition with `@` mentions |
+| `src/Notifications.tsx` | The mention bell on Home and in the file, backed by `src/notification-store.ts` |
 | `src/presence.ts` | Active member grouping across tabs and pages |
 | `shared/design-system.ts` | Brand validation and token metadata for canvas specimens |
 | `src/Canvas.tsx` | Camera, gestures, selection, and canvas composition |
@@ -39,6 +40,7 @@ edits and fan out changes.
 | `worker/viewer-access.ts` | Fencing for share-link lookups that race a viewer revocation |
 | `worker/room.ts` | Per-file persistence, realtime sync, and preview queue |
 | `worker/comments.ts` | Transactional SQLite comment storage and anchor lifecycle |
+| `worker/notifications.ts` | Mention recipients, the D1 notification inbox and optional Resend email |
 | `worker/mcp.ts` | Agent tools and input validation |
 | `worker/skills/sharpner/` | The skill and references agents read through `read_skill` |
 | `worker/friction.ts` | Agent friction reports, deduplication, and ranking |
@@ -52,6 +54,7 @@ edits and fan out changes.
 | `shared/session-principal.ts` | Immutable Clerk identity binding across HTTP, socket init, and SDK |
 | `shared/build.ts`, `src/stale-build.ts` | The deploy a bundle came from; a tab whose room `init` reports another build reloads once (or offers to, while someone types) |
 | `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
+| `shared/mentions.ts` | `@Name` parsing, suggestions and highlighting for comment mentions |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
 | `shared/specimens.ts` | Component and token-sheet presentations |
 | `shared/themes.ts` | Theme names declared in token CSS |
@@ -271,6 +274,15 @@ anchors follow computed layout; node deletion detaches feedback at its previous
 position, and page deletion removes its threads. Comment writes do not invalidate
 sources, layout caches, thumbnails, or design libraries. Public viewers receive
 neither comment summaries nor conversations.
+
+Mentions: a message stores the members it tags as `mentions`, after the route keeps only current members of the
+file's workspace (`worker/notifications.ts`). Once the comment is saved, each tagged member gets a row in D1's
+`notifications` table, written after the response so the comment never waits on it. That row is the member's inbox
+across files. If `RESEND_API_KEY` and `EMAIL_FROM` are set, each member is also emailed through Resend. A failed
+notification is logged and never fails the comment, because a retry would post the comment twice. The bell
+(`src/Notifications.tsx`) polls `/api/notifications` each minute while visible. Its links open
+`/f/<file>?page=…&comment=<thread>`, and opening a thread marks that thread's notifications read. Agents tag members
+with the `mentions` argument of `add_comment` and `reply_to_comment`, using ids from `get_app_state`.
 
 The comment panel floats over the desktop canvas. On mobile, its actual height
 reserves canvas space so focused pins use the visible preview area. Closing the

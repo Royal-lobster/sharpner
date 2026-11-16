@@ -717,6 +717,33 @@ body:has(.editor) { --toast-offset: 116px; }
 .comment-composer textarea { min-height: 84px; max-height: 180px; overflow-y: auto; }
 .comment-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .comment-composer-actions > span { color: var(--faint); font-size: 11px; }
+.comment-composer { position: relative; }
+.comment-mention { padding: 0 2px; border-radius: 4px; color: var(--foreground); background: color-mix(in srgb, var(--foreground) 7%, transparent); font-weight: 500; }
+.comment-mention.self { background: color-mix(in srgb, var(--foreground) 16%, transparent); }
+.mention-suggestions { flex: none; max-height: 220px; margin: 0; padding: 4px; overflow-y: auto; list-style: none; border-radius: 12px; }
+.mention-option { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.mention-option[aria-selected=true] { background: color-mix(in srgb, var(--foreground) 8%, transparent); }
+.mention-option > [data-slot=avatar] { width: 22px; height: 22px; flex: none; }
+.mention-option [data-slot=avatar-fallback] { font-size: 10px; font-weight: 600; }
+.mention-option > span { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mention-option strong { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.mention-option small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 12px; }
+.notification-bell { position: relative; }
+.notification-count { position: absolute; top: 2px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--foreground); color: var(--background); font-size: 10px; font-weight: 600; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+.notification-list { max-height: min(480px, 70vh); padding: 4px; overflow-y: auto; overscroll-behavior: contain; }
+.notification-empty { padding: 32px 20px; }
+.notification-item { position: relative; display: flex; gap: 12px; width: 100%; padding: 12px 28px 12px 10px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.notification-item:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.notification-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.notification-item > [data-slot=avatar] { width: 24px; height: 24px; flex: none; }
+.notification-item [data-slot=avatar-fallback] { font-size: 11px; font-weight: 600; }
+.notification-text { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
+.notification-title { font-size: 13px; line-height: 1.45; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.notification-title strong { color: var(--foreground); font-weight: 500; }
+.notification-quote { font-size: 13px; line-height: 1.5; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.notification-item:not(.unread) .notification-quote { color: var(--muted-foreground); }
+.notification-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--faint); }
+.notification-dot { position: absolute; top: 18px; right: 12px; width: 7px; height: 7px; border-radius: 50%; background: var(--foreground); }
 .comment-draft { display: flex; flex-direction: column; align-items: stretch; gap: 8px; padding: 0 12px 16px; overflow-y: auto; }
 .comment-draft .comment-location { padding: 12px 4px 4px; }
 .comment-draft > button { align-self: flex-start; }

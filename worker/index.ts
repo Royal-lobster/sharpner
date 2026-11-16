@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { auth, authenticate, authErrorStatus, clerkClient, sessionPrincipal, type AppEnv } from "./auth";
 import { serveAsset, servePreviewBatch } from "./assets";
 import { createFile, fileFor, newShareToken, room, sharedFile, workspaceFiles, workspaceFor } from "./data";
@@ -6,6 +6,9 @@ import { mcp } from "./mcp";
 import { oauth } from "./oauth";
 import { hostToken } from "./render-host";
 import { newComment, commentReply, commentResolution } from "./comment-schema";
+import { deliverMentions, listNotifications, markNotificationsRead, mentionActors, resolveMentions, workspaceMembers } from "./notifications";
+import type { CommentDetail } from "../shared/types";
+import { z } from "zod";
 
 export { FileRoom } from "./room";
 export { ThumbnailQueue } from "./thumbnail-queue";
@@ -170,20 +173,55 @@ api.get("/files/:id/comments/:threadId", async (c) => {
   return c.json(await room(c.env, file.id).comment(c.req.param("threadId")));
 });
 
+/** Members of the file's workspace, whom a comment can tag. */
+api.get("/files/:id/members", async (c) => {
+  const file = await fileFor(c.env, c.get("user").id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  return c.json({ members: await workspaceMembers(c.env, file.workspace_id) });
+});
+
 api.post("/files/:id/comments", async (c) => {
   const user = c.get("user");
   const file = await fileFor(c.env, user.id, c.req.param("id"));
   if (!file) return c.json({ error: "not found" }, 404);
-  const { anchor, body } = newComment.parse(await c.req.json());
-  return c.json(await room(c.env, file.id).createComment(file.id, anchor, body, { id: user.id, name: user.name, avatar: user.avatar_url }), 201);
+  const { anchor, body, mentions } = newComment.parse(await c.req.json());
+  const recipients = await resolveMentions(c.env, file.workspace_id, mentions);
+  const stub = room(c.env, file.id);
+  const thread = await stub.createComment(file.id, anchor, body, { id: user.id, name: user.name, avatar: user.avatar_url }, mentionActors(recipients));
+  notifyAfterResponse(c, file, thread, recipients, () => stub.commentLocation(thread.anchor));
+  return c.json(thread, 201);
 });
 
 api.post("/files/:id/comments/:threadId/replies", async (c) => {
   const user = c.get("user");
   const file = await fileFor(c.env, user.id, c.req.param("id"));
   if (!file) return c.json({ error: "not found" }, 404);
-  const { body } = commentReply.parse(await c.req.json());
-  return c.json(await room(c.env, file.id).replyComment(file.id, c.req.param("threadId"), body, { id: user.id, name: user.name, avatar: user.avatar_url }));
+  const { body, mentions } = commentReply.parse(await c.req.json());
+  const recipients = await resolveMentions(c.env, file.workspace_id, mentions);
+  const stub = room(c.env, file.id);
+  const thread = await stub.replyComment(file.id, c.req.param("threadId"), body, { id: user.id, name: user.name, avatar: user.avatar_url }, mentionActors(recipients));
+  notifyAfterResponse(c, file, thread, recipients, () => stub.commentLocation(thread.anchor));
+  return c.json(thread);
+});
+
+/** Tagged members hear about a comment after its author gets a response. */
+function notifyAfterResponse(c: Context<AppEnv>, file: { id: string; name: string; workspace_id: string }, thread: CommentDetail,
+  recipients: Awaited<ReturnType<typeof resolveMentions>>, locate: () => Promise<string>) {
+  if (!recipients.length) return;
+  c.executionCtx.waitUntil(deliverMentions(c.env, {
+    workspaceId: file.workspace_id, file, origin: c.env.APP_ORIGIN || new URL(c.req.url).origin,
+    thread: { id: thread.id, number: thread.number, pageId: thread.anchor.pageId }, message: thread.messages.at(-1)!,
+  }, recipients, locate));
+}
+
+// Notifications: the signed-in member's own inbox, across workspaces they still belong to.
+
+api.get("/notifications", async (c) => c.json(await listNotifications(c.env, c.get("user").id)));
+
+const notificationRead = z.object({ ids: z.array(z.string().min(1)).max(100).optional(), threadId: z.string().min(1).optional() });
+api.post("/notifications/read", async (c) => {
+  await markNotificationsRead(c.env, c.get("user").id, notificationRead.parse(await c.req.json()));
+  return c.body(null, 204);
 });
 
 api.patch("/files/:id/comments/:threadId", async (c) => {
