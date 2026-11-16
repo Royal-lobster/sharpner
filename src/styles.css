@@ -223,26 +223,29 @@
   .rim, .floaty, .panel { position: relative; }
   .rim::before, .floaty::before, .panel::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none; background: radial-gradient(35% 70% at 50% 0%, var(--rim-top), transparent 70%), radial-gradient(35% 70% at 50% 100%, var(--rim-bottom), transparent 70%), linear-gradient(var(--rim-base), var(--rim-base)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
   .rim::after, .floaty::after, .panel::after { content: ''; position: absolute; top: -1px; left: 34%; right: 34%; height: 1px; pointer-events: none; background: linear-gradient(90deg, transparent, var(--rim-glow), transparent); box-shadow: 0 0 8px 0 var(--rim-glow); opacity: .6; }
-  .notch { position: absolute; z-index: 5; background: var(--shell); }
+  /* A notch carries the sheet's edge around its carved outline: a 1px line in --notch-rim (the sheet's top
+     light) along the notch's sheet-facing sides (an offset shadow) and through both concave corners (a ring
+     in their gradient), so the edge runs unbroken into and out of the notch instead of stopping at it. */
+  .notch { --notch-rim: var(--hi); position: absolute; z-index: 5; background: var(--shell); }
   .notch::before, .notch::after { content: ''; position: absolute; width: 16px; height: 16px; pointer-events: none; }
-  .notch-tl { top: 0; left: 0; border-bottom-right-radius: 16px; }
-  .notch-tl::before { top: 0; right: -16px; background: radial-gradient(circle at 100% 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-tl::after { left: 0; bottom: -16px; background: radial-gradient(circle at 100% 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-tr { top: 0; right: 0; border-bottom-left-radius: 16px; }
-  .notch-tr::before { top: 0; left: -16px; background: radial-gradient(circle at 0 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-tr::after { right: 0; bottom: -16px; background: radial-gradient(circle at 0 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-t { top: 0; left: 50%; transform: translateX(-50%); border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; }
-  .notch-t::before { top: 0; left: -16px; background: radial-gradient(circle at 0 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-t::after { top: 0; right: -16px; background: radial-gradient(circle at 100% 100%, transparent 16px, var(--shell) 16.5px); }
-  .notch-b { bottom: 0; left: 50%; transform: translateX(-50%); border-top-left-radius: 16px; border-top-right-radius: 16px; }
-  .notch-b::before { bottom: 0; left: -16px; background: radial-gradient(circle at 0 0, transparent 16px, var(--shell) 16.5px); }
-  .notch-b::after { bottom: 0; right: -16px; background: radial-gradient(circle at 100% 0, transparent 16px, var(--shell) 16.5px); }
-  .notch-bl { bottom: 0; left: 0; border-top-right-radius: 16px; }
-  .notch-bl::before { bottom: 0; right: -16px; background: radial-gradient(circle at 100% 0, transparent 16px, var(--shell) 16.5px); }
-  .notch-bl::after { left: 0; top: -16px; background: radial-gradient(circle at 100% 0, transparent 16px, var(--shell) 16.5px); }
-  .notch-br { bottom: 0; right: 0; border-top-left-radius: 16px; }
-  .notch-br::before { bottom: 0; left: -16px; background: radial-gradient(circle at 0 0, transparent 16px, var(--shell) 16.5px); }
-  .notch-br::after { right: 0; top: -16px; background: radial-gradient(circle at 0 0, transparent 16px, var(--shell) 16.5px); }
+  .notch-tl { top: 0; left: 0; border-bottom-right-radius: 16px; box-shadow: 1px 1px 0 var(--notch-rim); }
+  .notch-tl::before { top: 0; right: -16px; background: radial-gradient(circle at 100% 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-tl::after { left: 0; bottom: -16px; background: radial-gradient(circle at 100% 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-tr { top: 0; right: 0; border-bottom-left-radius: 16px; box-shadow: -1px 1px 0 var(--notch-rim); }
+  .notch-tr::before { top: 0; left: -16px; background: radial-gradient(circle at 0 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-tr::after { right: 0; bottom: -16px; background: radial-gradient(circle at 0 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-t { top: 0; left: 50%; transform: translateX(-50%); border-bottom-left-radius: 16px; border-bottom-right-radius: 16px; box-shadow: -1px 1px 0 var(--notch-rim), 1px 1px 0 var(--notch-rim); }
+  .notch-t::before { top: 0; left: -16px; background: radial-gradient(circle at 0 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-t::after { top: 0; right: -16px; background: radial-gradient(circle at 100% 100%, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-b { bottom: 0; left: 50%; transform: translateX(-50%); border-top-left-radius: 16px; border-top-right-radius: 16px; box-shadow: -1px -1px 0 var(--notch-rim), 1px -1px 0 var(--notch-rim); }
+  .notch-b::before { bottom: 0; left: -16px; background: radial-gradient(circle at 0 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-b::after { bottom: 0; right: -16px; background: radial-gradient(circle at 100% 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-bl { bottom: 0; left: 0; border-top-right-radius: 16px; box-shadow: 1px -1px 0 var(--notch-rim); }
+  .notch-bl::before { bottom: 0; right: -16px; background: radial-gradient(circle at 100% 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-bl::after { left: 0; top: -16px; background: radial-gradient(circle at 100% 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-br { bottom: 0; right: 0; border-top-left-radius: 16px; box-shadow: -1px -1px 0 var(--notch-rim); }
+  .notch-br::before { bottom: 0; left: -16px; background: radial-gradient(circle at 0 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
+  .notch-br::after { right: 0; top: -16px; background: radial-gradient(circle at 0 0, transparent 15px, var(--notch-rim) 15.5px 16px, var(--shell) 16.5px); }
   /* The spiral mark shown monochrome, usually on a raised tile. */
   .mark { filter: grayscale(1) brightness(.3) contrast(1.5); }
   .dark .mark { filter: grayscale(1) brightness(2.6) contrast(1.05); }
@@ -416,6 +419,7 @@ body:has(.editor) { --toast-offset: 116px; }
 /* With the comments column open, the collaboration notch heads that column instead of carving the sheet. */
 @media (min-width: 701px) {
   .editor.comments-open .editor-collaboration::before, .editor.comments-open .editor-collaboration::after { display: none; }
+  .editor.comments-open .editor-collaboration { box-shadow: none; }
   .editor.comments-open .editor-navigation { max-width: calc(100% - 2 * var(--inset) - 376px - var(--safe-left) - var(--safe-right)); }
 }
 .dock-bar { display: flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 13px; line-height: 1; }
@@ -480,6 +484,9 @@ body:has(.editor) { --toast-offset: 116px; }
 .dock-popover[data-slot=drawer-content] .dock-panel-head { margin-inline: 20px; }
 .dock-popover[data-slot=drawer-content] .dock-panel-body { overflow-y: auto; padding-inline: 14px; }
 .dock-pages .dock-panel-body, .dock-people .dock-panel-body { gap: 2px; padding: 6px; }
+/* Lists inside the panels share their rows' inset with the head's rule, so selected rows line up under it. */
+.dock-pages .dock-panel-head, .dock-people .dock-panel-head { margin-inline: 6px; padding-inline: 6px; }
+.dock-popover[data-slot=drawer-content]:is(.dock-pages, .dock-people) .dock-panel-head { margin-inline: 14px; padding-inline: 6px; }
 .dock-menu { border-radius: 14px; padding: 6px; }
 .file-menu-head { display: flex; flex-direction: column; gap: 3px; padding: 8px 8px 8px; }
 .file-menu-head strong { color: var(--foreground); font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -490,7 +497,9 @@ body:has(.editor) { --toast-offset: 116px; }
 .page-list { display: flex; flex-direction: column; gap: 2px; max-height: min(440px, calc(100dvh - 190px - var(--keyboard))); overflow-y: auto; overscroll-behavior: contain; }
 .page-option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 9px; background: none; color: var(--muted-foreground); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .page-option:not(.key):hover { background: var(--accent); color: var(--foreground); }
-.page-option.key { color: var(--foreground); font-weight: 500; }
+/* The current page is a flat, filled row, as the selected design under it: a raised key here would draw a
+   second rim inside the popover's own and stand apart from the page's sections. */
+.page-option.key { color: var(--foreground); font-weight: 500; background: color-mix(in oklab, var(--foreground) 7%, transparent); box-shadow: none; }
 .page-icon { flex: none; width: 16px; height: 16px; color: var(--faint); }
 .page-option.key .page-icon { color: currentColor; }
 .page-option-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 1px; }
@@ -655,6 +664,9 @@ body:has(.editor) { --toast-offset: 116px; }
 .comment-pin > [data-slot=avatar] { width: 100%; height: 100%; pointer-events: none; }
 .comment-pin [data-slot=avatar-fallback] { font-size: 11px; font-weight: 600; color: #0b0b0c !important; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.4), inset 0 -1px 0 rgb(0 0 0 / 0.15); }
 .comment-pin > svg { width: 16px; height: 16px; }
+/* An agent's avatar is an ink key, the pin's own color: inside the pin it is the dark key instead, so the pin
+   holds a disc as a person's pin does, not a bare sparkle on a blank drop. */
+.comment-pin [data-slot=avatar-fallback].key-primary { background: var(--key); box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.5); color: var(--foreground) !important; }
 .comment-pin:hover, .comment-pin.active, .comment-pin.draft { box-shadow: 0 0 0 2px var(--canvas), 0 0 0 3.5px var(--select), var(--pkey-shadow); }
 .comment-pin:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
 .comment-pin.resolved { color: #5a5a5a; background: linear-gradient(180deg, #ffffff, #ececec); box-shadow: inset 0 1px 0 #fff, 0 0 0 1px rgb(0 0 0 / 0.16), 0 2px 6px -1px rgb(0 0 0 / 0.3); }
