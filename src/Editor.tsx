@@ -5,6 +5,7 @@ import { api, HttpError, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
+import { ApprovalButton, DesignDates } from "./Approval";
 import type { CommentAnchor, CommentThread, Page } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
@@ -292,6 +293,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
           <div className="selection-bar floaty" role="toolbar" aria-label="Selection" key={selected.length > 1 ? "many" : "one"} onKeyDown={stop}>
             <span className="selection-name" title={selected.length === 1 ? selected[0]!.name : undefined}>{selected.length === 1 ? selected[0]!.name : `${selected.length} selected`}</span>
             <span className="selection-agents">visible to agents</span>
+            {selected.length === 1 && <DesignDates node={selected[0]!} />}
+            {selected.length === 1 && <ApprovalButton room={room} node={selected[0]!} />}
             {playable && <Tooltip><TooltipTrigger asChild>
               <Button size="lg" className="selection-action" disabled={room.status !== "open"} onClick={() => setInteractionId(playable.id)}>
                 <IconPlayerPlay aria-hidden />Interact<kbd className="selection-kbd" aria-hidden>↵</kbd>

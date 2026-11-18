@@ -11,7 +11,7 @@ The tenant: a group of members who share files and libraries.
 _Avoid_: Team, organization, org, tenant
 
 **Member**:
-A person who belongs to a workspace, either as an owner or a regular member. Members view the canvas, select designs, comment and share; they change the canvas only by asking an agent. Only owners (Clerk organization admins) delete files. A member deletes their own comments and their agent's; owners delete anyone's.
+A person who belongs to a workspace, either as an owner or a regular member. Members view the canvas, select designs, comment, approve frames and share; they change the canvas only by asking an agent. Only owners (Clerk organization admins) delete files. A member deletes their own comments and their agent's; owners delete anyone's.
 _Avoid_: User (when the workspace relationship matters), collaborator, seat
 
 **Invite**:
@@ -71,6 +71,14 @@ _Avoid_: Tag (as a noun for the record), ping, @-reply
 **Notification**:
 A member's record that they were mentioned: who mentioned them, the file, page and design, the comment's text, and a link that opens the thread. It is shown under the bell and, when email is configured, also emailed.
 _Avoid_: Alert, inbox item, activity
+
+**Design dates**:
+When a node was created and when what it renders last changed: its own source or size, or the design system it uses. Nodes made before Sharpner recorded dates have none.
+_Avoid_: Timestamps, modified date (when talking to members)
+
+**Approval**:
+A member's sign-off on a frame, recording who approved it and when. A member approves in the editor, or asks their agent to. A later change keeps the approval but marks the frame as changed since approval, until someone approves it again or withdraws it.
+_Avoid_: Sign-off (as a record), accepted, locked, published
 
 **Interaction playback**:
 A viewer-local session that sends input to one frame or component. Typed values,
@@ -149,6 +157,7 @@ _Avoid_: Components page, styles page
 - A **Frame** uses **Components** through **Instances** and styles itself with **Tokens**.
 - Only an **Agent** changes a canvas: its pages, nodes, cover, Brand and library. A **Member**'s browser cannot.
 - A **Mention** names a **Member** of the file's **Workspace** and creates one **Notification** for them.
+- A **Frame** has at most one **Approval**. Deleting the frame deletes it.
 - An **Agent connection** lets an **Agent** act as exactly one **Member** and see that member's **Selection**; it cannot grant access beyond that member's workspaces.
 
 ## Example dialogue

@@ -6,7 +6,8 @@ import { authenticate, authErrorStatus, requireScope, type AppEnv, type Identity
 import { oauthChallenge } from "./oauth";
 import { createFile, fileFor, filesFor, MAX_UPLOAD, putFile, room, setLibrary, workspaceFor, workspacesFor } from "./data";
 import { layoutHeight, layoutRects, type Rect } from "../shared/layout";
-import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type CommentDetail, type NodeInput, type Op, type Page } from "../shared/types";
+import { approvable, approvalState, type Approval } from "../shared/approvals";
+import { componentTag, DESCRIPTION_MAX, tokenNames, type Actor, type CanvasNode, type CommentDetail, type NodeInput, type Op, type Page } from "../shared/types";
 import { themeNames } from "../shared/themes";
 import { propAxes } from "../shared/catalog-specimens";
 import skill from "./skills/sharpner/SKILL.md?raw";
@@ -276,7 +277,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
     annotations: { readOnlyHint: true },
   }, async ({ fileId, pageId }) => {
     const { file, stub } = await access(fileId);
-    const [all, cover] = await Promise.all([stub.outline(), stub.cover()]);
+    const [all, cover, approvals] = await Promise.all([stub.outline(), stub.cover(), stub.approvals()]);
     const outline = all.filter((p) => !pageId || p.id === pageId);
     if (pageId && !outline.length) throw new Error(`Page ${pageId} not found`);
     const pages = outline.map((p) => {
@@ -293,6 +294,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
           ...(n.height == null && n.measuredHeight ? { renderedHeight: n.measuredHeight } : {}),
           ...(n.kind === "image" ? { src: abs(n.src) } : {}),
           ...(n.kind === "component" ? { tag: componentTag(n.name) } : {}),
+          ...designDates(n, approvals),
         })),
       };
     });
@@ -477,7 +479,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
   }, async ({ fileId, nodeIds }) => {
     const { stub } = await access(fileId);
     const nodes = await Promise.all(nodeIds.map((id) => stub.node(id)));
-    const all = await stub.nodes();
+    const [all, approvals] = await Promise.all([stub.nodes(), stub.approvals()]);
     const rects = layoutRects(all, (n) => layoutHeight(n));
     await stub.agentActivity(actor, nodes.flatMap((n) => (n && n.kind !== "section" ? [n.id] : [])));
     return json(nodes.map((node, index) => {
@@ -493,6 +495,7 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         ...(node.kind === "image" ? { src: abs(node.src) } : { source: node.source }),
         ...(node.kind === "component" && node.description ? { description: node.description } : {}),
         ...(node.examples?.length ? { examples: node.examples } : {}),
+        ...designDates(node, approvals),
       };
     }));
   });
@@ -512,19 +515,32 @@ function buildServer(env: Env, identity: Identity, origin: string) {
         width: z.number().positive().optional(),
         height: z.number().positive().nullish(),
         examples: componentExamples.optional(),
+        approved: z.boolean().optional().describe("Frames: true signs off for the member, only when asked. false withdraws."),
       })).min(1).max(50),
     },
   }, async ({ fileId, updates }) => {
     const { stub, apply } = await access(fileId);
-    const all = new Set((await stub.nodes()).map((node) => node.id));
+    const all = new Map((await stub.nodes()).map((node) => [node.id, node]));
     const missing = updates.filter((update) => !all.has(update.nodeId)).map((update) => update.nodeId);
     if (missing.length) throw new Error(`Nodes not found: ${missing.join(", ")}`);
-    await apply(updates.map(({ nodeId, sectionId, ...patch }) => {
+    const unapprovable = updates.filter((u) => u.approved !== undefined && !approvable(all.get(u.nodeId)!)).map((u) => all.get(u.nodeId)!.name);
+    if (unapprovable.length) throw new Error(`Only frames can be approved: ${unapprovable.join(", ")}`);
+    const edits = updates.flatMap(({ nodeId, sectionId, approved: _approved, ...patch }) => {
       const node = Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as NodeInput;
       if (sectionId !== undefined) node.parentId = sectionId;
-      return { t: "node.put", id: nodeId, node } as Op;
-    }));
-    return json({ ok: true, updated: updates.length });
+      // An approval alone changes no design, so it is not a canvas edit.
+      return Object.keys(node).length ? [{ t: "node.put", id: nodeId, node } as Op] : [];
+    });
+    if (edits.length) await apply(edits);
+    // After the edits, so a frame edited and approved in one call is approved, not changed since approval.
+    const approvals: Approval[] = [];
+    for (const approved of [true, false]) {
+      const ids = updates.filter((u) => u.approved === approved).map((u) => u.nodeId);
+      if (!ids.length) continue;
+      requireScope(identity, "sharpner:write");
+      approvals.push(...await stub.approve(fileId, ids, approved, actor));
+    }
+    return json({ ok: true, updated: updates.length, ...(approvals.length ? { approvals: approvals.map(approvalJson) } : {}) });
   });
 
   server.registerTool("edit_node_source", {
@@ -618,6 +634,19 @@ function nodeGeometry(node: { id: string; height?: number | null; kind?: string;
     ...(cells ? { cellsWidth: rect.w } : {}),
     height: rect.h,
     heightMode: node.height == null ? "auto" : "fixed",
+  };
+}
+
+const iso = (ms: number | null | undefined) => (ms == null ? null : new Date(ms).toISOString());
+const approvalJson = (a: Approval) => ({ nodeId: a.nodeId, approvedAt: iso(a.approvedAt), approvedBy: a.approvedBy.name });
+
+/** When a node was created and last changed, and a frame's approval. Dates from before Sharpner recorded them are left out. */
+function designDates(node: Pick<CanvasNode, "id" | "kind" | "createdAt" | "changedAt">, approvals: Approval[]) {
+  const approval = approvals.find((a) => a.nodeId === node.id);
+  return {
+    ...(node.createdAt != null ? { createdAt: iso(node.createdAt) } : {}),
+    ...(node.changedAt != null ? { changedAt: iso(node.changedAt) } : {}),
+    ...(approval ? { approval: { ...approvalJson(approval), changedSinceApproval: approvalState(node, approval) === "changed" } } : {}),
   };
 }
 

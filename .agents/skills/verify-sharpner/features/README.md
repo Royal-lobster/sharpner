@@ -75,5 +75,7 @@ required state, commands and observable proof.
   and render live on an open canvas, the member's selection, and agent screenshots.
 - [Comments](./comments.md): pin, reply, resolve and reopen in the browser, and the
   same threads through MCP.
+- [Approvals and design dates](./approvals.md): approve a frame in the selection bar,
+  see it flagged after an agent edit, and the same record through MCP.
 - [Share link](./share-link.md): create a view link, watch as a signed-out viewer,
   confirm the viewer cannot edit, and turn the link off.

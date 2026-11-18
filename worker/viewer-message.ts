@@ -7,12 +7,13 @@ export function viewerMessage(message: ServerMsg): ServerMsg | null {
     case "peer.leave":
     case "activity":
     case "comments":
+    case "approvals":
       return null;
     case "sync":
       return message.by ? { ...message, by: null } : message;
     case "init": {
       const { principal: _principal, sessionExpiresAt: _expiry, ...publicInit } = message;
-      return { ...publicInit, peers: [], ...(message.comments ? { comments: [] } : {}) };
+      return { ...publicInit, peers: [], ...(message.comments ? { comments: [] } : {}), ...(message.approvals ? { approvals: [] } : {}) };
     }
     default:
       return message;

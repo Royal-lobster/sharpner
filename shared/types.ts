@@ -6,6 +6,7 @@ import { themeNames } from "./themes";
 import { previewPacingScript } from "./preview-pacing";
 import type { ThemeThumbnails } from "./thumbnails";
 import type { SessionPrincipal } from "./session-principal";
+import type { Approval } from "./approvals";
 export { tokenNames } from "./specimens";
 
 /**
@@ -66,6 +67,10 @@ export type CanvasNode = {
   specimen?: Specimen | null;
   /** Components: authored examples, named prop sets the catalog shows under the cells. */
   examples?: ComponentExample[];
+  /** Design dates (ms). When the node was created, and when what it renders last changed: its own source or size, or
+   * the design system it uses. null for nodes made before Sharpner recorded them. */
+  createdAt?: number | null;
+  changedAt?: number | null;
 };
 
 /** Whether the node's raster previews show its current revision (missing on older clients' metadata). */
@@ -132,10 +137,12 @@ export type ClientMsg =
   | { type: "source"; ids: string[] };
 
 export type ServerMsg =
-  | { type: "init"; build?: string; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; brand?: Brand; comments?: CommentThread[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null }
+  | { type: "init"; build?: string; pages: Page[]; nodes: CanvasNode[]; cid: string; peers: Peer[]; library: LibraryInfo | null; brand?: Brand; comments?: CommentThread[]; approvals?: Approval[]; sessionExpiresAt?: number; principal?: SessionPrincipal; coverNodeId?: string | null }
   /** Full current state of everything an edit touched. Clients replace rather than merge. */
   | { type: "sync"; pages?: Page[]; pageDels?: string[]; nodes?: CanvasNode[]; nodeDels?: string[]; brand?: Brand; coverNodeId?: string | null; by: Actor | null }
   | { type: "source"; items: { id: string; rev: number; source: string }[] }
+  /** Current approvals of these frames; `deleted` lists frames whose approval was withdrawn. Members only. */
+  | { type: "approvals"; approvals: Approval[]; deleted?: string[] }
   /** An agent is looking at or working on these nodes without changing them (reading, screenshotting). */
   | { type: "activity"; by: Actor; ids: string[] }
   /** The file's library changed (relinked, or its design system was edited). */
