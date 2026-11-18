@@ -9,7 +9,7 @@ vi.mock("./data", async (original) => ({ ...await original<typeof import("./data
     return {
       brand: async () => mocks.brand(id), catalog: async () => mocks.catalog(id),
       apply: mocks.apply, outline, peers: async () => [], instances: () => mocks.instances(id),
-      cover: async () => ({ nodeId: null, url: null }),
+      cover: async () => ({ nodeId: null, url: null }), approvals: async () => [],
       pages: async () => (await outline()).map(({ nodes: _nodes, ...page }) => page),
       nodes: async () => (await outline()).flatMap((p) => p.nodes),
       designSystem: async () => ({ tokens: "", components: [], library: mocks.library() }),

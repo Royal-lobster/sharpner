@@ -554,6 +554,8 @@ body:has(.editor) { --toast-offset: 116px; }
 .selection-action { flex: none; height: 32px; gap: 6px; padding: 0 10px; border-radius: 9px; font-size: 13px; }
 .selection-action:has(.selection-kbd) { padding-right: 6px; }
 .selection-action[data-variant=default] { font-weight: 600; }
+.selection-dates { flex: none; padding: 0 8px 0 2px; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; border-radius: 6px; }
+.selection-approval-date { font-weight: 400; color: var(--muted-foreground); }
 .selection-kbd { margin-left: 2px; padding: 3px 5px; border-radius: 5px; font: 500 10.5px/1 var(--font-mono); background: color-mix(in srgb, currentColor 10%, transparent); box-shadow: inset 0 1px 1px rgb(0 0 0 / 0.2); opacity: 0.7; }
 .interaction-controls .selection-kbd { background: var(--well); box-shadow: var(--well-shadow); color: var(--faint); opacity: 1; }
 .interaction-status { display: inline-flex; flex: none; align-items: center; gap: 6px; padding-right: 8px; font-size: 12px; color: var(--muted-foreground); }
@@ -574,7 +576,7 @@ body:has(.editor) { --toast-offset: 116px; }
   .dock-file-button { flex: 1 1 auto; }
   .dock-page-button { flex: 0 1 auto; max-width: 44%; }
   .dock-people-button > .presence-dot { display: none; }
-  .selection-agents { display: none; }
+  .selection-agents, .selection-approval-date { display: none; }
   /* Phones have no Enter or Esc key to hint at. */
   .selection-kbd { display: none; }
   .selection-action:has(.selection-kbd) { padding-right: 10px; }

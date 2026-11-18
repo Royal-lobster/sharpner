@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), fileFor: vi.fn(), comment: vi.fn(), create: vi.fn(), reply: vi.fn(), resolve: vi.fn(),
-  commentLocation: vi.fn(), resolveMentions: vi.fn(), deliverMentions: vi.fn(), workspaceMembers: vi.fn(), listNotifications: vi.fn(), markRead: vi.fn(),
+  commentLocation: vi.fn(), approve: vi.fn(), resolveMentions: vi.fn(), deliverMentions: vi.fn(), workspaceMembers: vi.fn(), listNotifications: vi.fn(), markRead: vi.fn(),
   workspaceFor: vi.fn(), deleteThread: vi.fn(), deleteReply: vi.fn(), forgetMentions: vi.fn() }));
 vi.mock("./notifications", async (original) => ({ ...await original<typeof import("./notifications")>(),
   resolveMentions: mocks.resolveMentions, deliverMentions: mocks.deliverMentions, workspaceMembers: mocks.workspaceMembers,
@@ -9,7 +9,7 @@ vi.mock("./notifications", async (original) => ({ ...await original<typeof impor
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({ ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, workspaceFor: mocks.workspaceFor,
   room: () => ({ commentLocation: mocks.commentLocation, comment: mocks.comment, createComment: mocks.create, replyComment: mocks.reply, resolveComment: mocks.resolve,
-    deleteComment: mocks.deleteThread, deleteCommentReply: mocks.deleteReply }),
+    deleteComment: mocks.deleteThread, deleteCommentReply: mocks.deleteReply, approve: mocks.approve }),
 }));
 vi.mock("./room", () => ({ FileRoom: class {} }));
 vi.mock("./thumbnail-queue", () => ({ ThumbnailQueue: class {} }));
@@ -183,5 +183,37 @@ describe("notification inbox", () => {
     expect((await api("/notifications")).status).toBe(401);
     expect(mocks.listNotifications).not.toHaveBeenCalled();
     expect(mocks.markRead).not.toHaveBeenCalled();
+  });
+});
+
+describe("member approval route", () => {
+  const approve = (body: unknown) => api("/files/file/nodes/screen/approval", "PATCH", body);
+
+  it("approves and withdraws as the verified member, ignoring forged approvers", async () => {
+    mocks.approve.mockResolvedValue([{ nodeId: "screen", approvedAt: 5, approvedBy: actor }]);
+    const response = await approve({ approved: true, approvedBy: { id: "forged", agent: true } });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ approval: { nodeId: "screen", approvedAt: 5, approvedBy: actor } });
+    expect(mocks.approve).toHaveBeenCalledWith("file", ["screen"], true, actor);
+    mocks.approve.mockResolvedValue([]);
+    expect(await (await approve({ approved: false })).json()).toEqual({ approval: null });
+    expect(mocks.approve).toHaveBeenLastCalledWith("file", ["screen"], false, actor);
+  });
+
+  it("rejects non-members, signed-out requests and malformed bodies without touching the file", async () => {
+    mocks.fileFor.mockResolvedValue(null);
+    expect((await approve({ approved: true })).status).toBe(404);
+    mocks.fileFor.mockResolvedValue({ id: "file", name: "App", workspace_id: "acme" });
+    expect((await approve({ approved: "yes" })).status).toBe(400);
+    mocks.authenticate.mockResolvedValue(null);
+    expect((await approve({ approved: true })).status).toBe(401);
+    expect(mocks.approve).not.toHaveBeenCalled();
+  });
+
+  it("reports a room refusal, such as approving a component", async () => {
+    mocks.approve.mockRejectedValue(new Error("Only frames can be approved; Button is a component"));
+    const response = await approve({ approved: true });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "Only frames can be approved; Button is a component" });
   });
 });

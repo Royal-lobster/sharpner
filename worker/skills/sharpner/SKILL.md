@@ -69,6 +69,12 @@ Use `add_comment` to leave feedback. With nodeId, x/y start at the node's comput
 
 Tag a member only when the member asks you to. Take ids from the workspace's `members` in `get_app_state`, write `@Name` in `body`, and pass the ids in `mentions`. Each tagged member gets a notification with the comment.
 
+## Approve designs when asked
+
+An approval is the member's sign-off on a frame. Set `approved: true` on the frame's entry in `update_nodes` only when the member asks. Use `approved: false` to withdraw it. Approvals apply after the call's other changes.
+
+`get_file` and `read_nodes` show each node's `createdAt` and `changedAt`, and a frame's `approval`. A change to an approved frame keeps the approval and sets `changedSinceApproval`. Tell the member when your edit changes an approved frame.
+
 ## Report tool problems
 
 Check `list_friction` before `report_friction`. Use `sameAs` for an existing issue. State the task, result, expected result, and workaround.

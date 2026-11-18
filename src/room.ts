@@ -2,6 +2,7 @@ import { selectThumbnail } from "../shared/thumbnails";
 import { reloadIfStale } from "./stale-build";
 import { layoutHeight } from "../shared/layout";
 import { api, HttpError } from "./api";
+import type { Approval } from "../shared/approvals";
 import { samePrincipal, type SessionPrincipal } from "../shared/session-principal";
 import {
   componentTag, mergeDesignSystems, emptyBrand,
@@ -31,6 +32,8 @@ export class Room {
   nodes = new Map<string, CanvasNode>();
   peers = new Map<string, Peer>();
   comments = new Map<string, CommentThread>();
+  /** Frame id -> its approval. Empty for public view links. */
+  approvals = new Map<string, Approval>();
   library: LibraryInfo | null = null;
   /** Explicit workspace-card cover; null lets the server choose automatically. */
   coverNodeId: string | null = null;
@@ -253,7 +256,7 @@ export class Room {
       ws.close();
     }
     if (this.pendingIdentity) {
-      this.pages = []; this.nodes.clear(); this.peers.clear(); this.comments.clear(); this.library = null;
+      this.pages = []; this.nodes.clear(); this.peers.clear(); this.comments.clear(); this.approvals.clear(); this.library = null;
       this.sources.clear(); this.heights.clear(); this.designNodes.clear(); this.pageCache.clear();
       this.agentActivity.clear(); this.agentDone.clear(); this.appeared.clear();
     }
@@ -284,6 +287,7 @@ export class Room {
         for (const id of this.comments.keys()) if (!comments.has(id)) this.deletedComments.add(id);
         this.comments = comments;
         this.commentsRevision++;
+        this.approvals = new Map((msg.approvals ?? []).map((a) => [a.nodeId, a]));
         this.library = msg.library;
         this.coverNodeId = msg.coverNodeId ?? null;
         this.brand = msg.brand ?? emptyBrand();
@@ -358,6 +362,10 @@ export class Room {
         break;
       case "peer.leave":
         this.peers.delete(msg.cid);
+        break;
+      case "approvals":
+        for (const id of msg.deleted ?? []) this.approvals.delete(id);
+        for (const approval of msg.approvals) this.approvals.set(approval.nodeId, approval);
         break;
       case "comments":
         for (const thread of msg.threads) this.upsertComment(thread);
@@ -479,6 +487,7 @@ export class Room {
     this.agentActivity.delete(id);
     this.agentDone.delete(id);
     this.appeared.delete(id);
+    this.approvals.delete(id);
     if (this.designNodes.delete(id)) this.designRevision++;
   }
 
@@ -561,6 +570,21 @@ export class Room {
     const thread = await api<CommentDetail>(`/files/${this.fileId}/comments${path}`, { method, json });
     if (!this.closed) { this.upsertComment(thread); this.emit(); }
     return thread;
+  }
+
+  /** Approves a frame as this member, or withdraws its approval. The broadcast updates every member's editor. */
+  async approve(nodeId: string, approved: boolean) {
+    if (this.shareToken || this.status !== "open" || this.closed) throw new Error("Reconnect to the file before approving designs");
+    const sent = Date.now();
+    const { approval } = await api<{ approval: Approval | null }>(`/files/${this.fileId}/nodes/${nodeId}/approval`, { method: "PATCH", json: { approved } });
+    // The broadcast usually lands first; a late response must not undo an approval someone made after it.
+    const current = this.approvals.get(nodeId);
+    if (!this.closed && this.nodes.has(nodeId)) {
+      if (approval && (!current || current.approvedAt <= approval.approvedAt)) this.approvals.set(nodeId, approval);
+      else if (!approval && current && current.approvedAt < sent) this.approvals.delete(nodeId);
+      this.emit();
+    }
+    return approval;
   }
 
   private upsertPage(p: Page) {

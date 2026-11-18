@@ -17,6 +17,7 @@ import { viewerMessage } from "./viewer-message";
 import { ViewerAccess } from "./viewer-access";
 import { Comments, COMMENT_SCHEMA } from "./comments";
 import { DELETE_COMMENT_DENIED, mayDeleteMessage, mayDeleteThread } from "../shared/comments";
+import { approvable, type Approval } from "../shared/approvals";
 import { presenceMessage } from "./presence";
 import { isSessionPrincipal, type SessionPrincipal } from "../shared/session-principal";
 import { backfilling, THUMBNAIL_POLICY } from "./thumbnail-policy";
@@ -55,6 +56,7 @@ const MAX_SOLO = 500;
 // `layout` is 'auto' on every section. It stays in node metadata for tabs loaded before that, which read it.
 const META_COLS = `nodes.id AS id, page_id AS pageId, parent_id AS parentId, kind, name, x, y, layout, d.text AS description, sort AS 'order', width, height, measured_h AS measuredHeight,
   src, thumb_lo AS thumbLo, thumb_hi AS thumbHi, rev, thumb_rev AS thumbRev, thumb_theme AS thumbTheme, specimen, examples,
+  created_at AS createdAt, changed_at AS changedAt,
   (SELECT json_group_object(t.theme, json_object('rev', t.rev, 'lo', t.thumb_lo, 'hi', t.thumb_hi, 'measuredHeight', t.measured_h))
    FROM node_thumbnails t WHERE t.node_id = nodes.id AND t.thumb_lo IS NOT NULL) AS thumbnails`;
 /** Node rows with their descriptions (sections and components have one). */
@@ -357,6 +359,14 @@ const MIGRATIONS = [
     sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE ${RENDERED}`);
     sql.exec(`INSERT OR REPLACE INTO meta (k, v) VALUES ('thumbReconcile', '1')`);
   },
+  // Design dates and approvals. Nodes made before this have no dates: nothing recorded when they were made. Replay-safe,
+  // because an older deployment can lower the recorded version.
+  (sql: SqlStorage) => {
+    const columns = new Set(sql.exec<{ name: string }>(`PRAGMA table_info(nodes)`).toArray().map((c) => c.name));
+    if (!columns.has("created_at")) sql.exec(`ALTER TABLE nodes ADD COLUMN created_at INTEGER`);
+    if (!columns.has("changed_at")) sql.exec(`ALTER TABLE nodes ADD COLUMN changed_at INTEGER`);
+    sql.exec(`CREATE TABLE IF NOT EXISTS approvals (node_id TEXT PRIMARY KEY, data TEXT NOT NULL)`);
+  },
 ];
 
 /** Files whose every preview the owner asked to redraw once on 4 Nov 2026: tupredices, fraxnet, fraxramp, sharpner. */
@@ -580,6 +590,31 @@ export class FileRoom extends DurableObject<Env> {
     });
     this.publishComment(fileId, thread);
     return thread;
+  }
+
+  approvals(): Approval[] {
+    return this.sql.exec<{ data: string }>(`SELECT data FROM approvals ORDER BY rowid`).toArray().map((row) => JSON.parse(row.data) as Approval);
+  }
+
+  /** Approves frames, or withdraws their approval. Approving again records the new date and approver. */
+  approve(fileId: string, ids: string[], approved: boolean, by: Actor): Approval[] {
+    if (typeof approved !== "boolean") throw new Error("approved must be a boolean");
+    const result = this.ctx.storage.transactionSync(() => ids.map((id) => {
+      const node = this.node(id);
+      if (!node) throw new Error(`Design ${id} not found`);
+      if (!approvable(node)) throw new Error(`Only frames can be approved; ${node.name} is a ${node.kind}`);
+      if (!approved) {
+        this.sql.exec(`DELETE FROM approvals WHERE node_id = ?`, id);
+        return null;
+      }
+      const approval: Approval = { nodeId: id, approvedAt: Date.now(), approvedBy: by };
+      this.sql.exec(`INSERT OR REPLACE INTO approvals (node_id, data) VALUES (?, ?)`, id, JSON.stringify(approval));
+      return approval;
+    }));
+    const approvals = result.filter((a): a is Approval => a !== null);
+    this.broadcast({ type: "approvals", approvals, ...(approved ? {} : { deleted: ids }) });
+    this.touch(fileId);
+    return approvals;
   }
 
   /** "Page · Design" (or "Page · Canvas"), as the comments panel labels a thread, for mention notifications. */
@@ -840,8 +875,11 @@ export class FileRoom extends DurableObject<Env> {
       next.src, thumbLo, thumbHi, rev, isRendered(kind) ? cur?.thumbRev ?? 0 : kind === "image" && !thumbLo ? 0 : rev, changed ? 0 : thumb.tries, next.source,
     );
     if (cur?.thumbTheme !== undefined) this.sql.exec(`UPDATE nodes SET thumb_theme = ? WHERE id = ?`, cur.thumbTheme, id);
-    // REPLACE cleared the derived cells; refreshSpecimens restores them and bumps the revision if they differ.
-    this.sql.exec(`UPDATE nodes SET specimen = ?, examples = ? WHERE id = ?`, cur?.specimen ? JSON.stringify(cur.specimen) : null, examplesJson, id);
+    // REPLACE cleared the derived cells and the design dates; refreshSpecimens restores the cells and bumps the
+    // revision if they differ. A node from before design dates keeps none.
+    const now = Date.now();
+    this.sql.exec(`UPDATE nodes SET specimen = ?, examples = ?, created_at = ?, changed_at = ? WHERE id = ?`,
+      cur?.specimen ? JSON.stringify(cur.specimen) : null, examplesJson, cur ? cur.createdAt ?? null : now, changed ? now : cur?.changedAt ?? null, id);
     if ((kind === "section" || kind === "component") && input.description !== undefined) this.describe(str(id), input.description);
     return changed && (isRendered(kind) || kind === "image" && !thumbLo);
   }
@@ -888,7 +926,8 @@ export class FileRoom extends DurableObject<Env> {
         }
       }
     }
-    for (const id of users) this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0 WHERE id = ?`, id);
+    const now = Date.now();
+    for (const id of users) this.sql.exec(`UPDATE nodes SET rev = rev + 1, thumb_tries = 0, changed_at = ? WHERE id = ?`, now, id);
     return users;
   }
 
@@ -900,6 +939,7 @@ export class FileRoom extends DurableObject<Env> {
     const raw = isRendered(n.kind) ? this.sql.exec<{ thumbLo: string | null; thumbHi: string | null }>(`SELECT thumb_lo AS thumbLo, thumb_hi AS thumbHi FROM nodes WHERE id = ?`, id).toArray()[0] : undefined;
     if (raw) staleThumbs.push(...thumbKeys(raw));
     this.sql.exec(`DELETE FROM nodes WHERE id = ?`, id);
+    this.sql.exec(`DELETE FROM approvals WHERE node_id = ?`, id);
     this.describe(id, "");
     deleted.add(id);
     if (isRendered(n.kind)) {
@@ -1583,6 +1623,7 @@ export class FileRoom extends DurableObject<Env> {
       coverNodeId: this.meta("coverNodeId") || null,
       brand: this.brand(),
       comments: att.shareToken ? [] : this.comments(),
+      approvals: att.shareToken ? [] : this.approvals(),
       ...(!att.shareToken && att.principal ? { principal: att.principal } : {}),
       ...(!att.shareToken && att.sessionId ? { sessionExpiresAt: att.sessionExpiresAt } : {}) });
   }

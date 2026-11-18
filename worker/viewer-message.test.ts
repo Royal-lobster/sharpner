@@ -46,4 +46,10 @@ describe("public viewer messages", () => {
     expect(viewerMessage(initial)).toEqual({ ...initial, comments: [] });
     expect(initial.comments).toEqual([thread]);
   });
+
+  it("keeps approvals and their approvers out of public view links", () => {
+    expect(viewerMessage({ type: "approvals", approvals: [{ nodeId: "node", approvedAt: 1, approvedBy: actor }] })).toBeNull();
+    const initial: ServerMsg = { type: "init", nodes: [], pages: [], cid: "viewer", peers: [], library: null, approvals: [{ nodeId: "node", approvedAt: 1, approvedBy: actor }] };
+    expect(viewerMessage(initial)).toEqual({ ...initial, approvals: [] });
+  });
 });

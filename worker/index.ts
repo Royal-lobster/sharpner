@@ -219,6 +219,7 @@ function notifyAfterResponse(c: Context<AppEnv>, file: { id: string; name: strin
 
 api.get("/notifications", async (c) => c.json(await listNotifications(c.env, c.get("user").id)));
 
+const approval = z.object({ approved: z.boolean() });
 const notificationRead = z.object({ ids: z.array(z.string().min(1)).max(100).optional(), threadId: z.string().min(1).optional() });
 api.post("/notifications/read", async (c) => {
   await markNotificationsRead(c.env, c.get("user").id, notificationRead.parse(await c.req.json()));
@@ -264,6 +265,16 @@ api.patch("/files/:id/comments/:threadId", async (c) => {
   if (!file) return c.json({ error: "not found" }, 404);
   const { resolved } = commentResolution.parse(await c.req.json());
   return c.json(await room(c.env, file.id).resolveComment(file.id, c.req.param("threadId"), resolved, { id: user.id, name: user.name, avatar: user.avatar_url }));
+});
+
+/** A member approves a frame, or withdraws its approval. Public view links never see approvals. */
+api.patch("/files/:id/nodes/:nodeId/approval", async (c) => {
+  const user = c.get("user");
+  const file = await fileFor(c.env, user.id, c.req.param("id"));
+  if (!file) return c.json({ error: "not found" }, 404);
+  const { approved } = approval.parse(await c.req.json());
+  const [result] = await room(c.env, file.id).approve(file.id, [c.req.param("nodeId")], approved, { id: user.id, name: user.name, avatar: user.avatar_url });
+  return c.json({ approval: result ?? null });
 });
 
 /** Renew an existing connection with a freshly verified session and current file access. */

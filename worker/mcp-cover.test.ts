@@ -8,7 +8,7 @@ vi.mock("./notifications", async (original) => ({ ...await original<typeof impor
 vi.mock("./auth", async (original) => ({ ...await original<typeof import("./auth")>(), authenticate: mocks.authenticate }));
 vi.mock("./data", async (original) => ({
   ...await original<typeof import("./data")>(), fileFor: mocks.fileFor, filesFor: mocks.filesFor, workspacesFor: mocks.workspacesFor,
-  room: () => ({ apply: mocks.apply, cover: mocks.cover, outline: mocks.outline, peers: async () => [], comments: async () => [] }),
+  room: () => ({ apply: mocks.apply, cover: mocks.cover, outline: mocks.outline, peers: async () => [], comments: async () => [], approvals: async () => [] }),
 }));
 import { mcp } from "./mcp";
 

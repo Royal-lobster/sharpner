@@ -78,7 +78,7 @@ describe("persisted automatic layout", () => {
     // Eight refreshes: the old card presentation, dark specimens, standards-mode measurement, compact specimens twice,
     // the owner's clear, full-width previews, then the system font stand-in.
     expect(room.node("component")!.rev).toBe(9);
-    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "31" });
+    expect(db.prepare("SELECT v FROM meta WHERE k = 'schema'").get()).toEqual({ v: "32" });
   });
 
   it("refreshes cached token previews once for named themes without rerendering screens or components", () => {
