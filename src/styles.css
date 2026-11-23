@@ -416,6 +416,8 @@ body:has(.editor) { --toast-offset: 116px; }
 .editor-navigation { top: calc(var(--inset) + var(--safe-top)); left: calc(var(--inset) + var(--safe-left)); padding-right: 8px; padding-bottom: 8px; max-width: calc(100% - 2 * var(--inset) - 280px - var(--safe-left) - var(--safe-right)); }
 .editor-collaboration.notch-tr { top: calc(var(--inset) + var(--safe-top)); right: calc(var(--inset) + var(--safe-right)); padding-left: 12px; padding-bottom: 8px; }
 .editor-collaboration.notch-bl { top: auto; bottom: calc(var(--inset) + var(--safe-bottom)); left: calc(var(--inset) + var(--safe-left)); height: var(--notch-h); padding: 8px 8px 0 0; }
+/* Hide UI: only the canvas, a Show UI notch and the playback controls remain. */
+.editor.ui-hidden :is(.zoom, .agent-status, .selection-bar:not(.interaction-controls)) { display: none; }
 /* With the comments column open, the collaboration notch heads that column instead of carving the sheet. */
 @media (min-width: 701px) {
   .editor.comments-open .editor-collaboration::before, .editor.comments-open .editor-collaboration::after { display: none; }

@@ -29,13 +29,13 @@ describe("bounded preview navigation", () => {
     }
   });
 
-  it("makes the fitted overview the furthest zoom out and locks panning at that overview", () => {
+  it("makes the fitted overview the furthest zoom out and still pans freely there", () => {
     const nav = canvasNavigation([cluster], desktop);
     expect(nav.minZoom).toBeCloseTo((desktop.h - 128 - LABEL_ROOM) / cluster.h);
     expectCamera(nav.fit([]), nav.overview);
     for (const x of [-1e10, 0, 1e10]) for (const y of [-1e10, 0, 1e10]) {
       expectCamera(nav.constrain({ x, y, z: 0.00001 }), nav.overview);
-      expectCamera(nav.constrain({ x, y, z: nav.minZoom }), nav.overview);
+      expectCamera(nav.constrain({ x, y, z: nav.minZoom }), { x, y, z: nav.minZoom });
     }
   });
 
@@ -74,14 +74,17 @@ describe("bounded preview navigation", () => {
     expect(nav.constrain({ ...nav.overview, z: 1000 }).z).toBe(MAX_CANVAS_ZOOM);
   });
 
-  it("allows zoomed touch panning and locks a pinch back to the overview", () => {
+  it("allows touch panning and stops a pinch out at the overview zoom", () => {
     const nav = canvasNavigation([cluster], desktop);
     const current = nav.constrain({ x: -500, y: -2000, z: 1 });
     const panned = applyTouch(current, { type: "pan", dx: 1e10, dy: -1e10 }, nav.minZoom, MAX_CANVAS_ZOOM);
     const bounded = nav.constrain(panned);
     expectCamera(bounded, panned);
     const pinched = applyTouch(current, { type: "pinch", scale: 0.000001, from: { x: 100, y: 300 }, to: { x: 140, y: 360 } }, nav.minZoom, MAX_CANVAS_ZOOM);
-    expectCamera(nav.constrain(pinched), nav.overview);
+    expectCamera(nav.constrain(pinched), pinched);
+    expect(pinched.z).toBe(nav.minZoom);
+    const overviewPan = applyTouch(nav.overview, { type: "pan", dx: 120, dy: -80 }, nav.minZoom, MAX_CANVAS_ZOOM);
+    expectCamera(nav.constrain(overviewPan), { ...nav.overview, x: nav.overview.x + 120, y: nav.overview.y - 80 });
   });
 
   it("preserves the pinch anchor when the requested view is within the bounds", () => {
@@ -97,7 +100,7 @@ describe("bounded preview navigation", () => {
     const nav = canvasNavigation([cluster], { w: 390, h: 844 });
     const requested = { x: 190, y: 300, z: 1 };
     expectCamera(nav.constrain(requested), requested);
-    expectCamera(nav.constrain({ ...requested, z: nav.minZoom }), nav.overview);
+    expectCamera(nav.fit([]), nav.overview);
     expect(cluster.y * nav.overview.z + nav.overview.y).toBeGreaterThanOrEqual(68 + LABEL_ROOM);
   });
 
@@ -115,7 +118,7 @@ describe("bounded preview navigation", () => {
     const updated = canvasNavigation([{ x: 50000, y: -9000, w: 400, h: 600 }], { w: 390, h: 844 });
     expectCamera(updated.constrain(old), updated.overview);
     const empty = canvasNavigation([], desktop);
-    expectCamera(empty.constrain({ ...old, z: 1 }), empty.overview);
+    expectCamera(empty.constrain(old), empty.overview);
   });
 
   it("allows navigation to newly added screens and detached comment pins", () => {

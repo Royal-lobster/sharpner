@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLayoutGrid, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLayoutGrid, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay, IconEye, IconEyeOff } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, HttpError, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
@@ -21,7 +21,7 @@ import { Loading, Notice } from "./states";
 import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -153,6 +153,19 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const [draftComment, setDraftComment] = useState<CommentAnchor | null>(null);
   const [commentFocus, setCommentFocus] = useState<{ id: string; request: number } | null>(null);
   const [dialog, setDialog] = useState<"help" | null>(null);
+  // Hide UI clears the notches, toolbars and comments column off the canvas. Starting or opening a comment brings them back.
+  const [uiHidden, setUiHidden] = useState(false);
+  useEffect(() => { if (commentMode || draftComment || activeCommentId) setUiHidden(false); }, [commentMode, draftComment, activeCommentId]);
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== "Backslash") return;
+      event.preventDefault();
+      setOpen(null);
+      setUiHidden((hidden) => !hidden);
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
   const [interactionId, setInteractionId] = useState<string | null>(null);
   const playableRef = useRef<string | null>(null);
   const [hideComponents, setHideComponents] = useHiddenComponents();
@@ -253,7 +266,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const playable = selected.length === 1 && canInteract(selected[0]) ? selected[0]! : null;
   playableRef.current = playable?.id ?? null;
   const status = room.status === "open" ? "Live" : room.status === "connecting" ? "Connecting" : "Reconnecting";
-  const commentsShown = !readOnly && commentsOpen && !commentMode;
+  const commentsShown = !readOnly && commentsOpen && !commentMode && !uiHidden;
   // Agents at work on this page, for the notch above the canvas. The frames themselves show the trace.
   const working = [...room.agentActivity].flatMap(([id, activity]) => {
     const node = room.nodes.get(id);
@@ -262,7 +275,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   const agents = [...new Set(working.map((w) => w.agent))];
   const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
   return (
-    <div className={cn("editor shell", commentsShown && "comments-open")} ref={trackKeyboardInset}>
+    <div className={cn("editor shell", commentsShown && "comments-open", uiHidden && "ui-hidden")} ref={trackKeyboardInset}>
       <main className={cn("stage", commentsShown && "comments-open")}>
         {page ? (
           <Canvas key={page.id} room={room} fileId={file.id} pageId={page.id} selection={liveSelection} selectionFocus={selectionFocus} onSelect={selectNodes} onMarqueeSelection={setMarqueeSelection} readOnly={readOnly} hideComponents={hidingComponents}
@@ -303,7 +316,9 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
       {!readOnly && <CommentsPanel room={room} userId={user.id} owner={meta.workspace.role === "owner"} open={commentsShown} activeId={activeCommentId} draft={draftComment}
         onSelect={selectComment} onNew={startComment} onClose={closeComments} onCancelDraft={() => setDraftComment(null)} />}
       {/* Keyboard interaction with the notches and their panels (portaled, but still React children) must not select, delete, or pan the canvas. */}
-      <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>
+      {uiHidden ? <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>
+        <Button variant="ghost" size="lg" className="dock-button" title="Show UI (⌘\)" onClick={() => setUiHidden(false)}><IconEye aria-hidden /><span>Show UI</span></Button>
+      </div> : <div className="editor-notch editor-navigation notch notch-tl" onKeyDown={stop}>
         <nav aria-label="File and pages" className="dock-bar">
           {readOnly
             ? <a href="/" aria-label="Sharpner" className="mark-tile dock-mark"><img src="/mark.svg" width={18} height={18} alt="" className="mark" /></a>
@@ -340,6 +355,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                   if (kept.length !== liveSelection.length) selectNodes(kept);
                 }
               }}><IconComponents aria-hidden />Show components</DropdownMenuCheckboxItem>
+              <DropdownMenuItem onSelect={() => setUiHidden(true)}><IconEyeOff aria-hidden />Hide UI<DropdownMenuShortcut>⌘\</DropdownMenuShortcut></DropdownMenuItem>
               <DropdownMenuItem onSelect={() => { pendingFileAction.current = () => setDialog("help"); }}><IconKeyboard aria-hidden />Canvas controls</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -359,8 +375,8 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               onDesign={(id) => { focusNodes([id]); setOpen(null); }} />
           </DockPanel>
         </nav>
-      </div>
-      {!readOnly && <div className={cn("editor-notch editor-collaboration notch", narrow ? "notch-bl" : "notch-tr")} onKeyDown={stop}>
+      </div>}
+      {!readOnly && !uiHidden && <div className={cn("editor-notch editor-collaboration notch", narrow ? "notch-bl" : "notch-tr")} onKeyDown={stop}>
         <nav aria-label="Collaboration" className="dock-bar">
           <DockPanel label="In this file" count={people.length} open={open === "people"} onOpenChange={toggle("people")} className="dock-people" side="bottom" align="end"
             trigger={<Button variant="ghost" size="lg" className="dock-button dock-people-button" aria-label={room.status === "open" ? `${people.length} ${people.length === 1 ? "person" : "people"} in this file` : "Reconnecting to people in this file"}
@@ -418,6 +434,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
               <dt>Pan</dt><dd>Drag, scroll, or hold Space</dd>
               <dt>Zoom</dt><dd>Pinch, <Kbd>⌘</Kbd> scroll, <Kbd>⌘+</Kbd> / <Kbd>⌘−</Kbd></dd>
               <dt>Fit all / selection</dt><dd><Kbd>⇧1</Kbd> / <Kbd>⇧2</Kbd>, double-click</dd>
+              <dt>Hide / show UI</dt><dd><Kbd>⌘\</Kbd></dd>
               <dt>Interact</dt><dd>{readOnly ? "Try a design’s clicks and typing" : <><Kbd>Enter</Kbd>, or click a selected design</>}; <Kbd>Esc</Kbd> stops, Reset starts again</dd>
               {!readOnly && <>
                 <dt>Select</dt><dd>Click, ⇧ click, ⇧ drag, to show designs to agents</dd>
