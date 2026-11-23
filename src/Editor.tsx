@@ -158,7 +158,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
   useEffect(() => { if (commentMode || draftComment || activeCommentId) setUiHidden(false); }, [commentMode, draftComment, activeCommentId]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.code !== "Backslash") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || (event.code !== "Backslash" && event.key !== "\\")) return;
       event.preventDefault();
       setOpen(null);
       setUiHidden((hidden) => !hidden);
