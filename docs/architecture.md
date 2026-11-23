@@ -11,6 +11,7 @@ edits and fan out changes.
 | `src/App.tsx` | Clerk sign-in pages and theme, routing, and workspace bootstrap |
 | `src/Landing.tsx` | Minimal signed-out introduction and sign-in action |
 | `src/Home.tsx` | Workspace file grid, search, and agent connection |
+| `src/search.ts` | Search matching: files by name and library name, pages by name, description and section |
 | `src/Editor.tsx` | File lifecycle, page organization, sharing, and presence |
 | `src/file-startup.ts` | Bounded direct-file preconnection, identity verification, and ownership transfer |
 | `src/Comments.tsx` | Canvas feedback list, thread conversations, and comment composition with `@` mentions |
@@ -234,7 +235,8 @@ The editor is a shell around the canvas sheet. The sheet is the camera's viewpor
 window and narrows when the comments column opens, and every gesture measures its own rect, so a resize only
 re-applies the camera constraints (an open thread re-centres on its pin). Toolbars sit in notches carved into the
 sheet's edge. The pages popover lists every page and, for the current page, its sections with the screens of open
-sections; choosing a screen selects and fits it, as a link to it would.
+sections; choosing a screen selects and fits it, as a link to it would. Its search narrows the list to pages whose name, description or a section
+name holds every word typed (`src/search.ts`), and names the matching sections; Enter opens the first match.
 
 Preview navigation locks panning at the fitted overview, which is also the minimum
 zoom. Above that zoom, panning is free on both axes so any part of a design can be

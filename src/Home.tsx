@@ -6,6 +6,7 @@ import { api, timeAgo, type FileSummary, type Workspace } from "./api";
 import { Link, navigate } from "./router";
 import { askConfirm, askText } from "./dialog";
 import { toast } from "./toast";
+import { fileMatches } from "./search";
 import { IconAlertCircle, IconDots, IconFile, IconFolder, IconLayout2, IconLibrary, IconPencil, IconPlus, IconSearch, IconTerminal2, IconTrash } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -84,7 +85,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
   const files = detail?.files ?? [];
   const libraries = files.filter((f) => f.used_by > 0);
   const names = new Map(files.map((f) => [f.id, f.name]));
-  const visible = files.filter((f) => (view === "all" || f.used_by > 0) && f.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = files.filter((f) => (view === "all" || f.used_by > 0) && fileMatches(f, query, names));
 
   const renameFile = async (file: FileSummary) => {
     const name = await askText({ title: "Rename file", label: "File name", initial: file.name, confirm: "Rename" });
@@ -151,7 +152,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
               </TabsList>
               <InputGroup className="home-search">
                 <InputGroupAddon><IconSearch aria-hidden /></InputGroupAddon>
-                <InputGroupInput aria-label="Search files" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files" type="search" enterKeyHint="search" />
+                <InputGroupInput aria-label="Search by file name or project name" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by file name or project name" type="search" enterKeyHint="search" />
               </InputGroup>
               <Button size="lg" className="new-file" onClick={newFile} disabled={creating} aria-label="New file">
                 {creating ? <Spinner aria-hidden /> : <IconPlus aria-hidden />}
@@ -171,7 +172,7 @@ export function Home({ me, agentConfig }: { me: Me; agentConfig: AgentConnection
                 <EmptyHeader>
                   <EmptyMedia variant="icon">{query ? <IconSearch aria-hidden /> : view === "libraries" ? <IconLibrary aria-hidden /> : <IconFile aria-hidden />}</EmptyMedia>
                   <EmptyTitle role="heading" aria-level={2}>{query ? "No files match" : view === "libraries" ? "No shared libraries yet" : "Start with a file"}</EmptyTitle>
-                  <EmptyDescription>{query ? `Nothing in ${current.name} is called “${query.trim()}”.` : view === "libraries" ? "When a file uses another file’s design system, that file shows up here." : "Create one, then ask your agent to design in it. Everyone in the workspace sees changes live."}</EmptyDescription>
+                  <EmptyDescription>{query ? `No file or library in ${current.name} matches “${query.trim()}”.` : view === "libraries" ? "When a file uses another file’s design system, that file shows up here." : "Create one, then ask your agent to design in it. Everyone in the workspace sees changes live."}</EmptyDescription>
                 </EmptyHeader>
                 {(query || view === "all") && <EmptyContent>
                   {query ? <Button variant="secondary" size="lg" onClick={() => setQuery("")}>Clear search</Button> : <div className="flex flex-wrap justify-center gap-3">
