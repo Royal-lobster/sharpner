@@ -10,9 +10,9 @@ function fixture() {
     ownerDocument: doc, contains: (node: unknown) => node === root || node === control, closest: () => null,
   });
   const cleanup = canvasGestureBoundary(root as unknown as HTMLElement);
-  const event = (type: string, target: unknown, touches: unknown[] = [target]) => {
+  const event = (type: string, target: unknown, touches: unknown[] = [target], init: { ctrlKey?: boolean } = {}) => {
     const e = new Event(type, { cancelable: true, bubbles: true });
-    Object.defineProperties(e, { target: { value: target }, touches: { value: touches.map((target) => ({ target })) } });
+    Object.defineProperties(e, { ctrlKey: { value: !!init.ctrlKey }, target: { value: target }, touches: { value: touches.map((target) => ({ target })) } });
     // Native capture traverses the document before reaching the element.
     doc.dispatchEvent(e);
     if (root.contains(target)) root.dispatchEvent(e);
@@ -48,6 +48,16 @@ describe("canvas native gesture boundary", () => {
     const { event, root, outside } = fixture();
     for (const type of ["gesturestart", "gesturechange", "gestureend"]) expect(event(type, root)).toBe(true);
     expect(event("gesturestart", outside)).toBe(false);
+  });
+
+  it("cancels a trackpad pinch anywhere in the editor, so the browser never zooms the page, and leaves scrolling alone", () => {
+    const { event, root, outside, control, cleanup } = fixture();
+    for (const target of [root, outside, control]) {
+      expect(event("wheel", target, [], { ctrlKey: true })).toBe(true);
+      expect(event("wheel", target)).toBe(false);
+    }
+    cleanup();
+    expect(event("wheel", outside, [], { ctrlKey: true })).toBe(false);
   });
 
   it("recovers when a new touch starts outside after the old end event was lost", () => {
