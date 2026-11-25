@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactElement, type ReactNode } from "react";
-import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLayoutGrid, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay, IconEye, IconEyeOff } from "@tabler/icons-react";
+import { IconCheck as Check, IconChevronDown as ChevronDown, IconFileText as FileText, IconLayoutGrid, IconLink as Link2, IconPencil as Pencil, IconSparkles, IconComponents, IconKeyboard, IconMessageCircle, IconPlayerPlay, IconEye, IconEyeOff, IconSearch } from "@tabler/icons-react";
 import { useAuth, useClerk } from "@clerk/react";
 import { api, HttpError, type FileInfo, type User } from "./api";
 import { samePrincipal } from "../shared/session-principal";
 import { Avatar } from "./Avatar";
 import { CommentsPanel } from "./Comments";
 import { ApprovalButton, DesignDates } from "./Approval";
-import type { CommentAnchor, CommentThread, Page } from "../shared/types";
+import type { CanvasNode, CommentAnchor, CommentThread, Page } from "../shared/types";
 import { peopleInFile } from "./presence";
 import { Canvas } from "./Canvas";
 import { canInteract } from "./canvas-render-plan";
 import { canvasLocationUrl, useCanvasLocation, type CanvasLocation } from "./canvas-location";
 import { withoutComponents } from "./canvas-layout";
 import { pageOutline, type OutlineItem } from "./page-outline";
+import { searchPages } from "./search";
 import { Room } from "./room";
 import { Link, navigate, useLocation } from "./router";
 import { NotificationBell } from "./Notifications";
@@ -22,6 +23,7 @@ import { Loading, Notice } from "./states";
 import { toast } from "./toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from "@/components/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -371,7 +373,7 @@ function EditorInner({ room, meta, user, onChange, onShare, readOnly = false }: 
                 <ChevronDown className="dock-chevron" aria-hidden />
               </Button>
             }>
-            <PageList pages={room.pages} current={page?.id ?? null} counts={counts}
+            <PageList pages={room.pages} current={page?.id ?? null} counts={counts} nodesOf={(id) => room.pageNodes(id)}
               outline={open === "pages" && page ? pageOutline(hidingComponents ? withoutComponents(room.pageNodes(page.id)) : room.pageNodes(page.id), { selection: liveSelection, toggled: openSections }) : []}
               onPage={(id) => { selectPage(id); setOpen(null); }}
               onToggleSection={(id, next) => setOpenSections((current) => new Map(current).set(id, next))}
@@ -489,7 +491,11 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
   return (
     <Drawer open={open} onOpenChange={change} autoFocus>
       <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-      <DrawerContent ref={content} onEscapeKeyDown={onEscapeKeyDown} aria-describedby={undefined}
+      <DrawerContent ref={content} onEscapeKeyDown={onEscapeKeyDown} aria-describedby={undefined} onOpenAutoFocus={(event) => {
+        // Opening a panel must not raise the phone keyboard: when its first control is an editable text field (the pages search), focus the panel itself.
+        const first = content.current?.querySelector<HTMLElement>("button:not(:disabled), [href], input:not(:disabled), textarea, select, [tabindex]:not([tabindex='-1'])");
+        if (first?.matches("input:not([readonly]), textarea:not([readonly])")) { event.preventDefault(); content.current?.focus(); }
+      }}
         className={cn("dock-popover", className)}>
         {heading(DrawerTitle)}
         <div className="dock-panel-body">{children}</div>
@@ -502,12 +508,17 @@ const designCount = (n: number) => `${n} design${n === 1 ? "" : "s"}`;
 
 /**
  * Every page of the file, and the current page's outline: its sections, with the screens of open sections.
+ * A search narrows the pages to those whose name, description or a section matches; the query clears when the panel closes.
  * Members only navigate here; agents add, rename, reorder and delete pages.
  */
-function PageList({ pages, current, counts, outline, onPage, onToggleSection, onDesign }: {
+function PageList({ pages, current, counts, outline, nodesOf, onPage, onToggleSection, onDesign }: {
   pages: Page[]; current: string | null; counts: ReadonlyMap<string, number>; outline: OutlineItem[];
+  nodesOf: (pageId: string) => readonly CanvasNode[];
   onPage: (id: string) => void; onToggleSection: (id: string, open: boolean) => void; onDesign: (id: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const searching = query.trim() !== "";
+  const matches = searchPages(pages, query, nodesOf);
   const tree = (items: OutlineItem[]): ReactNode => items.map((item) => item.kind === "section" ? (
     <li key={item.node.id} className="outline-section">
       <button type="button" className="outline-row outline-section-row" aria-expanded={item.open} onClick={() => onToggleSection(item.node.id, !item.open)}
@@ -524,9 +535,16 @@ function PageList({ pages, current, counts, outline, onPage, onToggleSection, on
       </button>
     </li>
   ));
-  return (
-    <ul className="page-list" aria-label="Pages">
-      {pages.map((p) => {
+  return (<>
+    <InputGroup className="page-search">
+      <InputGroupAddon><IconSearch aria-hidden /></InputGroupAddon>
+      <InputGroupInput aria-label="Search pages or sections" placeholder="Search pages or sections" type="search" enterKeyHint="search"
+        value={query} onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter" && searching && matches.length) { e.preventDefault(); onPage(matches[0]!.page.id); } }} />
+    </InputGroup>
+    {searching && !matches.length ? <p className="page-search-empty" role="status">No page or section matches “{query.trim()}”.</p> :
+    <ul className="page-list" aria-label={searching ? `Pages matching ${query.trim()}` : "Pages"}>
+      {matches.map(({ page: p, sections }) => {
         const Icon = p.kind === "design-system" ? IconLayoutGrid : FileText;
         const active = p.id === current;
         return <li key={p.id} className="page-item">
@@ -534,15 +552,16 @@ function PageList({ pages, current, counts, outline, onPage, onToggleSection, on
             <Icon className="page-icon" aria-hidden />
             <span className="page-option-text">
               <span className="truncate">{p.name}{p.kind === "design-system" && <span className="sr-only"> · Design System page</span>}</span>
-              {p.description && <span className="page-description" title={p.description}>{p.description}</span>}
+              {sections.length > 0 ? <span className="page-description" title={sections.join(", ")}>Sections: {sections.join(", ")}</span>
+                : p.description && <span className="page-description" title={p.description}>{p.description}</span>}
             </span>
             <span className="page-count" aria-label={designCount(counts.get(p.id) ?? 0)}>{counts.get(p.id) ?? 0}</span>
           </button>
-          {active && outline.length > 0 && <ul className="page-outline" aria-label={`Sections on ${p.name}`}>{tree(outline)}</ul>}
+          {active && !searching && outline.length > 0 && <ul className="page-outline" aria-label={`Sections on ${p.name}`}>{tree(outline)}</ul>}
         </li>;
       })}
-    </ul>
-  );
+    </ul>}
+  </>);
 }
 
 /**
