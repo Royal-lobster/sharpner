@@ -578,7 +578,7 @@ body:has(.editor) { --toast-offset: 116px; }
   .dock-file-button { flex: 1 1 auto; }
   .dock-page-button { flex: 0 1 auto; max-width: 44%; }
   .dock-people-button > .presence-dot { display: none; }
-  .selection-agents, .selection-approval-date { display: none; }
+  .selection-agents, .selection-dates, .selection-approval-date { display: none; }
   /* Phones have no Enter or Esc key to hint at. */
   .selection-kbd { display: none; }
   .selection-action:has(.selection-kbd) { padding-right: 10px; }
