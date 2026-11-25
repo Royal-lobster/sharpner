@@ -488,7 +488,11 @@ function DockPanel({ label, count, action, open, onOpenChange, onEscapeKeyDown, 
   return (
     <Drawer open={open} onOpenChange={change} autoFocus>
       <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-      <DrawerContent ref={content} onEscapeKeyDown={onEscapeKeyDown} aria-describedby={undefined}
+      <DrawerContent ref={content} onEscapeKeyDown={onEscapeKeyDown} aria-describedby={undefined} onOpenAutoFocus={(event) => {
+        // Opening a panel must not raise the phone keyboard: when its first control is a text field (the pages search), focus the panel itself.
+        const first = content.current?.querySelector<HTMLElement>("button:not(:disabled), [href], input:not(:disabled), textarea, select, [tabindex]:not([tabindex='-1'])");
+        if (first?.matches("input, textarea")) { event.preventDefault(); content.current?.focus(); }
+      }}
         className={cn("dock-popover", className)}>
         {heading(DrawerTitle)}
         <div className="dock-panel-body">{children}</div>
