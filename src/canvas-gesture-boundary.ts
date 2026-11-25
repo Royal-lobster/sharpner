@@ -24,6 +24,9 @@ export function canvasGestureBoundary(root: HTMLElement) {
   };
   const finish = (event: TouchEvent) => { if (!event.touches.length) owned = false; };
   const gesture = (event: Event) => { if (owned || surface(event.target)) prevent(event); };
+  // A trackpad pinch arrives as ctrl+wheel. Over the notches or a panel it would zoom the browser's visual
+  // viewport, which pushes the right-hand controls off screen with no way back from the canvas.
+  const pageZoom = (event: WheelEvent) => { if (event.ctrlKey) prevent(event); };
   const reset = () => { owned = false; };
   const visibility = () => { if (doc.hidden) reset(); };
 
@@ -33,9 +36,11 @@ export function canvasGestureBoundary(root: HTMLElement) {
   doc.addEventListener("touchend", finish, capture);
   doc.addEventListener("touchcancel", finish, capture);
   for (const type of ["gesturestart", "gesturechange", "gestureend"]) doc.addEventListener(type, gesture, capture);
+  doc.addEventListener("wheel", pageZoom, capture);
   doc.addEventListener("visibilitychange", visibility);
   doc.defaultView?.addEventListener("blur", reset);
   return () => {
+    doc.removeEventListener("wheel", pageZoom, capture);
     root.removeEventListener("touchstart", start, capture);
     doc.removeEventListener("touchstart", continuation, capture);
     doc.removeEventListener("touchmove", continuation, capture);

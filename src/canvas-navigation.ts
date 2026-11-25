@@ -3,9 +3,8 @@ import type { Camera } from "./canvas-render-plan";
 import { LABEL_ROOM } from "./canvas-labels";
 
 export const MAX_CANVAS_ZOOM = 8;
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-/** Fit locks the page overview; zoomed previews can be panned freely to inspect any detail. */
+/** The fitted overview is the furthest zoom out; the page pans freely at every zoom, and Fit returns to the overview. */
 export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) {
   const bounds = rects.length ? union(rects) : { x: 0, y: 0, w: 800, h: 600 };
   const width = Math.max(1, size.w), height = Math.max(1, size.h);
@@ -29,9 +28,10 @@ export function canvasNavigation(rects: Rect[], size: { w: number; h: number }) 
   const minZoom = overview.z;
 
   const constrain = (camera: Camera): Camera => {
-    const z = Number.isFinite(camera.z) && camera.z > 0 ? clamp(camera.z, minZoom, MAX_CANVAS_ZOOM) : minZoom;
-    if (z === minZoom) return overview;
-    // A zoomed page must be movable past its edges, including on an axis where it still fits.
+    // An invalid zoom, or one further out than the overview (an old saved camera, a shrunken layout), recovers to the overview.
+    if (!Number.isFinite(camera.z) || camera.z < minZoom) return overview;
+    const z = Math.min(camera.z, MAX_CANVAS_ZOOM);
+    // The page must be movable past its edges, including on an axis where it still fits.
     // Otherwise labels and details can get trapped behind the floating editor controls.
     return { z,
       x: Number.isFinite(camera.x) ? camera.x : viewport.x + viewport.w / 2 - (bounds.x + bounds.w / 2) * z,

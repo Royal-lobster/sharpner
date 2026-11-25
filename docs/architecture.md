@@ -237,10 +237,13 @@ re-applies the camera constraints (an open thread re-centres on its pin). Toolba
 sheet's edge. The pages popover lists every page and, for the current page, its sections with the screens of open
 sections; choosing a screen selects and fits it, as a link to it would.
 
-Preview navigation locks panning at the fitted overview, which is also the minimum
-zoom. Above that zoom, panning is free on both axes so any part of a design can be
-centered and titles can be moved clear of floating controls. Returning to Fit or
-pinching back to the minimum zoom restores the content overview and its margins.
+The fitted overview is the minimum zoom. Panning is free on both axes at every zoom,
+the overview included, so any part of a design can be centered and titles can be moved
+clear of floating controls. Fit restores the content overview and its margins, and so
+does a view saved further out than the current overview. A trackpad pinch anywhere in
+the editor zooms the canvas or does nothing; it never zooms the browser page.
+Hide UI (File menu, or ⌘\) removes the notches, toolbars and comments column until
+Show UI; starting or opening a comment also brings them back.
 All camera writes, including mouse/trackpad, touch, keyboard, animated focus and restored views,
 use the same constraints. Bounds update with live layout and viewport changes;
 visible comment pins also contribute so detached feedback remains reachable.
