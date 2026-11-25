@@ -95,7 +95,7 @@ claude mcp add --transport http sharpner https://<your-domain>/mcp --header "Aut
 | `create_section` | Create an auto-fitting, described section, optionally nested |
 | `create_nodes` | Create up to 20 frames, components, token sheets, or images at the end of a section or page |
 | `read_nodes` | Read up to 20 nodes with their HTML or CSS sources |
-| `update_nodes` | Update up to 50 nodes or sections: size, source, order, page, and grouping |
+| `update_nodes` | Update up to 50 nodes or sections: size, source, order, page, and grouping. `approved` approves frames when the member asks, or withdraws approval with `false` |
 | `edit_node_source` | Ordered find/replace edits, with unique matches unless `all` is set |
 | `delete_nodes` | Delete nodes; deleting a section also deletes its contents |
 | `upload_image` | Upload from a URL or base64 and return a permanent URL |

@@ -54,6 +54,7 @@ edits and fan out changes.
 | `shared/types.ts` | Wire messages, documents, and design-system composition |
 | `shared/session-principal.ts` | Immutable Clerk identity binding across HTTP, socket init, and SDK |
 | `shared/build.ts`, `src/stale-build.ts` | The deploy a bundle came from; a tab whose room `init` reports another build reloads once (or offers to, while someone types) |
+| `shared/approvals.ts` | Which nodes can be approved, and whether an approval still matches the design |
 | `shared/comments.ts` | Comment input limits and node-relative pin coordinates |
 | `shared/mentions.ts` | `@Name` parsing, suggestions and highlighting for comment mentions |
 | `shared/layout.ts` | Section geometry shared by canvas, tools, and screenshots |
@@ -296,6 +297,16 @@ FileRoom checks it again inside its transaction. A deleted thread is broadcast a
 for every member; a deleted reply is broadcast as the thread's next revision. The mention notifications the deleted
 messages sent are removed with them (`forgetMentions`, by `message_id`). Agents have no delete tool: the MCP catalog
 is at its size budget, and a member can delete their agent's comments from the panel.
+
+Design dates and approvals: every node records `created_at` when it is made and `changed_at` when what it renders
+changes, from its own source, size or src, or from the design system it uses (`invalidate`). Renderer migrations
+bump `rev` but leave `changed_at`, so a fix to Sharpner's rendering never reads as a design change. Nodes made
+before dates were recorded have none. Approvals sit in the room's `approvals` table, one row per frame, and reach
+members through init and `approvals` messages; public viewers receive neither. Members approve through
+`PATCH /api/files/:id/nodes/:nodeId/approval` and agents through the `approved` field of `update_nodes`, both via `FileRoom.approve`. Approval is not a canvas
+edit, so it bypasses `apply`; `update_nodes` approves after applying the call's edits. A frame
+whose `changed_at` is later than its approval shows as changed since approval (`shared/approvals.ts`); the record
+stays until someone approves it again or withdraws it. Deleting the frame deletes its approval.
 
 The comment panel floats over the desktop canvas. On mobile, its actual height
 reserves canvas space so focused pins use the visible preview area. Closing the
