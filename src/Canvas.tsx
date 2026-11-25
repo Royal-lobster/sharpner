@@ -156,6 +156,7 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   const { navigationRects, navigation } = layout.navigation(pageId, size, activeCommentId, hideComponents);
   const navigationRef = useRef(navigation);
   navigationRef.current = navigation;
+  const fitted = useRef(navigation.overview);
 
   const setCam = useCallback((next: Cam | ((c: Cam) => Cam)) => {
     const current = camRef.current;
@@ -211,7 +212,11 @@ export function Canvas({ room, fileId, pageId, selection, selectionFocus, onSele
   // Resize, live layout changes and old saved cameras must obey the same limits as direct gestures.
   useLayoutEffect(() => {
     if (!size.w || !size.h || room.status !== "open") return;
-    const current = camRef.current, bounded = navigationRef.current.constrain(current);
+    // A view still resting on the old overview follows the new one unless that would zoom it out, so a small page stays centred.
+    const was = fitted.current, now = navigationRef.current, current = camRef.current;
+    fitted.current = now.overview;
+    const follows = current.x === was.x && current.y === was.y && current.z === was.z && current.z <= now.minZoom;
+    const bounded = follows ? now.overview : now.constrain(current);
     if (current.x === bounded.x && current.y === bounded.y && current.z === bounded.z) return;
     cancelAnimationFrame(tween.current);
     setCam(bounded);
